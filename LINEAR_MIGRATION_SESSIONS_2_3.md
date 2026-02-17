@@ -11,7 +11,7 @@
 - ✅ Refined spacing and border radius to match Linear's aesthetic
 
 ### ⌨️ 2. Command Palette (Cmd+K) - Signature Feature!
-**The most iconic Linear feature is now in SprintSpark!**
+**The most iconic Linear feature is now in TaskAI!**
 
 #### Features Implemented:
 - ✅ **Global keyboard shortcut**: `Cmd+K` (Mac) or `Ctrl+K` (Windows/Linux)
@@ -156,7 +156,7 @@ slide-up: 0.3s ease-out
 
 ## Comparison to Linear
 
-| Feature | Linear | SprintSpark | Status |
+| Feature | Linear | TaskAI | Status |
 |---------|--------|-------------|--------|
 | **Cmd+K Shortcut** | ✅ | ✅ | **Identical** |
 | **Fuzzy Search** | ✅ | ✅ | **Identical** |
@@ -179,7 +179,7 @@ slide-up: 0.3s ease-out
 
 **Total: 5+ clicks, 3-5 seconds**
 
-### After (Linear-style SprintSpark):
+### After (Linear-style TaskAI):
 1. Press `Cmd+K`
 2. Type "auth"
 3. Press Enter

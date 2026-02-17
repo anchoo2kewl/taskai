@@ -1,4 +1,4 @@
--- Initial schema for SprintSpark
+-- Initial schema for TaskAI
 
 -- Users table
 CREATE TABLE users (

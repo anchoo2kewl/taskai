@@ -29,8 +29,8 @@ FROM nginx:1.25-alpine
 RUN apk add --no-cache curl
 
 # Create non-root user
-RUN addgroup -g 1001 -S sprintspark && \
-    adduser -u 1001 -S sprintspark -G sprintspark
+RUN addgroup -g 1001 -S taskai && \
+    adduser -u 1001 -S taskai -G taskai
 
 # Copy custom nginx config
 COPY <<EOF /etc/nginx/nginx.conf

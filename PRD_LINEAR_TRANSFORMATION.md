@@ -1,4 +1,4 @@
-# Product Requirements Document: SprintSpark Linear Transformation
+# Product Requirements Document: TaskAI Linear Transformation
 
 **Version:** 1.0
 **Date:** January 22, 2026
@@ -9,7 +9,7 @@
 
 ## Executive Summary
 
-Transform SprintSpark from a traditional client-server project management tool into a modern, local-first, Linear-inspired application with offline capabilities, real-time sync, and a premium dark-themed user experience.
+Transform TaskAI from a traditional client-server project management tool into a modern, local-first, Linear-inspired application with offline capabilities, real-time sync, and a premium dark-themed user experience.
 
 ---
 
@@ -69,7 +69,7 @@ Build a fast, offline-capable project management system that matches Linear's po
 
 **Requirements**:
 - Use RxDB v15+ with Dexie storage adapter
-- Separate database per user: `sprintspark_{userId}`
+- Separate database per user: `taskai_{userId}`
 - Collections: `tasks`, `projects`, `sprints`, `tags`, `sync_queue`
 - Schema validation with proper AJV integration
 - Automatic migrations for schema changes
@@ -363,7 +363,7 @@ Commands:
          ▼
 ┌───────────────────┐
 │  Nginx (Reverse)  │
-│  sprintspark.     │
+│  taskai.     │
 │  biswas.me:443    │
 └────────┬──────────┘
          │
@@ -379,14 +379,14 @@ Commands:
                              ▼
                     ┌────────────────┐
                     │  SQLite DB     │
-                    │  sprintspark.db│
+                    │  taskai.db│
                     └────────────────┘
 ```
 
 ### 5.3 File Structure
 
 ```
-SprintSpark/
+TaskAI/
 ├── api/                      # Go backend
 │   ├── cmd/api/main.go      # Entry point
 │   ├── internal/
@@ -394,7 +394,7 @@ SprintSpark/
 │   │   ├── db/              # Database layer
 │   │   └── config/          # Configuration
 │   └── data/
-│       └── sprintspark.db   # SQLite database
+│       └── taskai.db   # SQLite database
 ├── web/                      # React frontend
 │   ├── src/
 │   │   ├── routes/          # Page components

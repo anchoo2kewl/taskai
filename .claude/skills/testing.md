@@ -1,6 +1,6 @@
-# Testing SprintSpark
+# Testing TaskAI
 
-Comprehensive testing guide for SprintSpark application.
+Comprehensive testing guide for TaskAI application.
 
 ## Quick Test Commands
 
@@ -95,18 +95,18 @@ npx playwright test --debug
 
 ```bash
 # Signup
-curl -X POST https://sprintspark.biswas.me/api/auth/signup \
+curl -X POST https://staging.taskai.cc/api/auth/signup \
   -H "Content-Type: application/json" \
   -d '{"email":"test@example.com","password":"password123"}'
 
 # Login
-curl -X POST https://sprintspark.biswas.me/api/auth/login \
+curl -X POST https://staging.taskai.cc/api/auth/login \
   -H "Content-Type: application/json" \
   -d '{"email":"test@example.com","password":"password123"}'
 
 # Get current user
 TOKEN="your_jwt_token"
-curl -X GET https://sprintspark.biswas.me/api/me \
+curl -X GET https://staging.taskai.cc/api/me \
   -H "Authorization: Bearer $TOKEN"
 ```
 
@@ -114,22 +114,22 @@ curl -X GET https://sprintspark.biswas.me/api/me \
 
 ```bash
 # Create API key
-curl -X POST https://sprintspark.biswas.me/api/api-keys \
+curl -X POST https://staging.taskai.cc/api/api-keys \
   -H "Content-Type: application/json" \
   -H "Authorization: Bearer $TOKEN" \
   -d '{"name":"Test Key","expires_in":90}'
 
 # List API keys
-curl -X GET https://sprintspark.biswas.me/api/api-keys \
+curl -X GET https://staging.taskai.cc/api/api-keys \
   -H "Authorization: Bearer $TOKEN"
 
 # Use API key
 API_KEY="your_api_key"
-curl -X GET https://sprintspark.biswas.me/api/me \
+curl -X GET https://staging.taskai.cc/api/me \
   -H "Authorization: ApiKey $API_KEY"
 
 # Delete API key
-curl -X DELETE https://sprintspark.biswas.me/api/api-keys/1 \
+curl -X DELETE https://staging.taskai.cc/api/api-keys/1 \
   -H "Authorization: Bearer $TOKEN"
 ```
 
@@ -137,27 +137,27 @@ curl -X DELETE https://sprintspark.biswas.me/api/api-keys/1 \
 
 ```bash
 # Create project
-curl -X POST https://sprintspark.biswas.me/api/projects \
+curl -X POST https://staging.taskai.cc/api/projects \
   -H "Content-Type: application/json" \
   -H "Authorization: Bearer $TOKEN" \
   -d '{"name":"Test Project","description":"Test description"}'
 
 # List projects
-curl -X GET https://sprintspark.biswas.me/api/projects \
+curl -X GET https://staging.taskai.cc/api/projects \
   -H "Authorization: Bearer $TOKEN"
 
 # Get project
-curl -X GET https://sprintspark.biswas.me/api/projects/1 \
+curl -X GET https://staging.taskai.cc/api/projects/1 \
   -H "Authorization: Bearer $TOKEN"
 
 # Update project
-curl -X PATCH https://sprintspark.biswas.me/api/projects/1 \
+curl -X PATCH https://staging.taskai.cc/api/projects/1 \
   -H "Content-Type: application/json" \
   -H "Authorization: Bearer $TOKEN" \
   -d '{"name":"Updated Name"}'
 
 # Delete project
-curl -X DELETE https://sprintspark.biswas.me/api/projects/1 \
+curl -X DELETE https://staging.taskai.cc/api/projects/1 \
   -H "Authorization: Bearer $TOKEN"
 ```
 
@@ -165,23 +165,23 @@ curl -X DELETE https://sprintspark.biswas.me/api/projects/1 \
 
 ```bash
 # Create task
-curl -X POST https://sprintspark.biswas.me/api/projects/1/tasks \
+curl -X POST https://staging.taskai.cc/api/projects/1/tasks \
   -H "Content-Type: application/json" \
   -H "Authorization: Bearer $TOKEN" \
   -d '{"title":"Test Task","description":"Test description","status":"todo"}'
 
 # List tasks
-curl -X GET https://sprintspark.biswas.me/api/projects/1/tasks \
+curl -X GET https://staging.taskai.cc/api/projects/1/tasks \
   -H "Authorization: Bearer $TOKEN"
 
 # Update task
-curl -X PATCH https://sprintspark.biswas.me/api/tasks/1 \
+curl -X PATCH https://staging.taskai.cc/api/tasks/1 \
   -H "Content-Type: application/json" \
   -H "Authorization: Bearer $TOKEN" \
   -d '{"status":"done"}'
 
 # Delete task
-curl -X DELETE https://sprintspark.biswas.me/api/tasks/1 \
+curl -X DELETE https://staging.taskai.cc/api/tasks/1 \
   -H "Authorization: Bearer $TOKEN"
 ```
 
@@ -195,12 +195,12 @@ curl -X DELETE https://sprintspark.biswas.me/api/tasks/1 \
 # Linux: go install github.com/rakyll/hey@latest
 
 # Test API health endpoint
-hey -n 1000 -c 10 https://sprintspark.biswas.me/api/health
+hey -n 1000 -c 10 https://staging.taskai.cc/api/health
 
 # Test authenticated endpoint
 hey -n 1000 -c 10 \
   -H "Authorization: Bearer $TOKEN" \
-  https://sprintspark.biswas.me/api/projects
+  https://staging.taskai.cc/api/projects
 ```
 
 ### Rate Limiting Test
@@ -208,7 +208,7 @@ hey -n 1000 -c 10 \
 ```bash
 # Test rate limiting (should get 429 after 20 requests/min on auth endpoints)
 for i in {1..25}; do
-  curl -X POST https://sprintspark.biswas.me/api/auth/login \
+  curl -X POST https://staging.taskai.cc/api/auth/login \
     -H "Content-Type: application/json" \
     -d '{"email":"test@example.com","password":"wrong"}' \
     -w "\nRequest $i: HTTP %{http_code}\n" \
@@ -228,9 +228,9 @@ done
 ### Demo Users
 
 ```
-demo.user1@sprintspark.app / DemoPass123!
-demo.user2@sprintspark.app / DemoPass223!
-demo.user3@sprintspark.app / DemoPass323!
+demo.user1@taskai.app / DemoPass123!
+demo.user2@taskai.app / DemoPass223!
+demo.user3@taskai.app / DemoPass323!
 ```
 
 ### Populate Demo Data

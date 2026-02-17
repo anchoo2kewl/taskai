@@ -14,9 +14,9 @@ import (
 	"github.com/go-chi/cors"
 	"go.uber.org/zap"
 
-	"sprintspark/internal/api"
-	"sprintspark/internal/config"
-	"sprintspark/internal/db"
+	"taskai/internal/api"
+	"taskai/internal/config"
+	"taskai/internal/db"
 )
 
 func main() {

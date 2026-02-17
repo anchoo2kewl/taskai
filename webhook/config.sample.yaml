@@ -28,19 +28,34 @@ projects:
         command: "echo 'Project updated successfully!'"
     enabled: false
 
-  # SprintSpark example configuration
-  sprintspark:
-    name: "SprintSpark Project Management System"
-    repository: "username/SprintSpark"
-    secret: "your-sprintspark-webhook-secret"
+  # TaskAI staging configuration
+  taskai-staging:
+    name: "TaskAI Staging"
+    repository: "username/taskai"
+    secret: "your-taskai-staging-webhook-secret"
     branch: "main"
-    local_path: "/path/to/projects/sprintspark"
+    local_path: "/path/to/taskai-staging/source"
     actions:
       - type: "git_pull"
       - type: "custom_command"
-        command: "cd /path/to/projects/sprintspark && docker-compose down && docker-compose up --build -d"
+        command: "cd /path/to/taskai-staging && docker compose build --no-cache && docker compose down && docker compose up -d"
       - type: "custom_command"
-        command: "echo 'SprintSpark deployed successfully!'"
+        command: "echo 'TaskAI staging deployed successfully!'"
+    enabled: true
+
+  # TaskAI production configuration
+  taskai:
+    name: "TaskAI Production"
+    repository: "username/taskai"
+    secret: "your-taskai-production-webhook-secret"
+    branch: "main"
+    local_path: "/path/to/taskai/source"
+    actions:
+      - type: "git_pull"
+      - type: "custom_command"
+        command: "cd /path/to/taskai && docker compose build --no-cache && docker compose down && docker compose up -d"
+      - type: "custom_command"
+        command: "echo 'TaskAI production deployed successfully!'"
     enabled: true
 
 # Available action types:

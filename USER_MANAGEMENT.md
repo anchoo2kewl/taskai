@@ -13,11 +13,11 @@ Password: password123
 **Test Users:**
 ```
 testuser2@example.com / TestPass123!
-demo.user1@sprintspark.app / DemoPass123!
-demo.user2@sprintspark.app / DemoPass223!
-demo.user3@sprintspark.app / DemoPass323!
-demo.user4@sprintspark.app / DemoPass423!
-demo.user5@sprintspark.app / DemoPass523!
+demo.user1@taskai.app / DemoPass123!
+demo.user2@taskai.app / DemoPass223!
+demo.user3@taskai.app / DemoPass323!
+demo.user4@taskai.app / DemoPass423!
+demo.user5@taskai.app / DemoPass523!
 ```
 
 ## 🛠️ User Management Commands
@@ -190,7 +190,7 @@ CREATE TABLE users (
 ./script/server db-query "SELECT * FROM users LIMIT 5;"
 
 # Or use Docker
-docker-compose exec -u root api sh -c "sqlite3 /data/sprintspark.db 'SELECT * FROM users;'"
+docker-compose exec -u root api sh -c "sqlite3 /data/taskai.db 'SELECT * FROM users;'"
 ```
 
 ## 🔒 Production vs Local
@@ -214,7 +214,7 @@ docker-compose exec -u root api sh -c "sqlite3 /data/sprintspark.db 'SELECT * FR
 ### I want to test with a fresh user
 ```bash
 # Option 1: Reset existing user
-./script/server local users:password demo.user1@sprintspark.app NewPass123!
+./script/server local users:password demo.user1@taskai.app NewPass123!
 
 # Option 2: Create new user via signup
 curl -X POST http://localhost:8083/api/auth/signup \

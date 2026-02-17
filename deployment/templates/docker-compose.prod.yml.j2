@@ -1,4 +1,4 @@
-# Docker Compose for SprintSpark ({{ env_name }})
+# Docker Compose for TaskAI ({{ env_name }})
 # Architecture: linux/amd64
 
 services:
@@ -11,7 +11,7 @@ services:
     platform: linux/amd64
     container_name: {{ app_name }}-api
     environment:
-      DB_PATH: /data/sprintspark.db
+      DB_PATH: /data/taskai.db
       JWT_SECRET: {{ jwt_secret }}
       PORT: 8080
       ENV: {{ env_name }}

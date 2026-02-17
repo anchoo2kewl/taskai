@@ -1,7 +1,7 @@
 .PHONY: help dev dev-docker stop clean test lint build install-tools
 
 help: ## Show this help message
-	@echo 'SprintSpark - Project Management Tool'
+	@echo 'TaskAI - Project Management Tool'
 	@echo ''
 	@echo 'Usage: make [target]'
 	@echo ''
@@ -9,7 +9,7 @@ help: ## Show this help message
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  %-20s %s\n", $$1, $$2}'
 
 dev: ## Start both API and Web in development mode (local)
-	@echo "Starting SprintSpark in development mode..."
+	@echo "Starting TaskAI in development mode..."
 	@echo ""
 	@echo "🚀 Starting API server on http://localhost:8080"
 	@echo "🚀 Starting Web server on http://localhost:5173"
@@ -20,7 +20,7 @@ dev: ## Start both API and Web in development mode (local)
 		wait
 
 dev-docker: ## Start both services using Docker Compose
-	@echo "Starting SprintSpark with Docker Compose..."
+	@echo "Starting TaskAI with Docker Compose..."
 	docker-compose up --build
 
 stop: ## Stop Docker Compose services
@@ -65,7 +65,7 @@ install-tools: ## Install development tools
 	@echo "✓ All tools installed"
 
 setup: ## Initial project setup
-	@echo "Setting up SprintSpark..."
+	@echo "Setting up TaskAI..."
 	@echo ""
 	@echo "1. Creating .env files from examples..."
 	@if [ ! -f api/.env ]; then cp api/.env.example api/.env; echo "   ✓ Created api/.env"; fi

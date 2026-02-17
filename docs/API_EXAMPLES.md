@@ -1,6 +1,6 @@
 # API Usage Examples
 
-Complete guide to using the SprintSpark API.
+Complete guide to using the TaskAI API.
 
 ## Table of Contents
 
@@ -118,7 +118,7 @@ curl "http://localhost:8080/api/projects?page=1&limit=10" \
 [
   {
     "id": 1,
-    "name": "SprintSpark Development",
+    "name": "TaskAI Development",
     "description": "Building the next-gen project management tool",
     "user_id": 1,
     "created_at": "2025-10-18T00:00:00Z",
@@ -149,7 +149,7 @@ curl http://localhost:8080/api/projects/1 \
 ```json
 {
   "id": 1,
-  "name": "SprintSpark Development",
+  "name": "TaskAI Development",
   "description": "Building the next-gen project management tool",
   "user_id": 1,
   "created_at": "2025-10-18T00:00:00Z",

@@ -1,11 +1,11 @@
 #!/bin/bash
 
-# SprintSpark Demo Data Population Script
+# TaskAI Demo Data Population Script
 # Creates users, projects, sprints, tags, and tasks with realistic data
 
 set -e
 
-API_URL="${API_URL:-https://sprintspark.biswas.me}"
+API_URL="${API_URL:-https://staging.taskai.cc}"
 TESTUSER_EMAIL="${TESTUSER_EMAIL:-testuser2@example.com}"
 TESTUSER_PASSWORD="${TESTUSER_PASSWORD:-TestPass123!}"
 
@@ -15,7 +15,7 @@ BLUE='\033[0;34m'
 YELLOW='\033[1;33m'
 NC='\033[0m'
 
-echo -e "${BLUE}=== SprintSpark Demo Data Population ===${NC}"
+echo -e "${BLUE}=== TaskAI Demo Data Population ===${NC}"
 echo "API URL: $API_URL"
 echo ""
 
@@ -79,7 +79,7 @@ USER_TOKENS=()
 USER_IDS=()
 
 for i in {1..5}; do
-    USER_EMAIL="demo.user${i}@sprintspark.app"
+    USER_EMAIL="demo.user${i}@taskai.app"
     USER_PASSWORD="DemoPass${i}23!"
     USER_NAME="Demo User $i"
 

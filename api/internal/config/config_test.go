@@ -369,8 +369,8 @@ func TestLoad(t *testing.T) {
 		if cfg.Env != "development" {
 			t.Errorf("Default Env = %q, want %q", cfg.Env, "development")
 		}
-		if cfg.DBPath != "./data/sprintspark.db" {
-			t.Errorf("Default DBPath = %q, want %q", cfg.DBPath, "./data/sprintspark.db")
+		if cfg.DBPath != "./data/taskai.db" {
+			t.Errorf("Default DBPath = %q, want %q", cfg.DBPath, "./data/taskai.db")
 		}
 		if cfg.MigrationsPath != "./internal/db/migrations" {
 			t.Errorf("Default MigrationsPath = %q, want %q", cfg.MigrationsPath, "./internal/db/migrations")

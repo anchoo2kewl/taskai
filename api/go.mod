@@ -1,4 +1,4 @@
-module sprintspark
+module taskai
 
 go 1.24.0
 

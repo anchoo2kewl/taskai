@@ -17,7 +17,7 @@ COPY . .
 RUN CGO_ENABLED=1 go build \
     -ldflags='-w -s -extldflags "-static"' \
     -tags sqlite_omit_load_extension \
-    -o sprintspark \
+    -o taskai \
     ./cmd/api
 
 # Production stage
@@ -25,25 +25,25 @@ FROM alpine:3.19
 
 # Install CA certificates and create non-root user
 RUN apk --no-cache add ca-certificates tzdata && \
-    addgroup -g 1001 -S sprintspark && \
-    adduser -u 1001 -S sprintspark -G sprintspark
+    addgroup -g 1001 -S taskai && \
+    adduser -u 1001 -S taskai -G taskai
 
 # Create data directory with correct permissions
-RUN mkdir -p /data && chown sprintspark:sprintspark /data
+RUN mkdir -p /data && chown taskai:taskai /data
 
 WORKDIR /app
 
 # Copy binary from builder
-COPY --from=builder --chown=sprintspark:sprintspark /build/sprintspark .
+COPY --from=builder --chown=taskai:taskai /build/taskai .
 
 # Copy OpenAPI spec (needed for /api/openapi endpoint)
-COPY --chown=sprintspark:sprintspark openapi.yaml .
+COPY --chown=taskai:taskai openapi.yaml .
 
 # Copy database migrations
-COPY --chown=sprintspark:sprintspark internal/db/migrations ./internal/db/migrations
+COPY --chown=taskai:taskai internal/db/migrations ./internal/db/migrations
 
 # Switch to non-root user
-USER sprintspark
+USER taskai
 
 # Expose port
 EXPOSE 8080
@@ -53,4 +53,4 @@ HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
     CMD wget --no-verbose --tries=1 --spider http://localhost:8080/api/health || exit 1
 
 # Run the binary
-CMD ["./sprintspark"]
+CMD ["./taskai"]

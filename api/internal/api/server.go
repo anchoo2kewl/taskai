@@ -7,9 +7,9 @@ import (
 
 	"go.uber.org/zap"
 
-	"sprintspark/internal/config"
-	"sprintspark/internal/db"
-	"sprintspark/internal/email"
+	"taskai/internal/config"
+	"taskai/internal/db"
+	"taskai/internal/email"
 )
 
 // Server holds the application dependencies

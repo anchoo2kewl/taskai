@@ -6,7 +6,7 @@ import (
 	"net/http"
 	"testing"
 
-	"sprintspark/internal/db"
+	"taskai/internal/db"
 )
 
 func TestHandleCreateAPIKey(t *testing.T) {

@@ -1,6 +1,6 @@
 # Troubleshooting Guide
 
-Common issues and solutions for SprintSpark.
+Common issues and solutions for TaskAI.
 
 ## Table of Contents
 
@@ -81,15 +81,15 @@ sudo yum groupinstall "Development Tools"
 **Solution:**
 ```bash
 # Option 1: Stop all processes
-pkill -f sprintspark
+pkill -f taskai
 docker-compose down
 
 # Option 2: Remove lock files
-rm api/data/sprintspark.db-shm
-rm api/data/sprintspark.db-wal
+rm api/data/taskai.db-shm
+rm api/data/taskai.db-wal
 
 # Option 3: Fresh database
-rm -rf api/data/sprintspark.db*
+rm -rf api/data/taskai.db*
 cd api && make migrate
 ```
 
@@ -101,14 +101,14 @@ cd api && make migrate
 ```bash
 # Check migration status
 cd api
-sqlite3 data/sprintspark.db "SELECT * FROM schema_migrations;"
+sqlite3 data/taskai.db "SELECT * FROM schema_migrations;"
 
 # Reset database completely
-rm data/sprintspark.db*
+rm data/taskai.db*
 make migrate
 
 # Check migrations ran
-sqlite3 data/sprintspark.db ".schema"
+sqlite3 data/taskai.db ".schema"
 ```
 
 ### Cannot Create Database Directory
@@ -419,13 +419,13 @@ localStorage.getItem('token')
 ```bash
 # Check users in database
 cd api
-sqlite3 data/sprintspark.db "SELECT * FROM users;"
+sqlite3 data/taskai.db "SELECT * FROM users;"
 
 # Delete test user
-sqlite3 data/sprintspark.db "DELETE FROM users WHERE email='test@example.com';"
+sqlite3 data/taskai.db "DELETE FROM users WHERE email='test@example.com';"
 
 # Or reset entire database
-rm data/sprintspark.db*
+rm data/taskai.db*
 make migrate
 ```
 
@@ -441,7 +441,7 @@ make migrate
 ```bash
 # Check database indexes
 cd api
-sqlite3 data/sprintspark.db ".schema"
+sqlite3 data/taskai.db ".schema"
 
 # Should see indexes on:
 # - users(email)
@@ -452,7 +452,7 @@ sqlite3 data/sprintspark.db ".schema"
 # Enable query logging in api/internal/db/db.go
 
 # Optimize database
-sqlite3 data/sprintspark.db "VACUUM; ANALYZE;"
+sqlite3 data/taskai.db "VACUUM; ANALYZE;"
 ```
 
 ### High Memory Usage
@@ -513,7 +513,7 @@ npx playwright test --headed
 
 # Check test database is clean
 cd ../api
-rm data/sprintspark.db*
+rm data/taskai.db*
 make migrate
 cd ../web
 npx playwright test
@@ -581,7 +581,7 @@ go clean -testcache
    ```
 
 4. **Get Help:**
-   - Open an issue: https://github.com/anchoo2kewl/SprintSpark/issues
+   - Open an issue: https://github.com/anchoo2kewl/taskai/issues
    - Include: OS, versions, error messages, logs
 
 ---

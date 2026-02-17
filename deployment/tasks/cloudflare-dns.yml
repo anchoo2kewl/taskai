@@ -75,7 +75,7 @@
     body_format: json
     body:
       type: A
-      name: "sprintspark"
+      name: "staging"
       content: "{{ ansible_host }}"
       ttl: 1
       proxied: false
@@ -95,7 +95,7 @@
     body_format: json
     body:
       type: A
-      name: "sprintspark"
+      name: "staging"
       content: "{{ ansible_host }}"
       ttl: 1
       proxied: false

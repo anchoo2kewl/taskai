@@ -11,7 +11,7 @@ import (
 
 	"go.uber.org/zap"
 
-	"sprintspark/internal/auth"
+	"taskai/internal/auth"
 )
 
 // SignupRequest represents the signup request payload

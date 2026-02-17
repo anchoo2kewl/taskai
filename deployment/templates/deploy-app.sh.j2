@@ -1,5 +1,5 @@
 #!/bin/bash
-# Deployment script for SprintSpark ({{ env_name }})
+# Deployment script for TaskAI ({{ env_name }})
 # This script rebuilds and restarts the Docker containers
 
 set -e
@@ -7,7 +7,7 @@ set -e
 APP_DIR="{{ app_dir }}"
 cd "$APP_DIR"
 
-echo "=== Deploying SprintSpark ({{ env_name }}) ==="
+echo "=== Deploying TaskAI ({{ env_name }}) ==="
 
 echo "-> Building Docker images..."
 docker compose build --no-cache

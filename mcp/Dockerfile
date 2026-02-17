@@ -14,15 +14,15 @@ FROM node:20-alpine
 WORKDIR /app
 
 # Non-root user
-RUN addgroup -g 1001 -S sprintspark && \
-    adduser -u 1001 -S sprintspark -G sprintspark
+RUN addgroup -g 1001 -S taskai && \
+    adduser -u 1001 -S taskai -G taskai
 
 COPY package.json package-lock.json ./
 RUN npm ci --omit=dev && npm cache clean --force
 
 COPY --from=builder /app/dist ./dist
 
-USER sprintspark
+USER taskai
 
 EXPOSE 3000
 

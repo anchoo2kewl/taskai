@@ -1,7 +1,7 @@
-# SprintSpark ⚡
+# TaskAI ⚡
 
-[![CI](https://github.com/anchoo2kewl/SprintSpark/actions/workflows/ci.yml/badge.svg)](https://github.com/anchoo2kewl/SprintSpark/actions/workflows/ci.yml)
-[![Go Report Card](https://goreportcard.com/badge/github.com/anchoo2kewl/SprintSpark)](https://goreportcard.com/report/github.com/anchoo2kewl/SprintSpark)
+[![CI](https://github.com/anchoo2kewl/taskai/actions/workflows/ci.yml/badge.svg)](https://github.com/anchoo2kewl/taskai/actions/workflows/ci.yml)
+[![Go Report Card](https://goreportcard.com/badge/github.com/anchoo2kewl/taskai)](https://goreportcard.com/report/github.com/anchoo2kewl/taskai)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
 > A lightweight, production-grade project management system built with Go, SQLite, React, and TypeScript.
@@ -13,8 +13,8 @@
 ## ⚡ Quick Start (< 3 commands)
 
 ```bash
-git clone https://github.com/anchoo2kewl/SprintSpark.git
-cd SprintSpark
+git clone https://github.com/anchoo2kewl/taskai.git
+cd taskai
 docker-compose up --build
 ```
 
@@ -116,8 +116,8 @@ docker-compose up --build
 
 ```bash
 # Clone the repository
-git clone https://github.com/anchoo2kewl/SprintSpark.git
-cd SprintSpark
+git clone https://github.com/anchoo2kewl/taskai.git
+cd taskai
 
 # Start all services
 docker-compose up --build -d
@@ -135,8 +135,8 @@ Access the application:
 
 ```bash
 # Clone the repository
-git clone https://github.com/anchoo2kewl/SprintSpark.git
-cd SprintSpark
+git clone https://github.com/anchoo2kewl/taskai.git
+cd taskai
 
 # Start everything with hot-reload
 make dev
@@ -318,7 +318,7 @@ docker-compose down -v
 
 **API (`api/.env`):**
 ```env
-DB_PATH=/data/sprintspark.db
+DB_PATH=/data/taskai.db
 JWT_SECRET=your-secure-secret-here
 PORT=8080
 ENV=production
@@ -333,7 +333,7 @@ VITE_API_URL=http://localhost:8080
 
 ### Auto-Deployment with Webhooks
 
-SprintSpark includes a webhook system for automatic deployment:
+TaskAI includes a webhook system for automatic deployment:
 
 1. **Configure webhook on server:**
    ```bash
@@ -344,7 +344,7 @@ SprintSpark includes a webhook system for automatic deployment:
    ```
 
 2. **Add GitHub webhook:**
-   - URL: `https://webhook.yourdomain.com/webhook/sprintspark`
+   - URL: `https://webhook.yourdomain.com/webhook/taskai`
    - Secret: (from your config.yaml)
    - Events: Push events
 
@@ -397,7 +397,7 @@ See [docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md) for detailed troubleshoot
 # Stop all running instances
 docker-compose down
 # Remove old database
-rm api/data/sprintspark.db*
+rm api/data/taskai.db*
 # Restart
 docker-compose up
 ```
@@ -453,6 +453,6 @@ Built with:
 
 ---
 
-**Made with ⚡ by the SprintSpark team**
+**Made with ⚡ by the TaskAI team**
 
 🤖 Generated with [Claude Code](https://claude.com/claude-code)

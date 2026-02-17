@@ -1,7 +1,7 @@
 .PHONY: run test lint fmt migrate db-reset clean help openapi-check
 
 # Variables
-DB_PATH ?= ./data/sprintspark.db
+DB_PATH ?= ./data/taskai.db
 MIGRATIONS_PATH ?= ./internal/db/migrations
 
 help: ## Show this help message
@@ -11,7 +11,7 @@ help: ## Show this help message
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  %-15s %s\n", $$1, $$2}'
 
 run: ## Start development server
-	@echo "Starting SprintSpark API..."
+	@echo "Starting TaskAI API..."
 	go run cmd/api/main.go
 
 test: ## Run tests with coverage
@@ -76,7 +76,7 @@ dev: ## Run with auto-reload (requires air)
 
 build: ## Build production binary
 	@echo "Building..."
-	go build -o bin/sprintspark cmd/api/main.go
+	go build -o bin/taskai cmd/api/main.go
 
 install-tools: ## Install development tools
 	@echo "Installing development tools..."

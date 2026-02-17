@@ -1,4 +1,4 @@
-> **Mission:** Build SprintSpark incrementally with production-quality code that always runs and passes tests.
+> **Mission:** Build TaskAI incrementally with production-quality code that always runs and passes tests.
 > **Philosophy:** Small, perfect commits > large, broken features
 
 ---
@@ -20,7 +20,7 @@
     api/                  # HTTP layer
     db/                   # Database layer
     config/              # Configuration
-  data/sprintspark.db    # SQLite (gitignored)
+  data/taskai.db    # SQLite (gitignored)
 
 /web/
   src/
@@ -325,14 +325,14 @@ docker-compose down -v # Stop and cleanup
 
 ### If Database Corrupted
 1. Stop application
-2. Backup current: `cp data/sprintspark.db data/backup.db`
-3. Reset: `rm data/sprintspark.db && make migrate`
+2. Backup current: `cp data/taskai.db data/backup.db`
+3. Reset: `rm data/taskai.db && make migrate`
 4. Restore from backup if needed
 
 ### If Tests Fail
 1. Run single test: `go test -run TestName`
 2. Check for race conditions: `go test -race`
-3. Verify database state: `sqlite3 data/sprintspark.db`
+3. Verify database state: `sqlite3 data/taskai.db`
 4. Clear test cache: `go clean -testcache`
 
 ---

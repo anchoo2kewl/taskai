@@ -17,9 +17,9 @@ import (
 	"github.com/go-chi/chi/v5/middleware"
 	"github.com/go-chi/cors"
 
-	"sprintspark/internal/api"
-	"sprintspark/internal/config"
-	"sprintspark/internal/db"
+	"taskai/internal/api"
+	"taskai/internal/config"
+	"taskai/internal/db"
 )
 
 // TestServer represents an in-process test server

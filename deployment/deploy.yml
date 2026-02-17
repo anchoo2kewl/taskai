@@ -4,7 +4,7 @@
 #   ansible-playbook -i inventory.yml deploy.yml -e target_env=staging
 #   ansible-playbook -i inventory.yml deploy.yml -e target_env=production
 
-- name: Deploy SprintSpark Application
+- name: Deploy TaskAI Application
   hosts: production
   become: yes
   gather_facts: yes

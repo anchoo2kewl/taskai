@@ -1,6 +1,6 @@
 #!/bin/bash
 
-# SprintSpark Server Management Script
+# TaskAI Server Management Script
 # Manages deployment, testing, health checks, and operations
 
 set -e
@@ -20,15 +20,15 @@ REMOTE_USER="ubuntu"
 REMOTE_SERVER="${REMOTE_USER}@${REMOTE_HOST}"
 
 # Staging environment
-STAGING_DEPLOY_PATH="/home/ubuntu/sprintspark-staging"
-STAGING_DOMAIN="sprintspark.biswas.me"
+STAGING_DEPLOY_PATH="/home/ubuntu/taskai-staging"
+STAGING_DOMAIN="staging.taskai.cc"
 STAGING_API_PORT=8082
 STAGING_WEB_PORT=8086
 STAGING_MCP_PORT=8084
-STAGING_MCP_DOMAIN="mcp.sprintspark.biswas.me"
+STAGING_MCP_DOMAIN="mcp.staging.taskai.cc"
 
 # Production environment
-PROD_DEPLOY_PATH="/home/ubuntu/sprintspark"
+PROD_DEPLOY_PATH="/home/ubuntu/taskai"
 PROD_DOMAIN="taskai.cc"
 PROD_API_PORT=8081
 PROD_WEB_PORT=8085
@@ -87,7 +87,7 @@ print_header() {
 
 # Function to show help
 show_help() {
-    echo -e "${CYAN}SprintSpark Server Management Script${NC}"
+    echo -e "${CYAN}TaskAI Server Management Script${NC}"
     echo ""
     echo "Usage: $0 <command> [options]"
     echo ""
@@ -104,7 +104,7 @@ show_help() {
     echo "  deploy [\"message\"]   Commit, push to main, auto-deploy to STAGING"
     echo "  promote [ref]        Promote to PRODUCTION (triggers GitHub Action)"
     echo ""
-    echo -e "${YELLOW}Staging Commands (sprintspark.biswas.me):${NC}"
+    echo -e "${YELLOW}Staging Commands (staging.taskai.cc):${NC}"
     echo "  staging status       Show staging service status"
     echo "  staging logs [svc]   Show staging logs"
     echo "  staging health       Check staging health"
@@ -183,7 +183,7 @@ Co-Authored-By: Claude <noreply@anthropic.com>" || {
     }
 
     print_success "Code pushed to GitHub — staging deployment triggered"
-    print_status "Monitor: https://github.com/anchoo2kewl/SprintSpark/actions"
+    print_status "Monitor: https://github.com/anchoo2kewl/taskai/actions"
     echo ""
 
     # Wait and verify staging
@@ -213,7 +213,7 @@ Co-Authored-By: Claude <noreply@anthropic.com>" || {
 
     print_warning "Staging not responding yet — deployment may still be in progress"
     print_status "Check status: $0 staging health"
-    print_status "Check actions: https://github.com/anchoo2kewl/SprintSpark/actions"
+    print_status "Check actions: https://github.com/anchoo2kewl/taskai/actions"
     return 1
 }
 
@@ -243,7 +243,7 @@ promote_to_production() {
 
     print_success "Production deployment triggered!"
     echo ""
-    echo -e "${CYAN}Monitor:${NC} https://github.com/anchoo2kewl/SprintSpark/actions"
+    echo -e "${CYAN}Monitor:${NC} https://github.com/anchoo2kewl/taskai/actions"
     echo ""
     print_status "After deployment completes, verify: $0 prod health"
 }
@@ -358,7 +358,7 @@ test_api() {
     print_header "Running API Tests"
 
     cd api
-    go test -v -cover ./... | tee /tmp/sprintspark-api-test.log
+    go test -v -cover ./... | tee /tmp/taskai-api-test.log
     local exit_code=${PIPESTATUS[0]}
     cd ..
 
@@ -375,7 +375,7 @@ test_web() {
     print_header "Running Frontend Tests"
 
     cd web
-    npm test 2>&1 | tee /tmp/sprintspark-web-test.log || {
+    npm test 2>&1 | tee /tmp/taskai-web-test.log || {
         print_warning "Frontend tests not configured or failed"
         cd ..
         return 0
@@ -390,7 +390,7 @@ test_e2e() {
     print_header "Running Playwright E2E Tests"
 
     cd web
-    npx playwright test 2>&1 | tee /tmp/sprintspark-e2e-test.log
+    npx playwright test 2>&1 | tee /tmp/taskai-e2e-test.log
     local exit_code=${PIPESTATUS[0]}
     cd ..
 
@@ -425,9 +425,9 @@ run_all_tests() {
     # Show coverage
     print_header "Test Coverage"
 
-    if [ -f /tmp/sprintspark-api-test.log ]; then
+    if [ -f /tmp/taskai-api-test.log ]; then
         echo -e "${CYAN}API Coverage:${NC}"
-        grep "coverage:" /tmp/sprintspark-api-test.log | tail -1 || echo "  No coverage data"
+        grep "coverage:" /tmp/taskai-api-test.log | tail -1 || echo "  No coverage data"
     fi
 
     # Summary
@@ -547,11 +547,11 @@ db_migrate() {
         local env_path="$1"
         ssh "$REMOTE_SERVER" "cd '$env_path' && docker compose exec -T -u root api sh -c '
             apk add --no-cache sqlite >/dev/null 2>&1
-            for t in \$(sqlite3 /data/sprintspark.db \".tables\"); do
-                c=\$(sqlite3 /data/sprintspark.db \"SELECT COUNT(*) FROM \$t;\")
+            for t in \$(sqlite3 /data/taskai.db \".tables\"); do
+                c=\$(sqlite3 /data/taskai.db \"SELECT COUNT(*) FROM \$t;\")
                 printf \"  %-25s %s rows\n\" \"\$t\" \"\$c\"
             done
-            printf \"  %-25s %s\n\" \"DB size:\" \"\$(du -h /data/sprintspark.db | cut -f1)\"
+            printf \"  %-25s %s\n\" \"DB size:\" \"\$(du -h /data/taskai.db | cut -f1)\"
         '" 2>/dev/null || echo "  (unable to read stats)"
     }
 
@@ -607,19 +607,19 @@ db_migrate() {
     # Step 1: Create backup of destination database
     print_status "Step 1/5: Backing up destination database..."
     local backup_ts=$(date +%Y%m%d_%H%M%S)
-    ssh "$REMOTE_SERVER" "cd '$dst_path' && docker compose exec -T api sh -c 'cp /data/sprintspark.db /data/sprintspark.db.backup_${backup_ts}'" || {
+    ssh "$REMOTE_SERVER" "cd '$dst_path' && docker compose exec -T api sh -c 'cp /data/taskai.db /data/taskai.db.backup_${backup_ts}'" || {
         print_error "Failed to backup destination database"
         return 1
     }
-    print_success "Backup saved as sprintspark.db.backup_${backup_ts}"
+    print_success "Backup saved as taskai.db.backup_${backup_ts}"
 
     # Step 2: Export source database to host (checkpoint WAL first for clean copy)
     print_status "Step 2/5: Exporting source database..."
     local src_app_name
     if [ "$src_env" = "staging" ]; then
-        src_app_name="sprintspark-staging"
+        src_app_name="taskai-staging"
     else
-        src_app_name="sprintspark"
+        src_app_name="taskai"
     fi
     local src_dir_name
     src_dir_name=$(basename "$src_path")
@@ -629,13 +629,13 @@ db_migrate() {
     ssh "$REMOTE_SERVER" "
         cd '$src_path' && docker compose exec -T api sh -c '
             if command -v sqlite3 >/dev/null 2>&1 || apk add --no-cache sqlite >/dev/null 2>&1; then
-                sqlite3 /data/sprintspark.db \"PRAGMA wal_checkpoint(TRUNCATE);\" >/dev/null 2>&1
+                sqlite3 /data/taskai.db \"PRAGMA wal_checkpoint(TRUNCATE);\" >/dev/null 2>&1
             fi
         '
         docker run --rm \
             -v '${src_volume}:/data' \
             -v /tmp:/tmp \
-            alpine sh -c 'cp /data/sprintspark.db /tmp/sprintspark_migrate_${backup_ts}.db'
+            alpine sh -c 'cp /data/taskai.db /tmp/taskai_migrate_${backup_ts}.db'
     " || {
         print_error "Failed to export source database"
         return 1
@@ -656,9 +656,9 @@ db_migrate() {
     # and volume name = <app_name>-data from docker-compose.yml
     local dst_app_name
     if [ "$dst_env" = "staging" ]; then
-        dst_app_name="sprintspark-staging"
+        dst_app_name="taskai-staging"
     else
-        dst_app_name="sprintspark"
+        dst_app_name="taskai"
     fi
     local dst_volume="${dst_dir_name}_${dst_app_name}-data"
 
@@ -667,9 +667,9 @@ db_migrate() {
             -v '${dst_volume}:/data' \
             -v /tmp:/tmp \
             alpine sh -c '
-                cp /tmp/sprintspark_migrate_${backup_ts}.db /data/sprintspark.db
-                rm -f /data/sprintspark.db-wal /data/sprintspark.db-shm
-                chmod 666 /data/sprintspark.db
+                cp /tmp/taskai_migrate_${backup_ts}.db /data/taskai.db
+                rm -f /data/taskai.db-wal /data/taskai.db-shm
+                chmod 666 /data/taskai.db
             '
     " || {
         print_error "Failed to import database. Restarting destination..."
@@ -685,7 +685,7 @@ db_migrate() {
     }
 
     # Clean up temp file
-    ssh "$REMOTE_SERVER" "rm -f /tmp/sprintspark_migrate_${backup_ts}.db" 2>/dev/null || true
+    ssh "$REMOTE_SERVER" "rm -f /tmp/taskai_migrate_${backup_ts}.db" 2>/dev/null || true
 
     # Wait and verify health
     print_status "Waiting for services to be healthy..."
@@ -707,12 +707,12 @@ db_migrate() {
         echo ""
         echo -e "${CYAN}Source:${NC}      $src_env ($src_domain)"
         echo -e "${CYAN}Destination:${NC} $dst_env ($dst_domain) — now has source data"
-        echo -e "${CYAN}Backup:${NC}     sprintspark.db.backup_${backup_ts} (inside destination container)"
+        echo -e "${CYAN}Backup:${NC}     taskai.db.backup_${backup_ts} (inside destination container)"
         echo ""
         print_status "To restore the backup if needed:"
         echo "  ssh $REMOTE_SERVER"
         echo "  cd $dst_path"
-        echo "  docker compose exec api sh -c 'cp /data/sprintspark.db.backup_${backup_ts} /data/sprintspark.db'"
+        echo "  docker compose exec api sh -c 'cp /data/taskai.db.backup_${backup_ts} /data/taskai.db'"
         echo "  docker compose restart api"
     else
         print_error "Migration completed but destination health check failed"
@@ -747,7 +747,7 @@ execute_db_query() {
         if ! command -v sqlite3 >/dev/null 2>&1; then
             apk add --no-cache sqlite >/dev/null 2>&1
         fi
-        sqlite3 -header -column /data/sprintspark.db \"$query\"
+        sqlite3 -header -column /data/taskai.db \"$query\"
     '"
 }
 
@@ -775,7 +775,7 @@ admin_create() {
                 if ! command -v sqlite3 >/dev/null 2>&1; then
                     apk add --no-cache sqlite >/dev/null 2>&1
                 fi
-                sqlite3 -header -column /data/sprintspark.db \"UPDATE users SET is_admin = 1 WHERE email = '\''$email'\''; SELECT id, email, is_admin FROM users WHERE email = '\''$email'\''\"
+                sqlite3 -header -column /data/taskai.db \"UPDATE users SET is_admin = 1 WHERE email = '\''$email'\''; SELECT id, email, is_admin FROM users WHERE email = '\''$email'\''\"
             '")
             echo "$result"
 
@@ -802,7 +802,7 @@ admin_create() {
                 if ! command -v sqlite3 >/dev/null 2>&1; then
                     apk add --no-cache sqlite >/dev/null 2>&1
                 fi
-                sqlite3 -header -column /data/sprintspark.db \"UPDATE users SET is_admin = 1 WHERE email = '$email'; SELECT id, email, is_admin FROM users WHERE email = '$email';\"
+                sqlite3 -header -column /data/taskai.db \"UPDATE users SET is_admin = 1 WHERE email = '$email'; SELECT id, email, is_admin FROM users WHERE email = '$email';\"
             ")
             echo "$result"
 
@@ -840,7 +840,7 @@ admin_list() {
                 if ! command -v sqlite3 >/dev/null 2>&1; then
                     apk add --no-cache sqlite >/dev/null 2>&1
                 fi
-                sqlite3 -header -column /data/sprintspark.db \"$query\"
+                sqlite3 -header -column /data/taskai.db \"$query\"
             '"
             ;;
         local)
@@ -856,7 +856,7 @@ admin_list() {
                 if ! command -v sqlite3 >/dev/null 2>&1; then
                     apk add --no-cache sqlite >/dev/null 2>&1
                 fi
-                sqlite3 -header -column /data/sprintspark.db \"$query\"
+                sqlite3 -header -column /data/taskai.db \"$query\"
             "
             ;;
         *)
@@ -885,7 +885,7 @@ users_list_all() {
         if ! command -v sqlite3 >/dev/null 2>&1; then
             apk add --no-cache sqlite >/dev/null 2>&1
         fi
-        sqlite3 -header -column /data/sprintspark.db \"$query\"
+        sqlite3 -header -column /data/taskai.db \"$query\"
     "
 
     echo ""
@@ -897,11 +897,11 @@ users_list_all() {
     echo "  Password: TestPass123!"
     echo ""
     echo -e "${CYAN}Demo users:${NC}"
-    echo "  demo.user1@sprintspark.app / DemoPass123!"
-    echo "  demo.user2@sprintspark.app / DemoPass223!"
-    echo "  demo.user3@sprintspark.app / DemoPass323!"
-    echo "  demo.user4@sprintspark.app / DemoPass423!"
-    echo "  demo.user5@sprintspark.app / DemoPass523!"
+    echo "  demo.user1@taskai.app / DemoPass123!"
+    echo "  demo.user2@taskai.app / DemoPass223!"
+    echo "  demo.user3@taskai.app / DemoPass323!"
+    echo "  demo.user4@taskai.app / DemoPass423!"
+    echo "  demo.user5@taskai.app / DemoPass523!"
 }
 
 # Reset user password (local only, for debugging)
@@ -932,7 +932,7 @@ users_reset_password() {
 
     # First, check if user exists
     local user_exists=$(docker-compose exec -T -u root api sh -c "
-        sqlite3 /data/sprintspark.db \"SELECT id FROM users WHERE email = '$email';\"
+        sqlite3 /data/taskai.db \"SELECT id FROM users WHERE email = '$email';\"
     " | tr -d '\r')
 
     if [ -z "$user_exists" ]; then
@@ -942,7 +942,7 @@ users_reset_password() {
 
     # Get user admin status
     local is_admin=$(docker-compose exec -T -u root api sh -c "
-        sqlite3 /data/sprintspark.db \"SELECT is_admin FROM users WHERE email = '$email';\"
+        sqlite3 /data/taskai.db \"SELECT is_admin FROM users WHERE email = '$email';\"
     " | tr -d '\r')
 
     print_warning "This will DELETE the user and recreate with new password"
@@ -952,7 +952,7 @@ users_reset_password() {
 
     # Delete user
     docker-compose exec -T -u root api sh -c "
-        sqlite3 /data/sprintspark.db \"DELETE FROM users WHERE email = '$email';\"
+        sqlite3 /data/taskai.db \"DELETE FROM users WHERE email = '$email';\"
     "
 
     # Recreate via API (which will hash the password)
@@ -966,7 +966,7 @@ users_reset_password() {
         # Restore admin status if needed
         if [ "$is_admin" = "1" ]; then
             docker-compose exec -T -u root api sh -c "
-                sqlite3 /data/sprintspark.db \"UPDATE users SET is_admin = 1 WHERE email = '$email';\"
+                sqlite3 /data/taskai.db \"UPDATE users SET is_admin = 1 WHERE email = '$email';\"
             "
             print_status "Restored admin privileges"
         fi
@@ -1007,7 +1007,7 @@ admin_revoke() {
                 if ! command -v sqlite3 >/dev/null 2>&1; then
                     apk add --no-cache sqlite >/dev/null 2>&1
                 fi
-                sqlite3 -header -column /data/sprintspark.db \"UPDATE users SET is_admin = 0 WHERE email = '\''$email'\''; SELECT id, email, is_admin FROM users WHERE email = '\''$email'\''\"
+                sqlite3 -header -column /data/taskai.db \"UPDATE users SET is_admin = 0 WHERE email = '\''$email'\''; SELECT id, email, is_admin FROM users WHERE email = '\''$email'\''\"
             '")
             echo "$result"
 
@@ -1034,7 +1034,7 @@ admin_revoke() {
                 if ! command -v sqlite3 >/dev/null 2>&1; then
                     apk add --no-cache sqlite >/dev/null 2>&1
                 fi
-                sqlite3 -header -column /data/sprintspark.db \"UPDATE users SET is_admin = 0 WHERE email = '$email'; SELECT id, email, is_admin FROM users WHERE email = '$email';\"
+                sqlite3 -header -column /data/taskai.db \"UPDATE users SET is_admin = 0 WHERE email = '$email'; SELECT id, email, is_admin FROM users WHERE email = '$email';\"
             ")
             echo "$result"
 
@@ -1243,7 +1243,7 @@ keep_scroll = true
 EOF
     fi
 
-    export DB_PATH="../data/sprintspark.db"
+    export DB_PATH="../data/taskai.db"
     export PORT=8083
     air > ../logs/api.log 2>&1 &
     API_PID=$!

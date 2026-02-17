@@ -1277,7 +1277,7 @@ print(response.json())`}
                         {(() => {
                           const hostname = window.location.hostname
                           if (hostname === 'taskai.cc') return 'https://mcp.taskai.cc/mcp'
-                          if (hostname === 'sprintspark.biswas.me') return 'https://mcp.sprintspark.biswas.me/mcp'
+                          if (hostname === 'staging.taskai.cc') return 'https://mcp.staging.taskai.cc/mcp'
                           return `${window.location.origin}/mcp`
                         })()}
                       </code>
@@ -1287,7 +1287,7 @@ print(response.json())`}
                         const hostname = window.location.hostname
                         let mcpUrl = `${window.location.origin}/mcp`
                         if (hostname === 'taskai.cc') mcpUrl = 'https://mcp.taskai.cc/mcp'
-                        if (hostname === 'sprintspark.biswas.me') mcpUrl = 'https://mcp.sprintspark.biswas.me/mcp'
+                        if (hostname === 'staging.taskai.cc') mcpUrl = 'https://mcp.staging.taskai.cc/mcp'
                         copyToClipboard(mcpUrl)
                         setCopiedSnippet('mcp-url')
                         setTimeout(() => setCopiedSnippet(null), 2000)
@@ -1322,7 +1322,7 @@ print(response.json())`}
                           const hostname = window.location.hostname
                           let mcpUrl = `${window.location.origin}/mcp`
                           if (hostname === 'taskai.cc') mcpUrl = 'https://mcp.taskai.cc/mcp'
-                          if (hostname === 'sprintspark.biswas.me') mcpUrl = 'https://mcp.sprintspark.biswas.me/mcp'
+                          if (hostname === 'staging.taskai.cc') mcpUrl = 'https://mcp.staging.taskai.cc/mcp'
                           copyToClipboard(JSON.stringify({
                             mcpServers: {
                               taskai: {
@@ -1349,7 +1349,7 @@ print(response.json())`}
       url: (() => {
         const hostname = window.location.hostname
         if (hostname === 'taskai.cc') return 'https://mcp.taskai.cc/mcp'
-        if (hostname === 'sprintspark.biswas.me') return 'https://mcp.sprintspark.biswas.me/mcp'
+        if (hostname === 'staging.taskai.cc') return 'https://mcp.staging.taskai.cc/mcp'
         return `${window.location.origin}/mcp`
       })(),
       headers: { "X-API-Key": "YOUR_API_KEY" }

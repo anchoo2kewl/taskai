@@ -8,7 +8,7 @@ import (
 	"sync"
 	"time"
 
-	"sprintspark/internal/auth"
+	"taskai/internal/auth"
 )
 
 // contextKey is a custom type for context keys to avoid collisions

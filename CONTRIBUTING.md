@@ -1,6 +1,6 @@
-# Contributing to SprintSpark
+# Contributing to TaskAI
 
-Thank you for your interest in contributing to SprintSpark! This guide will help you get started.
+Thank you for your interest in contributing to TaskAI! This guide will help you get started.
 
 ## 📋 Table of Contents
 
@@ -38,11 +38,11 @@ Thank you for your interest in contributing to SprintSpark! This guide will help
 ```bash
 # Fork the repository on GitHub
 # Then clone your fork
-git clone https://github.com/YOUR_USERNAME/SprintSpark.git
-cd SprintSpark
+git clone https://github.com/YOUR_USERNAME/taskai.git
+cd taskai
 
 # Add upstream remote
-git remote add upstream https://github.com/anchoo2kewl/SprintSpark.git
+git remote add upstream https://github.com/anchoo2kewl/taskai.git
 ```
 
 ### Setup Development Environment
@@ -493,7 +493,7 @@ Brief description of changes
 ## Project Structure
 
 ```
-SprintSpark/
+taskai/
 ├── api/                      # Go backend
 │   ├── cmd/api/             # Application entry point
 │   │   └── main.go
@@ -531,9 +531,9 @@ SprintSpark/
 
 ## Getting Help
 
-- **Questions?** Open a [Discussion](https://github.com/anchoo2kewl/SprintSpark/discussions)
-- **Bug?** Open an [Issue](https://github.com/anchoo2kewl/SprintSpark/issues)
-- **Feature Request?** Open an [Issue](https://github.com/anchoo2kewl/SprintSpark/issues) with `feature` label
+- **Questions?** Open a [Discussion](https://github.com/anchoo2kewl/taskai/discussions)
+- **Bug?** Open an [Issue](https://github.com/anchoo2kewl/taskai/issues)
+- **Feature Request?** Open an [Issue](https://github.com/anchoo2kewl/taskai/issues) with `feature` label
 
 ---
 
@@ -543,4 +543,4 @@ By contributing, you agree that your contributions will be licensed under the MI
 
 ---
 
-**Thank you for contributing to SprintSpark! 🚀**
+**Thank you for contributing to TaskAI! 🚀**

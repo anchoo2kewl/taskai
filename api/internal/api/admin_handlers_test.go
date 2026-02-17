@@ -11,9 +11,9 @@ import (
 
 	"go.uber.org/zap/zaptest"
 
-	"sprintspark/internal/auth"
-	"sprintspark/internal/config"
-	"sprintspark/internal/db"
+	"taskai/internal/auth"
+	"taskai/internal/config"
+	"taskai/internal/db"
 )
 
 func TestAdminHandlers(t *testing.T) {

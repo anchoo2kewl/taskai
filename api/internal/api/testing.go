@@ -15,9 +15,9 @@ import (
 
 	"golang.org/x/crypto/bcrypt"
 
-	"sprintspark/internal/auth"
-	"sprintspark/internal/config"
-	"sprintspark/internal/db"
+	"taskai/internal/auth"
+	"taskai/internal/config"
+	"taskai/internal/db"
 )
 
 // TestServer holds test server dependencies

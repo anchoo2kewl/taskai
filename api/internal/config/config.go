@@ -40,7 +40,7 @@ func Load() *Config {
 	cfg := &Config{
 		Port:                    getEnv("PORT", "8080"),
 		Env:                     getEnv("ENV", "development"),
-		DBPath:                  getEnv("DB_PATH", "./data/sprintspark.db"),
+		DBPath:                  getEnv("DB_PATH", "./data/taskai.db"),
 		MigrationsPath:          getEnv("MIGRATIONS_PATH", "./internal/db/migrations"),
 		JWTSecret:               getEnv("JWT_SECRET", "change-this-to-a-secure-random-string-in-production"),
 		JWTExpiryHours:          getEnvAsInt("JWT_EXPIRY_HOURS", 24),

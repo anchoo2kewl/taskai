@@ -137,6 +137,11 @@ func maskDSN(dsn string) string {
 
 // runMigrations executes all pending SQL migration files
 func (db *DB) runMigrations(ctx context.Context, migrationsPath string, driver string) error {
+	// Use postgres subdirectory for Postgres migrations
+	if driver == "postgres" || driver == "pgx" {
+		migrationsPath = filepath.Join(migrationsPath, "postgres")
+	}
+
 	// Create migrations table if it doesn't exist
 	createTableSQL := `
 		CREATE TABLE IF NOT EXISTS schema_migrations (

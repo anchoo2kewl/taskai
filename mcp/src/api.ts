@@ -54,6 +54,29 @@ export interface User {
   [key: string]: unknown;
 }
 
+export interface WikiPage {
+  id: string;
+  project_id: string;
+  title: string;
+  slug: string;
+  created_by: string;
+  created_at: string;
+  updated_at: string;
+  [key: string]: unknown;
+}
+
+export interface WikiBlock {
+  page_id: string;
+  page_title: string;
+  page_slug: string;
+  block_id: string;
+  block_type: string;
+  headings_path: string;
+  snippet: string;
+  rank?: number;
+  [key: string]: unknown;
+}
+
 export class TaskAIClient {
   private baseURL: string;
   private apiKey: string;
@@ -145,5 +168,32 @@ export class TaskAIClient {
       method: "POST",
       body: JSON.stringify({ comment: content }),
     });
+  }
+
+  // Wiki methods
+  async searchWiki(params: {
+    query: string;
+    project_id?: string;
+    limit?: number;
+    recency_days?: number;
+  }): Promise<{ results: WikiBlock[]; total: number }> {
+    return this.request("/api/wiki/search", {
+      method: "POST",
+      body: JSON.stringify(params),
+    });
+  }
+
+  async listWikiPages(projectId: string): Promise<WikiPage[]> {
+    return this.request<WikiPage[]>(`/api/projects/${encodeURIComponent(projectId)}/wiki/pages`);
+  }
+
+  async getWikiPage(pageId: string): Promise<WikiPage> {
+    return this.request<WikiPage>(`/api/wiki/pages/${encodeURIComponent(pageId)}`);
+  }
+
+  async autocompletePages(query: string, projectId?: string, limit = 10): Promise<Array<{ id: string; title: string; slug: string }>> {
+    const qs = new URLSearchParams({ query, limit: String(limit) });
+    if (projectId) qs.set("project_id", projectId);
+    return this.request(`/api/wiki/autocomplete?${qs}`);
   }
 }

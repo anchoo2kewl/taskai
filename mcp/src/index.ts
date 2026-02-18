@@ -2,7 +2,7 @@ import express from "express";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import { z } from "zod";
-import { TaskAIClient, Task, Project, SwimLane, Comment } from "./api.js";
+import { TaskAIClient, Task, Project, SwimLane, Comment, WikiPage, WikiBlock } from "./api.js";
 
 const TASKAI_API_URL = process.env.TASKAI_API_URL || "https://taskai.cc";
 const PORT = parseInt(process.env.PORT || "3000", 10);
@@ -233,6 +233,67 @@ function createServer(client: TaskAIClient): McpServer {
     async ({ task_id, content, verbose }) => {
       const comment = await client.addComment(task_id, content);
       return { content: [{ type: "text", text: formatResponse(comment, verbose) }] };
+    }
+  );
+
+  // --- search_wiki ---
+  server.tool(
+    "search_wiki",
+    "Search wiki content across pages (full-text search)",
+    {
+      query: z.string().describe("Search query"),
+      project_id: z.string().optional().describe("Filter by project ID"),
+      limit: z.number().optional().describe("Max results (default: 20, max: 100)"),
+      recency_days: z.number().optional().describe("Only return pages updated in last N days"),
+      verbose: z.boolean().optional().describe("Pretty print JSON (default: false)"),
+    },
+    async ({ query, project_id, limit, recency_days, verbose }) => {
+      const result = await client.searchWiki({ query, project_id, limit, recency_days });
+      return { content: [{ type: "text", text: formatResponse(result, verbose) }] };
+    }
+  );
+
+  // --- list_wiki_pages ---
+  server.tool(
+    "list_wiki_pages",
+    "List all wiki pages in a project",
+    {
+      project_id: z.string().describe("Project ID"),
+      verbose: z.boolean().optional().describe("Pretty print JSON (default: false)"),
+    },
+    async ({ project_id, verbose }) => {
+      const pages = await client.listWikiPages(project_id);
+      return { content: [{ type: "text", text: formatResponse(pages, verbose) }] };
+    }
+  );
+
+  // --- get_wiki_page ---
+  server.tool(
+    "get_wiki_page",
+    "Get a specific wiki page by ID",
+    {
+      page_id: z.string().describe("Wiki page ID"),
+      verbose: z.boolean().optional().describe("Pretty print JSON (default: false)"),
+    },
+    async ({ page_id, verbose }) => {
+      const page = await client.getWikiPage(page_id);
+      return { content: [{ type: "text", text: formatResponse(page, verbose) }] };
+    }
+  );
+
+  // --- autocomplete_wiki_pages ---
+  server.tool(
+    "autocomplete_wiki_pages",
+    "Autocomplete wiki page titles (fuzzy search)",
+    {
+      query: z.string().describe("Search query for page title"),
+      project_id: z.string().optional().describe("Filter by project ID"),
+      limit: z.number().optional().describe("Max results (default: 10, max: 50)"),
+      verbose: z.boolean().optional().describe("Pretty print JSON (default: false)"),
+    },
+    async ({ query, project_id, limit, verbose }) => {
+      const results = await client.autocompletePages(query, project_id, limit);
+      return { content: [{ type: "text", text: formatResponse(results, verbose) }] };
     }
   );
 

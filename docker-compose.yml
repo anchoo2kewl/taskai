@@ -6,7 +6,17 @@ services:
     ports:
       - "8083:8080"
     environment:
+      # Database config - defaults to SQLite for backward compatibility
+      - DB_DRIVER=${DB_DRIVER:-sqlite}
       - DB_PATH=/data/taskai.db
+      - DB_DSN=${DB_DSN:-}
+      # Postgres connection (when DB_DRIVER=postgres)
+      - POSTGRES_HOST=${POSTGRES_HOST:-postgres}
+      - POSTGRES_PORT=${POSTGRES_PORT:-5432}
+      - POSTGRES_DB=${POSTGRES_DB:-taskai}
+      - POSTGRES_USER=${POSTGRES_USER:-taskai}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-taskai-dev-password}
+      # App config
       - JWT_SECRET=${JWT_SECRET:-dev-secret-change-in-production}
       - PORT=8080
       - ENV=${ENV:-production}
@@ -17,6 +27,10 @@ services:
       - taskai-data:/data
     networks:
       - taskai
+    depends_on:
+      postgres:
+        condition: service_healthy
+        required: false
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:8080/api/health"]
@@ -24,6 +38,26 @@ services:
       timeout: 3s
       retries: 3
       start_period: 5s
+
+  postgres:
+    image: postgres:16-alpine
+    ports:
+      - "127.0.0.1:5432:5432"
+    environment:
+      - POSTGRES_DB=${POSTGRES_DB:-taskai}
+      - POSTGRES_USER=${POSTGRES_USER:-taskai}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-taskai-dev-password}
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    networks:
+      - taskai
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-taskai} -d ${POSTGRES_DB:-taskai}"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 10s
 
   web:
     build:
@@ -69,6 +103,10 @@ services:
 volumes:
   # Persistent volume for SQLite database
   taskai-data:
+    driver: local
+
+  # Persistent volume for Postgres database
+  postgres-data:
     driver: local
 
 networks:

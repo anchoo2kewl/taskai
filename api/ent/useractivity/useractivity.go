@@ -27,9 +27,9 @@ const (
 	// EdgeUser holds the string denoting the user edge name in mutations.
 	EdgeUser = "user"
 	// Table holds the table name of the useractivity in the database.
-	Table = "user_activities"
+	Table = "user_activity"
 	// UserTable is the table that holds the user relation/edge.
-	UserTable = "user_activities"
+	UserTable = "user_activity"
 	// UserInverseTable is the table name for the User entity.
 	// It exists in this package in order to avoid circular dependency with the "user" package.
 	UserInverseTable = "users"

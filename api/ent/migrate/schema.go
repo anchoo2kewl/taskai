@@ -3,6 +3,7 @@
 package migrate
 
 import (
+	"entgo.io/ent/dialect/entsql"
 	"entgo.io/ent/dialect/sql/schema"
 	"entgo.io/ent/schema/field"
 )
@@ -781,8 +782,8 @@ var (
 			},
 		},
 	}
-	// UserActivitiesColumns holds the columns for the "user_activities" table.
-	UserActivitiesColumns = []*schema.Column{
+	// UserActivityColumns holds the columns for the "user_activity" table.
+	UserActivityColumns = []*schema.Column{
 		{Name: "id", Type: field.TypeInt64, Increment: true},
 		{Name: "activity_type", Type: field.TypeString},
 		{Name: "ip_address", Type: field.TypeString, Nullable: true},
@@ -790,15 +791,15 @@ var (
 		{Name: "created_at", Type: field.TypeTime},
 		{Name: "user_id", Type: field.TypeInt64},
 	}
-	// UserActivitiesTable holds the schema information for the "user_activities" table.
-	UserActivitiesTable = &schema.Table{
-		Name:       "user_activities",
-		Columns:    UserActivitiesColumns,
-		PrimaryKey: []*schema.Column{UserActivitiesColumns[0]},
+	// UserActivityTable holds the schema information for the "user_activity" table.
+	UserActivityTable = &schema.Table{
+		Name:       "user_activity",
+		Columns:    UserActivityColumns,
+		PrimaryKey: []*schema.Column{UserActivityColumns[0]},
 		ForeignKeys: []*schema.ForeignKey{
 			{
-				Symbol:     "user_activities_users_user_activities",
-				Columns:    []*schema.Column{UserActivitiesColumns[5]},
+				Symbol:     "user_activity_users_user_activities",
+				Columns:    []*schema.Column{UserActivityColumns[5]},
 				RefColumns: []*schema.Column{UsersColumns[0]},
 				OnDelete:   schema.NoAction,
 			},
@@ -807,17 +808,17 @@ var (
 			{
 				Name:    "useractivity_user_id",
 				Unique:  false,
-				Columns: []*schema.Column{UserActivitiesColumns[5]},
+				Columns: []*schema.Column{UserActivityColumns[5]},
 			},
 			{
 				Name:    "useractivity_activity_type",
 				Unique:  false,
-				Columns: []*schema.Column{UserActivitiesColumns[1]},
+				Columns: []*schema.Column{UserActivityColumns[1]},
 			},
 			{
 				Name:    "useractivity_created_at",
 				Unique:  false,
-				Columns: []*schema.Column{UserActivitiesColumns[4]},
+				Columns: []*schema.Column{UserActivityColumns[4]},
 			},
 		},
 	}
@@ -840,7 +841,7 @@ var (
 		TeamInvitationsTable,
 		TeamMembersTable,
 		UsersTable,
-		UserActivitiesTable,
+		UserActivityTable,
 	}
 )
 
@@ -876,5 +877,8 @@ func init() {
 	TeamInvitationsTable.ForeignKeys[2].RefTable = UsersTable
 	TeamMembersTable.ForeignKeys[0].RefTable = TeamsTable
 	TeamMembersTable.ForeignKeys[1].RefTable = UsersTable
-	UserActivitiesTable.ForeignKeys[0].RefTable = UsersTable
+	UserActivityTable.ForeignKeys[0].RefTable = UsersTable
+	UserActivityTable.Annotation = &entsql.Annotation{
+		Table: "user_activity",
+	}
 }

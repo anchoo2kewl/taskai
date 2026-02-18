@@ -4,10 +4,12 @@ import (
 	"context"
 	"crypto/rand"
 	"crypto/sha256"
-	"database/sql"
 	"encoding/base64"
 	"fmt"
 	"time"
+
+	"taskai/ent"
+	"taskai/ent/apikey"
 )
 
 // APIKey represents an API key for user authentication
@@ -62,30 +64,30 @@ func (db *DB) CreateAPIKey(ctx context.Context, userID int64, name string, expir
 		return nil, fmt.Errorf("failed to generate API key: %w", err)
 	}
 
-	// Insert into database
-	query := `
-		INSERT INTO api_keys (user_id, name, key_hash, key_prefix, expires_at)
-		VALUES (?, ?, ?, ?, ?)
-	`
+	// Create using Ent
+	builder := db.Client.APIKey.Create().
+		SetUserID(userID).
+		SetName(name).
+		SetKeyHash(keyHash).
+		SetKeyPrefix(prefix)
 
-	result, err := db.ExecContext(ctx, query, userID, name, keyHash, prefix, expiresAt)
+	if expiresAt != nil {
+		builder.SetExpiresAt(*expiresAt)
+	}
+
+	newAPIKey, err := builder.Save(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("failed to insert API key: %w", err)
 	}
 
-	id, err := result.LastInsertId()
-	if err != nil {
-		return nil, fmt.Errorf("failed to get API key ID: %w", err)
-	}
-
 	return &APIKeyWithSecret{
 		APIKey: APIKey{
-			ID:        id,
-			UserID:    userID,
-			Name:      name,
-			KeyPrefix: prefix,
-			CreatedAt: time.Now(),
-			ExpiresAt: expiresAt,
+			ID:        newAPIKey.ID,
+			UserID:    newAPIKey.UserID,
+			Name:      newAPIKey.Name,
+			KeyPrefix: newAPIKey.KeyPrefix,
+			CreatedAt: newAPIKey.CreatedAt,
+			ExpiresAt: newAPIKey.ExpiresAt,
 		},
 		Key: key,
 	}, nil
@@ -93,39 +95,25 @@ func (db *DB) CreateAPIKey(ctx context.Context, userID int64, name string, expir
 
 // GetAPIKeysByUserID retrieves all API keys for a user
 func (db *DB) GetAPIKeysByUserID(ctx context.Context, userID int64) ([]APIKey, error) {
-	query := `
-		SELECT id, user_id, name, key_prefix, last_used_at, created_at, expires_at
-		FROM api_keys
-		WHERE user_id = ?
-		ORDER BY created_at DESC
-	`
-
-	rows, err := db.QueryContext(ctx, query, userID)
+	entKeys, err := db.Client.APIKey.Query().
+		Where(apikey.UserID(userID)).
+		Order(ent.Desc(apikey.FieldCreatedAt)).
+		All(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("failed to query API keys: %w", err)
 	}
-	defer rows.Close()
 
-	var keys []APIKey
-	for rows.Next() {
-		var key APIKey
-		err := rows.Scan(
-			&key.ID,
-			&key.UserID,
-			&key.Name,
-			&key.KeyPrefix,
-			&key.LastUsedAt,
-			&key.CreatedAt,
-			&key.ExpiresAt,
-		)
-		if err != nil {
-			return nil, fmt.Errorf("failed to scan API key: %w", err)
-		}
-		keys = append(keys, key)
-	}
-
-	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("error iterating API keys: %w", err)
+	keys := make([]APIKey, 0, len(entKeys))
+	for _, ek := range entKeys {
+		keys = append(keys, APIKey{
+			ID:         ek.ID,
+			UserID:     ek.UserID,
+			Name:       ek.Name,
+			KeyPrefix:  ek.KeyPrefix,
+			LastUsedAt: ek.LastUsedAt,
+			CreatedAt:  ek.CreatedAt,
+			ExpiresAt:  ek.ExpiresAt,
+		})
 	}
 
 	return keys, nil
@@ -135,54 +123,53 @@ func (db *DB) GetAPIKeysByUserID(ctx context.Context, userID int64) ([]APIKey, e
 func (db *DB) ValidateAPIKey(ctx context.Context, key string) (int64, error) {
 	keyHash := HashAPIKey(key)
 
-	query := `
-		SELECT user_id, expires_at
-		FROM api_keys
-		WHERE key_hash = ?
-	`
-
-	var userID int64
-	var expiresAt *time.Time
-	err := db.QueryRowContext(ctx, query, keyHash).Scan(&userID, &expiresAt)
-	if err == sql.ErrNoRows {
-		return 0, fmt.Errorf("invalid API key")
-	}
+	apiKeyEntity, err := db.Client.APIKey.Query().
+		Where(apikey.KeyHash(keyHash)).
+		Only(ctx)
 	if err != nil {
+		if ent.IsNotFound(err) {
+			return 0, fmt.Errorf("invalid API key")
+		}
 		return 0, fmt.Errorf("failed to validate API key: %w", err)
 	}
 
 	// Check expiration
-	if expiresAt != nil && expiresAt.Before(time.Now()) {
+	if apiKeyEntity.ExpiresAt != nil && apiKeyEntity.ExpiresAt.Before(time.Now()) {
 		return 0, fmt.Errorf("API key expired")
 	}
 
 	// Update last used timestamp
-	updateQuery := `UPDATE api_keys SET last_used_at = ? WHERE key_hash = ?`
-	_, err = db.ExecContext(ctx, updateQuery, time.Now(), keyHash)
+	now := time.Now()
+	_, err = db.Client.APIKey.UpdateOneID(apiKeyEntity.ID).
+		SetLastUsedAt(now).
+		Save(ctx)
 	if err != nil {
 		// Log but don't fail on update error
 		fmt.Printf("failed to update API key last_used_at: %v\n", err)
 	}
 
-	return userID, nil
+	return apiKeyEntity.UserID, nil
 }
 
 // DeleteAPIKey removes an API key
 func (db *DB) DeleteAPIKey(ctx context.Context, keyID, userID int64) error {
-	query := `DELETE FROM api_keys WHERE id = ? AND user_id = ?`
+	// Verify the API key belongs to the user before deleting
+	apiKeyEntity, err := db.Client.APIKey.Query().
+		Where(
+			apikey.ID(keyID),
+			apikey.UserID(userID),
+		).
+		Only(ctx)
+	if err != nil {
+		if ent.IsNotFound(err) {
+			return fmt.Errorf("API key not found or access denied")
+		}
+		return fmt.Errorf("failed to query API key: %w", err)
+	}
 
-	result, err := db.ExecContext(ctx, query, keyID, userID)
+	err = db.Client.APIKey.DeleteOneID(apiKeyEntity.ID).Exec(ctx)
 	if err != nil {
 		return fmt.Errorf("failed to delete API key: %w", err)
-	}
-
-	rows, err := result.RowsAffected()
-	if err != nil {
-		return fmt.Errorf("failed to get rows affected: %w", err)
-	}
-
-	if rows == 0 {
-		return fmt.Errorf("API key not found or access denied")
 	}
 
 	return nil
@@ -196,15 +183,13 @@ func (db *DB) GetUserByAPIKey(ctx context.Context, key string) (int64, string, e
 	}
 
 	// Get user email
-	query := `SELECT email FROM users WHERE id = ?`
-	var email string
-	err = db.QueryRowContext(ctx, query, userID).Scan(&email)
-	if err == sql.ErrNoRows {
-		return 0, "", fmt.Errorf("user not found")
-	}
+	userEntity, err := db.Client.User.Get(ctx, userID)
 	if err != nil {
+		if ent.IsNotFound(err) {
+			return 0, "", fmt.Errorf("user not found")
+		}
 		return 0, "", fmt.Errorf("failed to get user: %w", err)
 	}
 
-	return userID, email, nil
+	return userID, userEntity.Email, nil
 }

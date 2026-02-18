@@ -3,13 +3,15 @@ package api
 import (
 	"context"
 	"crypto/rand"
-	"database/sql"
 	"encoding/base64"
 	"fmt"
 	"net/http"
 	"time"
 
 	"go.uber.org/zap"
+
+	"taskai/ent"
+	"taskai/ent/invite"
 )
 
 // Invite represents an invite record
@@ -52,22 +54,17 @@ func (s *Server) HandleListInvites(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
 	defer cancel()
 
-	query := `
-		SELECT i.id, i.code, i.inviter_id, i.invitee_id, i.used_at, i.expires_at, i.created_at,
-			   u.name as invitee_name, u.email as invitee_email
-		FROM invites i
-		LEFT JOIN users u ON i.invitee_id = u.id
-		WHERE i.inviter_id = ?
-		ORDER BY i.created_at DESC
-	`
-
-	rows, err := s.db.QueryContext(ctx, query, userID)
+	// Fetch invites with invitee details
+	entInvites, err := s.db.Client.Invite.Query().
+		Where(invite.InviterID(userID)).
+		WithInvitee().
+		Order(ent.Desc(invite.FieldCreatedAt)).
+		All(ctx)
 	if err != nil {
 		s.logger.Error("Failed to query invites", zap.Error(err))
 		respondError(w, http.StatusInternalServerError, "failed to list invites", "internal_error")
 		return
 	}
-	defer rows.Close()
 
 	type InviteWithDetails struct {
 		ID          int64   `json:"id"`
@@ -80,37 +77,45 @@ func (s *Server) HandleListInvites(w http.ResponseWriter, r *http.Request) {
 		CreatedAt   string  `json:"created_at"`
 	}
 
-	invites := []InviteWithDetails{}
-	for rows.Next() {
-		var inv InviteWithDetails
-		var inviteeName, inviteeEmail sql.NullString
-		err := rows.Scan(&inv.ID, &inv.Code, &inv.InviterID, &inv.InviteeID, &inv.UsedAt, &inv.ExpiresAt, &inv.CreatedAt, &inviteeName, &inviteeEmail)
-		if err != nil {
-			s.logger.Error("Failed to scan invite row", zap.Error(err))
-			continue
+	invites := make([]InviteWithDetails, 0, len(entInvites))
+	for _, ei := range entInvites {
+		inv := InviteWithDetails{
+			ID:        ei.ID,
+			Code:      ei.Code,
+			InviterID: ei.InviterID,
+			InviteeID: ei.InviteeID,
+			CreatedAt: ei.CreatedAt.Format(time.RFC3339),
 		}
-		if inviteeName.Valid && inviteeName.String != "" {
-			inv.InviteeName = &inviteeName.String
-		} else if inviteeEmail.Valid {
-			inv.InviteeName = &inviteeEmail.String
+		if ei.UsedAt != nil {
+			usedAtStr := ei.UsedAt.Format(time.RFC3339)
+			inv.UsedAt = &usedAtStr
+		}
+		if ei.ExpiresAt != nil {
+			expiresAtStr := ei.ExpiresAt.Format(time.RFC3339)
+			inv.ExpiresAt = &expiresAtStr
+		}
+		if ei.Edges.Invitee != nil {
+			if ei.Edges.Invitee.Name != nil && *ei.Edges.Invitee.Name != "" {
+				inv.InviteeName = ei.Edges.Invitee.Name
+			} else {
+				inv.InviteeName = &ei.Edges.Invitee.Email
+			}
 		}
 		invites = append(invites, inv)
 	}
 
 	// Also get the user's invite count
-	var inviteCount int
-	var isAdmin bool
-	err = s.db.QueryRowContext(ctx, `SELECT invite_count, is_admin FROM users WHERE id = ?`, userID).Scan(&inviteCount, &isAdmin)
+	userEntity, err := s.db.Client.User.Get(ctx, userID)
 	if err != nil {
-		s.logger.Error("Failed to get invite count", zap.Error(err))
+		s.logger.Error("Failed to get user", zap.Error(err))
 		respondError(w, http.StatusInternalServerError, "failed to get invite count", "internal_error")
 		return
 	}
 
 	respondJSON(w, http.StatusOK, map[string]interface{}{
 		"invites":      invites,
-		"invite_count": inviteCount,
-		"is_admin":     isAdmin,
+		"invite_count": userEntity.InviteCount,
+		"is_admin":     userEntity.IsAdmin,
 	})
 }
 
@@ -133,17 +138,14 @@ func (s *Server) HandleCreateInvite(w http.ResponseWriter, r *http.Request) {
 	_ = decodeJSON(r, &req)
 
 	// Check invite count (admins have unlimited)
-	var inviteCount int
-	var isAdmin bool
-	var inviterName string
-	err := s.db.QueryRowContext(ctx, `SELECT invite_count, is_admin, COALESCE(name, email) FROM users WHERE id = ?`, userID).Scan(&inviteCount, &isAdmin, &inviterName)
+	userEntity, err := s.db.Client.User.Get(ctx, userID)
 	if err != nil {
-		s.logger.Error("Failed to get invite count", zap.Error(err))
+		s.logger.Error("Failed to get user", zap.Error(err))
 		respondError(w, http.StatusInternalServerError, "failed to create invite", "internal_error")
 		return
 	}
 
-	if !isAdmin && inviteCount <= 0 {
+	if !userEntity.IsAdmin && userEntity.InviteCount <= 0 {
 		respondError(w, http.StatusForbidden, "no invites remaining", "no_invites")
 		return
 	}
@@ -159,7 +161,8 @@ func (s *Server) HandleCreateInvite(w http.ResponseWriter, r *http.Request) {
 	// Set expiry to 7 days
 	expiresAt := time.Now().Add(7 * 24 * time.Hour)
 
-	tx, err := s.db.BeginTx(ctx, nil)
+	// Use Ent transaction
+	tx, err := s.db.Client.Tx(ctx)
 	if err != nil {
 		s.logger.Error("Failed to begin transaction", zap.Error(err))
 		respondError(w, http.StatusInternalServerError, "failed to create invite", "internal_error")
@@ -168,10 +171,11 @@ func (s *Server) HandleCreateInvite(w http.ResponseWriter, r *http.Request) {
 	defer tx.Rollback()
 
 	// Insert invite
-	_, err = tx.ExecContext(ctx,
-		`INSERT INTO invites (code, inviter_id, expires_at) VALUES (?, ?, ?)`,
-		code, userID, expiresAt,
-	)
+	_, err = tx.Invite.Create().
+		SetCode(code).
+		SetInviterID(userID).
+		SetExpiresAt(expiresAt).
+		Save(ctx)
 	if err != nil {
 		s.logger.Error("Failed to insert invite", zap.Error(err))
 		respondError(w, http.StatusInternalServerError, "failed to create invite", "internal_error")
@@ -179,11 +183,10 @@ func (s *Server) HandleCreateInvite(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Decrement invite count (only for non-admins)
-	if !isAdmin {
-		_, err = tx.ExecContext(ctx,
-			`UPDATE users SET invite_count = invite_count - 1 WHERE id = ? AND invite_count > 0`,
-			userID,
-		)
+	if !userEntity.IsAdmin {
+		_, err = tx.User.UpdateOneID(userID).
+			SetInviteCount(userEntity.InviteCount - 1).
+			Save(ctx)
 		if err != nil {
 			s.logger.Error("Failed to decrement invite count", zap.Error(err))
 			respondError(w, http.StatusInternalServerError, "failed to create invite", "internal_error")
@@ -200,6 +203,11 @@ func (s *Server) HandleCreateInvite(w http.ResponseWriter, r *http.Request) {
 	s.logger.Info("Invite created", zap.Int64("user_id", userID), zap.String("code", code[:8]+"..."))
 
 	// Send email if requested and email service is available
+	inviterName := userEntity.Email
+	if userEntity.Name != nil && *userEntity.Name != "" {
+		inviterName = *userEntity.Name
+	}
+
 	emailSent := false
 	if req.Email != "" {
 		if emailSvc := s.GetEmailService(); emailSvc != nil {
@@ -233,47 +241,36 @@ func (s *Server) HandleValidateInvite(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
 	defer cancel()
 
-	var inviterName sql.NullString
-	var usedAt sql.NullString
-	var expiresAt sql.NullString
-	err := s.db.QueryRowContext(ctx,
-		`SELECT u.name, u.email, i.used_at, i.expires_at
-		 FROM invites i JOIN users u ON i.inviter_id = u.id
-		 WHERE i.code = ?`, code,
-	).Scan(&inviterName, new(string), &usedAt, &expiresAt)
+	inviteEntity, err := s.db.Client.Invite.Query().
+		Where(invite.Code(code)).
+		WithInviter().
+		Only(ctx)
 
-	if err == sql.ErrNoRows {
-		respondJSON(w, http.StatusOK, InviteStatus{Valid: false, Message: "invalid invite code"})
-		return
-	}
 	if err != nil {
+		if ent.IsNotFound(err) {
+			respondJSON(w, http.StatusOK, InviteStatus{Valid: false, Message: "invalid invite code"})
+			return
+		}
 		s.logger.Error("Failed to validate invite", zap.Error(err))
 		respondError(w, http.StatusInternalServerError, "failed to validate invite", "internal_error")
 		return
 	}
 
-	if usedAt.Valid {
+	if inviteEntity.UsedAt != nil {
 		respondJSON(w, http.StatusOK, InviteStatus{Valid: false, Message: "this invite has already been used"})
 		return
 	}
 
-	if expiresAt.Valid {
-		t, err := time.Parse(time.RFC3339, expiresAt.String)
-		if err == nil && time.Now().After(t) {
-			respondJSON(w, http.StatusOK, InviteStatus{Valid: false, Message: "this invite has expired"})
-			return
-		}
-		// Also try parsing as the SQLite default format
-		t2, err2 := time.Parse("2006-01-02 15:04:05-07:00", expiresAt.String)
-		if err2 == nil && time.Now().After(t2) {
-			respondJSON(w, http.StatusOK, InviteStatus{Valid: false, Message: "this invite has expired"})
-			return
-		}
+	if inviteEntity.ExpiresAt != nil && time.Now().After(*inviteEntity.ExpiresAt) {
+		respondJSON(w, http.StatusOK, InviteStatus{Valid: false, Message: "this invite has expired"})
+		return
 	}
 
 	name := ""
-	if inviterName.Valid && inviterName.String != "" {
-		name = inviterName.String
+	if inviteEntity.Edges.Inviter != nil {
+		if inviteEntity.Edges.Inviter.Name != nil && *inviteEntity.Edges.Inviter.Name != "" {
+			name = *inviteEntity.Edges.Inviter.Name
+		}
 	}
 
 	respondJSON(w, http.StatusOK, InviteStatus{Valid: true, InviterName: name})
@@ -320,16 +317,17 @@ func (s *Server) HandleAdminBoostInvites(w http.ResponseWriter, r *http.Request)
 	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
 	defer cancel()
 
-	result, err := s.db.ExecContext(ctx, `UPDATE users SET invite_count = ? WHERE id = ?`, req.InviteCount, targetUserID)
+	// Update the user
+	err := s.db.Client.User.UpdateOneID(targetUserID).
+		SetInviteCount(req.InviteCount).
+		Exec(ctx)
 	if err != nil {
+		if ent.IsNotFound(err) {
+			respondError(w, http.StatusNotFound, "user not found", "not_found")
+			return
+		}
 		s.logger.Error("Failed to update invite count", zap.Error(err))
 		respondError(w, http.StatusInternalServerError, "failed to update invite count", "internal_error")
-		return
-	}
-
-	rowsAffected, _ := result.RowsAffected()
-	if rowsAffected == 0 {
-		respondError(w, http.StatusNotFound, "user not found", "not_found")
 		return
 	}
 

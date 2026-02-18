@@ -2,7 +2,6 @@ package api
 
 import (
 	"context"
-	"database/sql"
 	"encoding/json"
 	"net/http"
 	"strconv"
@@ -10,6 +9,13 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"go.uber.org/zap"
+
+	"taskai/ent"
+	"taskai/ent/project"
+	"taskai/ent/team"
+	"taskai/ent/teammember"
+	"taskai/ent/teaminvitation"
+	"taskai/ent/user"
 )
 
 type Team struct {
@@ -64,28 +70,31 @@ func (s *Server) HandleGetMyTeam(w http.ResponseWriter, r *http.Request) {
 	userID := r.Context().Value(UserIDKey).(int64)
 
 	// Get user's active team membership
-	query := `
-		SELECT t.id, t.name, t.owner_id, t.created_at, t.updated_at
-		FROM teams t
-		JOIN team_members tm ON t.id = tm.team_id
-		WHERE tm.user_id = ? AND tm.status = 'active'
-		LIMIT 1
-	`
-
-	var team Team
-	err := s.db.QueryRowContext(ctx, query, userID).Scan(
-		&team.ID, &team.Name, &team.OwnerID, &team.CreatedAt, &team.UpdatedAt,
-	)
-	if err == sql.ErrNoRows {
-		respondError(w, http.StatusNotFound, "no active team found", "not_found")
-		return
-	} else if err != nil {
+	entTeam, err := s.db.Client.Team.Query().
+		Where(team.HasMembersWith(
+			teammember.UserID(userID),
+			teammember.Status("active"),
+		)).
+		First(ctx)
+	if err != nil {
+		if ent.IsNotFound(err) {
+			respondError(w, http.StatusNotFound, "no active team found", "not_found")
+			return
+		}
 		s.logger.Error("Failed to get user's team", zap.Error(err), zap.Int64("user_id", userID))
 		respondError(w, http.StatusInternalServerError, "failed to fetch team", "internal_error")
 		return
 	}
 
-	respondJSON(w, http.StatusOK, team)
+	apiTeam := Team{
+		ID:        entTeam.ID,
+		Name:      entTeam.Name,
+		OwnerID:   entTeam.OwnerID,
+		CreatedAt: entTeam.CreatedAt,
+		UpdatedAt: entTeam.UpdatedAt,
+	}
+
+	respondJSON(w, http.StatusOK, apiTeam)
 }
 
 // HandleGetTeamMembers returns all members of the user's team
@@ -102,38 +111,35 @@ func (s *Server) HandleGetTeamMembers(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Get all team members
-	query := `
-		SELECT tm.id, tm.team_id, tm.user_id, u.name, u.email, tm.role, tm.status, tm.joined_at
-		FROM team_members tm
-		JOIN users u ON tm.user_id = u.id
-		WHERE tm.team_id = ?
-		ORDER BY tm.role DESC, tm.joined_at ASC
-	`
-
-	rows, err := s.db.QueryContext(ctx, query, teamID)
+	// Get all team members with user info
+	entMembers, err := s.db.Client.TeamMember.Query().
+		Where(teammember.TeamID(teamID)).
+		WithUser().
+		Order(ent.Desc(teammember.FieldRole), ent.Asc(teammember.FieldJoinedAt)).
+		All(ctx)
 	if err != nil {
 		s.logger.Error("Failed to get team members", zap.Error(err), zap.Int64("team_id", teamID))
 		respondError(w, http.StatusInternalServerError, "failed to fetch team members", "internal_error")
 		return
 	}
-	defer rows.Close()
 
-	members := []TeamMember{}
-	for rows.Next() {
-		var m TeamMember
-		if err := rows.Scan(&m.ID, &m.TeamID, &m.UserID, &m.UserName, &m.Email, &m.Role, &m.Status, &m.JoinedAt); err != nil {
-			s.logger.Error("Failed to scan team member", zap.Error(err))
-			respondError(w, http.StatusInternalServerError, "failed to scan team member", "internal_error")
-			return
+	members := make([]TeamMember, 0, len(entMembers))
+	for _, em := range entMembers {
+		m := TeamMember{
+			ID:       em.ID,
+			TeamID:   em.TeamID,
+			UserID:   em.UserID,
+			Role:     em.Role,
+			Status:   em.Status,
+			JoinedAt: em.JoinedAt,
 		}
-		members = append(members, m)
-	}
 
-	if err := rows.Err(); err != nil {
-		s.logger.Error("Error iterating team members", zap.Error(err))
-		respondError(w, http.StatusInternalServerError, "error iterating team members", "internal_error")
-		return
+		if em.Edges.User != nil {
+			m.UserName = em.Edges.User.Name
+			m.Email = em.Edges.User.Email
+		}
+
+		members = append(members, m)
 	}
 
 	respondJSON(w, http.StatusOK, members)
@@ -173,33 +179,33 @@ func (s *Server) HandleInviteTeamMember(w http.ResponseWriter, r *http.Request) 
 	}
 
 	// Check if invitee is already a member
-	var existingMemberID int64
-	checkMemberQuery := `
-		SELECT tm.id FROM team_members tm
-		JOIN users u ON tm.user_id = u.id
-		WHERE tm.team_id = ? AND u.email = ?
-	`
-	err = s.db.QueryRowContext(ctx, checkMemberQuery, teamID, req.Email).Scan(&existingMemberID)
-	if err == nil {
+	existingMember, err := s.db.Client.TeamMember.Query().
+		Where(
+			teammember.TeamID(teamID),
+			teammember.HasUserWith(user.Email(req.Email)),
+		).
+		First(ctx)
+	if err == nil && existingMember != nil {
 		respondError(w, http.StatusConflict, "user is already a team member", "already_member")
 		return
-	} else if err != sql.ErrNoRows {
+	} else if err != nil && !ent.IsNotFound(err) {
 		s.logger.Error("Failed to check existing member", zap.Error(err))
 		respondError(w, http.StatusInternalServerError, "failed to check membership", "internal_error")
 		return
 	}
 
 	// Check if there's already a pending invitation
-	var existingInvitationID int64
-	checkInvitationQuery := `
-		SELECT id FROM team_invitations
-		WHERE team_id = ? AND invitee_email = ? AND status = 'pending'
-	`
-	err = s.db.QueryRowContext(ctx, checkInvitationQuery, teamID, req.Email).Scan(&existingInvitationID)
-	if err == nil {
+	existingInv, err := s.db.Client.TeamInvitation.Query().
+		Where(
+			teaminvitation.TeamID(teamID),
+			teaminvitation.InviteeEmail(req.Email),
+			teaminvitation.Status("pending"),
+		).
+		First(ctx)
+	if err == nil && existingInv != nil {
 		respondError(w, http.StatusConflict, "pending invitation already exists", "invitation_exists")
 		return
-	} else if err != sql.ErrNoRows {
+	} else if err != nil && !ent.IsNotFound(err) {
 		s.logger.Error("Failed to check existing invitation", zap.Error(err))
 		respondError(w, http.StatusInternalServerError, "failed to check invitation", "internal_error")
 		return
@@ -207,12 +213,12 @@ func (s *Server) HandleInviteTeamMember(w http.ResponseWriter, r *http.Request) 
 
 	// Get invitee user ID if they exist
 	var inviteeID *int64
-	var tempInviteeID int64
-	getUserQuery := `SELECT id FROM users WHERE email = ?`
-	err = s.db.QueryRowContext(ctx, getUserQuery, req.Email).Scan(&tempInviteeID)
+	inviteeUser, err := s.db.Client.User.Query().
+		Where(user.Email(req.Email)).
+		Only(ctx)
 	if err == nil {
-		inviteeID = &tempInviteeID
-	} else if err != sql.ErrNoRows {
+		inviteeID = &inviteeUser.ID
+	} else if err != nil && !ent.IsNotFound(err) {
 		s.logger.Error("Failed to get invitee user", zap.Error(err))
 		respondError(w, http.StatusInternalServerError, "failed to get user", "internal_error")
 		return
@@ -227,25 +233,25 @@ func (s *Server) HandleInviteTeamMember(w http.ResponseWriter, r *http.Request) 
 	}
 
 	// Create invitation with acceptance token (expires in 7 days)
-	insertQuery := `
-		INSERT INTO team_invitations (team_id, inviter_id, invitee_email, invitee_id, status, created_at, acceptance_token, token_expires_at)
-		VALUES (?, ?, ?, ?, 'pending', CURRENT_TIMESTAMP, ?, datetime('now', '+7 days'))
-	`
-	result, err := s.db.ExecContext(ctx, insertQuery, teamID, userID, req.Email, inviteeID, acceptanceToken)
+	tokenExpires := time.Now().Add(7 * 24 * time.Hour)
+	newInv, err := s.db.Client.TeamInvitation.Create().
+		SetTeamID(teamID).
+		SetInviterID(userID).
+		SetInviteeEmail(req.Email).
+		SetNillableInviteeID(inviteeID).
+		SetStatus("pending").
+		SetAcceptanceToken(acceptanceToken).
+		SetTokenExpiresAt(tokenExpires).
+		Save(ctx)
 	if err != nil {
 		s.logger.Error("Failed to create invitation", zap.Error(err))
 		respondError(w, http.StatusInternalServerError, "failed to create invitation", "internal_error")
 		return
 	}
 
-	invitationID, err := result.LastInsertId()
-	if err != nil {
-		s.logger.Error("Failed to get invitation ID", zap.Error(err))
-		respondError(w, http.StatusInternalServerError, "failed to get invitation ID", "internal_error")
-		return
-	}
+	invitationID := newInv.ID
 
-	// Fetch created invitation
+	// Fetch created invitation with edges
 	invitation, err := s.getInvitation(ctx, invitationID)
 	if err != nil {
 		s.logger.Error("Failed to fetch created invitation", zap.Error(err))
@@ -262,12 +268,22 @@ func (s *Server) HandleInviteTeamMember(w http.ResponseWriter, r *http.Request) 
 	// Send email notification if email service is available
 	if emailSvc := s.GetEmailService(); emailSvc != nil {
 		// Get inviter name
-		var inviterName string
-		_ = s.db.QueryRowContext(ctx, `SELECT COALESCE(name, email) FROM users WHERE id = ?`, userID).Scan(&inviterName)
+		inviter, err := s.db.Client.User.Get(ctx, userID)
+		inviterName := ""
+		if err == nil {
+			if inviter.Name != nil {
+				inviterName = *inviter.Name
+			} else {
+				inviterName = inviter.Email
+			}
+		}
 
 		// Get team name
-		var teamName string
-		_ = s.db.QueryRowContext(ctx, `SELECT name FROM teams WHERE id = ?`, teamID).Scan(&teamName)
+		teamEntity, err := s.db.Client.Team.Get(ctx, teamID)
+		teamName := ""
+		if err == nil {
+			teamName = teamEntity.Name
+		}
 
 		appURL := s.getAppURL()
 
@@ -284,20 +300,24 @@ func (s *Server) HandleInviteTeamMember(w http.ResponseWriter, r *http.Request) 
 			inviteCode, codeErr := generateTeamInviteCode()
 			if codeErr == nil {
 				// Create a platform invite for this user
-				_, _ = s.db.ExecContext(ctx,
-					`INSERT INTO invites (code, inviter_id, expires_at) VALUES (?, ?, datetime('now', '+7 days'))`,
-					inviteCode, userID,
-				)
-				// Store invite code on the team invitation for retrieval during acceptance
-				_, _ = s.db.ExecContext(ctx,
-					`UPDATE team_invitations SET invite_code = ? WHERE id = ?`,
-					inviteCode, invitationID,
-				)
-				if err := emailSvc.SendProjectInvitationNewUser(ctx, req.Email, inviterName, teamName, acceptanceToken, appURL); err != nil {
-					s.logger.Warn("Failed to send team invitation email to new user",
-						zap.String("to", req.Email),
-						zap.Error(err),
-					)
+				expireTime := time.Now().Add(7 * 24 * time.Hour)
+				_, err := s.db.Client.Invite.Create().
+					SetCode(inviteCode).
+					SetInviterID(userID).
+					SetExpiresAt(expireTime).
+					Save(ctx)
+				if err == nil {
+					// Store invite code on the team invitation for retrieval during acceptance
+					_, _ = s.db.Client.TeamInvitation.UpdateOneID(invitationID).
+						SetInviteCode(inviteCode).
+						Save(ctx)
+
+					if err := emailSvc.SendProjectInvitationNewUser(ctx, req.Email, inviterName, teamName, acceptanceToken, appURL); err != nil {
+						s.logger.Warn("Failed to send team invitation email to new user",
+							zap.String("to", req.Email),
+							zap.Error(err),
+						)
+					}
 				}
 			}
 		}
@@ -315,33 +335,44 @@ func (s *Server) HandleGetMyInvitations(w http.ResponseWriter, r *http.Request) 
 	email := r.Context().Value(UserEmailKey).(string)
 
 	// Get pending invitations for this user
-	query := `
-		SELECT ti.id, ti.team_id, t.name, ti.inviter_id, u.name, ti.invitee_email,
-		       ti.invitee_id, ti.status, ti.created_at, ti.responded_at
-		FROM team_invitations ti
-		JOIN teams t ON ti.team_id = t.id
-		JOIN users u ON ti.inviter_id = u.id
-		WHERE (ti.invitee_id = ? OR ti.invitee_email = ?) AND ti.status = 'pending'
-		ORDER BY ti.created_at DESC
-	`
-
-	rows, err := s.db.QueryContext(ctx, query, userID, email)
+	entInvitations, err := s.db.Client.TeamInvitation.Query().
+		Where(
+			teaminvitation.Or(
+				teaminvitation.InviteeID(userID),
+				teaminvitation.InviteeEmail(email),
+			),
+			teaminvitation.Status("pending"),
+		).
+		WithTeam().
+		WithInviter().
+		Order(ent.Desc(teaminvitation.FieldCreatedAt)).
+		All(ctx)
 	if err != nil {
 		s.logger.Error("Failed to get invitations", zap.Error(err), zap.Int64("user_id", userID))
 		respondError(w, http.StatusInternalServerError, "failed to fetch invitations", "internal_error")
 		return
 	}
-	defer rows.Close()
 
-	invitations := []TeamInvitation{}
-	for rows.Next() {
-		var inv TeamInvitation
-		if err := rows.Scan(&inv.ID, &inv.TeamID, &inv.TeamName, &inv.InviterID, &inv.InviterName,
-			&inv.InviteeEmail, &inv.InviteeID, &inv.Status, &inv.CreatedAt, &inv.RespondedAt); err != nil {
-			s.logger.Error("Failed to scan invitation", zap.Error(err))
-			respondError(w, http.StatusInternalServerError, "failed to scan invitation", "internal_error")
-			return
+	invitations := make([]TeamInvitation, 0, len(entInvitations))
+	for _, entInv := range entInvitations {
+		inv := TeamInvitation{
+			ID:           entInv.ID,
+			TeamID:       entInv.TeamID,
+			InviterID:    entInv.InviterID,
+			InviteeEmail: entInv.InviteeEmail,
+			InviteeID:    entInv.InviteeID,
+			Status:       entInv.Status,
+			CreatedAt:    entInv.CreatedAt,
+			RespondedAt:  entInv.RespondedAt,
 		}
+
+		if entInv.Edges.Team != nil {
+			inv.TeamName = entInv.Edges.Team.Name
+		}
+		if entInv.Edges.Inviter != nil {
+			inv.InviterName = entInv.Edges.Inviter.Name
+		}
+
 		invitations = append(invitations, inv)
 	}
 
@@ -363,40 +394,31 @@ func (s *Server) HandleAcceptInvitation(w http.ResponseWriter, r *http.Request) 
 	}
 
 	// Get invitation and verify it's for this user
-	var inv struct {
-		TeamID       int64
-		InviteeEmail string
-		InviteeID    *int64
-		Status       string
-	}
-
-	query := `SELECT team_id, invitee_email, invitee_id, status FROM team_invitations WHERE id = ?`
-	err = s.db.QueryRowContext(ctx, query, invitationID).Scan(
-		&inv.TeamID, &inv.InviteeEmail, &inv.InviteeID, &inv.Status,
-	)
-	if err == sql.ErrNoRows {
-		respondError(w, http.StatusNotFound, "invitation not found", "not_found")
-		return
-	} else if err != nil {
+	entInv, err := s.db.Client.TeamInvitation.Get(ctx, invitationID)
+	if err != nil {
+		if ent.IsNotFound(err) {
+			respondError(w, http.StatusNotFound, "invitation not found", "not_found")
+			return
+		}
 		s.logger.Error("Failed to get invitation", zap.Error(err))
 		respondError(w, http.StatusInternalServerError, "failed to fetch invitation", "internal_error")
 		return
 	}
 
 	// Verify invitation is for this user
-	if inv.InviteeEmail != email && (inv.InviteeID == nil || *inv.InviteeID != userID) {
+	if entInv.InviteeEmail != email && (entInv.InviteeID == nil || *entInv.InviteeID != userID) {
 		respondError(w, http.StatusForbidden, "invitation is not for you", "forbidden")
 		return
 	}
 
 	// Check if invitation is still pending
-	if inv.Status != "pending" {
+	if entInv.Status != "pending" {
 		respondError(w, http.StatusConflict, "invitation already responded to", "already_responded")
 		return
 	}
 
-	// Begin transaction
-	tx, err := s.db.BeginTx(ctx, nil)
+	// Begin Ent transaction
+	tx, err := s.db.Client.Tx(ctx)
 	if err != nil {
 		s.logger.Error("Failed to begin transaction", zap.Error(err))
 		respondError(w, http.StatusInternalServerError, "failed to process invitation", "internal_error")
@@ -405,12 +427,12 @@ func (s *Server) HandleAcceptInvitation(w http.ResponseWriter, r *http.Request) 
 	defer tx.Rollback()
 
 	// Update invitation status
-	updateInvQuery := `
-		UPDATE team_invitations
-		SET status = 'accepted', invitee_id = ?, responded_at = CURRENT_TIMESTAMP
-		WHERE id = ?
-	`
-	_, err = tx.ExecContext(ctx, updateInvQuery, userID, invitationID)
+	now := time.Now()
+	_, err = tx.TeamInvitation.UpdateOneID(invitationID).
+		SetStatus("accepted").
+		SetInviteeID(userID).
+		SetRespondedAt(now).
+		Save(ctx)
 	if err != nil {
 		s.logger.Error("Failed to update invitation", zap.Error(err))
 		respondError(w, http.StatusInternalServerError, "failed to update invitation", "internal_error")
@@ -418,11 +440,12 @@ func (s *Server) HandleAcceptInvitation(w http.ResponseWriter, r *http.Request) 
 	}
 
 	// Add user to team
-	addMemberQuery := `
-		INSERT INTO team_members (team_id, user_id, role, status, joined_at)
-		VALUES (?, ?, 'member', 'active', CURRENT_TIMESTAMP)
-	`
-	_, err = tx.ExecContext(ctx, addMemberQuery, inv.TeamID, userID)
+	_, err = tx.TeamMember.Create().
+		SetTeamID(entInv.TeamID).
+		SetUserID(userID).
+		SetRole("member").
+		SetStatus("active").
+		Save(ctx)
 	if err != nil {
 		s.logger.Error("Failed to add team member", zap.Error(err))
 		respondError(w, http.StatusInternalServerError, "failed to add team member", "internal_error")
@@ -430,17 +453,29 @@ func (s *Server) HandleAcceptInvitation(w http.ResponseWriter, r *http.Request) 
 	}
 
 	// Add user to all existing team projects
-	addToProjectsQuery := `
-		INSERT INTO project_members (project_id, user_id, role, granted_by, granted_at)
-		SELECT p.id, ?, 'member', p.owner_id, CURRENT_TIMESTAMP
-		FROM projects p
-		WHERE p.team_id = ?
-	`
-	_, err = tx.ExecContext(ctx, addToProjectsQuery, userID, inv.TeamID)
+	// Get all projects for this team
+	projects, err := tx.Project.Query().
+		Where(project.TeamID(entInv.TeamID)).
+		All(ctx)
 	if err != nil {
-		s.logger.Error("Failed to add user to team projects", zap.Error(err))
-		respondError(w, http.StatusInternalServerError, "failed to add to team projects", "internal_error")
+		s.logger.Error("Failed to get team projects", zap.Error(err))
+		respondError(w, http.StatusInternalServerError, "failed to get team projects", "internal_error")
 		return
+	}
+
+	// Add user as member to each project
+	for _, proj := range projects {
+		_, err := tx.ProjectMember.Create().
+			SetProjectID(proj.ID).
+			SetUserID(userID).
+			SetRole("member").
+			SetGrantedBy(proj.OwnerID).
+			Save(ctx)
+		if err != nil {
+			s.logger.Error("Failed to add user to project", zap.Error(err), zap.Int64("project_id", proj.ID))
+			respondError(w, http.StatusInternalServerError, "failed to add to team projects", "internal_error")
+			return
+		}
 	}
 
 	if err := tx.Commit(); err != nil {
@@ -452,7 +487,7 @@ func (s *Server) HandleAcceptInvitation(w http.ResponseWriter, r *http.Request) 
 	s.logger.Info("Invitation accepted",
 		zap.Int64("invitation_id", invitationID),
 		zap.Int64("user_id", userID),
-		zap.Int64("team_id", inv.TeamID),
+		zap.Int64("team_id", entInv.TeamID),
 	)
 
 	respondJSON(w, http.StatusOK, map[string]string{"message": "invitation accepted"})
@@ -473,42 +508,36 @@ func (s *Server) HandleRejectInvitation(w http.ResponseWriter, r *http.Request) 
 	}
 
 	// Get invitation and verify it's for this user
-	var inv struct {
-		InviteeEmail string
-		InviteeID    *int64
-		Status       string
-	}
-
-	query := `SELECT invitee_email, invitee_id, status FROM team_invitations WHERE id = ?`
-	err = s.db.QueryRowContext(ctx, query, invitationID).Scan(&inv.InviteeEmail, &inv.InviteeID, &inv.Status)
-	if err == sql.ErrNoRows {
-		respondError(w, http.StatusNotFound, "invitation not found", "not_found")
-		return
-	} else if err != nil {
+	entInv, err := s.db.Client.TeamInvitation.Get(ctx, invitationID)
+	if err != nil {
+		if ent.IsNotFound(err) {
+			respondError(w, http.StatusNotFound, "invitation not found", "not_found")
+			return
+		}
 		s.logger.Error("Failed to get invitation", zap.Error(err))
 		respondError(w, http.StatusInternalServerError, "failed to fetch invitation", "internal_error")
 		return
 	}
 
 	// Verify invitation is for this user
-	if inv.InviteeEmail != email && (inv.InviteeID == nil || *inv.InviteeID != userID) {
+	if entInv.InviteeEmail != email && (entInv.InviteeID == nil || *entInv.InviteeID != userID) {
 		respondError(w, http.StatusForbidden, "invitation is not for you", "forbidden")
 		return
 	}
 
 	// Check if invitation is still pending
-	if inv.Status != "pending" {
+	if entInv.Status != "pending" {
 		respondError(w, http.StatusConflict, "invitation already responded to", "already_responded")
 		return
 	}
 
 	// Update invitation status
-	updateQuery := `
-		UPDATE team_invitations
-		SET status = 'rejected', invitee_id = ?, responded_at = CURRENT_TIMESTAMP
-		WHERE id = ?
-	`
-	_, err = s.db.ExecContext(ctx, updateQuery, userID, invitationID)
+	now := time.Now()
+	_, err = s.db.Client.TeamInvitation.UpdateOneID(invitationID).
+		SetStatus("rejected").
+		SetInviteeID(userID).
+		SetRespondedAt(now).
+		Save(ctx)
 	if err != nil {
 		s.logger.Error("Failed to reject invitation", zap.Error(err))
 		respondError(w, http.StatusInternalServerError, "failed to reject invitation", "internal_error")
@@ -551,28 +580,32 @@ func (s *Server) HandleRemoveTeamMember(w http.ResponseWriter, r *http.Request) 
 	}
 
 	// Get member to remove
-	var memberUserID int64
-	var memberRole string
-	getMemberQuery := `SELECT user_id, role FROM team_members WHERE id = ? AND team_id = ?`
-	err = s.db.QueryRowContext(ctx, getMemberQuery, memberID, teamID).Scan(&memberUserID, &memberRole)
-	if err == sql.ErrNoRows {
-		respondError(w, http.StatusNotFound, "member not found", "not_found")
-		return
-	} else if err != nil {
+	member, err := s.db.Client.TeamMember.Query().
+		Where(
+			teammember.ID(memberID),
+			teammember.TeamID(teamID),
+		).
+		Only(ctx)
+	if err != nil {
+		if ent.IsNotFound(err) {
+			respondError(w, http.StatusNotFound, "member not found", "not_found")
+			return
+		}
 		s.logger.Error("Failed to get member", zap.Error(err))
 		respondError(w, http.StatusInternalServerError, "failed to get member", "internal_error")
 		return
 	}
 
 	// Cannot remove team owner
-	if memberRole == "owner" {
+	if member.Role == "owner" {
 		respondError(w, http.StatusForbidden, "cannot remove team owner", "forbidden")
 		return
 	}
 
+	memberUserID := member.UserID
+
 	// Delete team member
-	deleteQuery := `DELETE FROM team_members WHERE id = ? AND team_id = ?`
-	_, err = s.db.ExecContext(ctx, deleteQuery, memberID, teamID)
+	err = s.db.Client.TeamMember.DeleteOneID(memberID).Exec(ctx)
 	if err != nil {
 		s.logger.Error("Failed to remove team member", zap.Error(err))
 		respondError(w, http.StatusInternalServerError, "failed to remove member", "internal_error")
@@ -591,40 +624,58 @@ func (s *Server) HandleRemoveTeamMember(w http.ResponseWriter, r *http.Request) 
 // Helper functions
 
 func (s *Server) getUserTeamID(ctx context.Context, userID int64) (int64, error) {
-	var teamID int64
-	query := `
-		SELECT team_id FROM team_members
-		WHERE user_id = ? AND status = 'active'
-		LIMIT 1
-	`
-	err := s.db.QueryRowContext(ctx, query, userID).Scan(&teamID)
-	return teamID, err
+	tm, err := s.db.Client.TeamMember.Query().
+		Where(
+			teammember.UserID(userID),
+			teammember.Status("active"),
+		).
+		First(ctx)
+	if err != nil {
+		return 0, err
+	}
+	return tm.TeamID, nil
 }
 
 func (s *Server) getUserTeamRole(ctx context.Context, userID, teamID int64) (string, error) {
-	var role string
-	query := `SELECT role FROM team_members WHERE user_id = ? AND team_id = ? AND status = 'active'`
-	err := s.db.QueryRowContext(ctx, query, userID, teamID).Scan(&role)
-	return role, err
+	tm, err := s.db.Client.TeamMember.Query().
+		Where(
+			teammember.UserID(userID),
+			teammember.TeamID(teamID),
+			teammember.Status("active"),
+		).
+		Only(ctx)
+	if err != nil {
+		return "", err
+	}
+	return tm.Role, nil
 }
 
 func (s *Server) getInvitation(ctx context.Context, invitationID int64) (*TeamInvitation, error) {
-	query := `
-		SELECT ti.id, ti.team_id, t.name, ti.inviter_id, u.name, ti.invitee_email,
-		       ti.invitee_id, ti.status, ti.created_at, ti.responded_at
-		FROM team_invitations ti
-		JOIN teams t ON ti.team_id = t.id
-		JOIN users u ON ti.inviter_id = u.id
-		WHERE ti.id = ?
-	`
-
-	var inv TeamInvitation
-	err := s.db.QueryRowContext(ctx, query, invitationID).Scan(
-		&inv.ID, &inv.TeamID, &inv.TeamName, &inv.InviterID, &inv.InviterName,
-		&inv.InviteeEmail, &inv.InviteeID, &inv.Status, &inv.CreatedAt, &inv.RespondedAt,
-	)
+	entInv, err := s.db.Client.TeamInvitation.Query().
+		Where(teaminvitation.ID(invitationID)).
+		WithTeam().
+		WithInviter().
+		Only(ctx)
 	if err != nil {
 		return nil, err
+	}
+
+	inv := TeamInvitation{
+		ID:           entInv.ID,
+		TeamID:       entInv.TeamID,
+		InviterID:    entInv.InviterID,
+		InviteeEmail: entInv.InviteeEmail,
+		InviteeID:    entInv.InviteeID,
+		Status:       entInv.Status,
+		CreatedAt:    entInv.CreatedAt,
+		RespondedAt:  entInv.RespondedAt,
+	}
+
+	if entInv.Edges.Team != nil {
+		inv.TeamName = entInv.Edges.Team.Name
+	}
+	if entInv.Edges.Inviter != nil {
+		inv.InviterName = entInv.Edges.Inviter.Name
 	}
 
 	return &inv, nil
@@ -657,48 +708,58 @@ func (s *Server) HandleGetInvitationByToken(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
-	var resp TokenInvitationResponse
-	var tokenExpiresAt time.Time
-	var inviteeID *int64
-	var inviteCode *string
-
-	query := `
-		SELECT ti.id, t.name, COALESCE(u.name, u.email), ti.invitee_email, ti.status,
-		       ti.invitee_id, ti.token_expires_at, ti.invite_code
-		FROM team_invitations ti
-		JOIN teams t ON ti.team_id = t.id
-		JOIN users u ON ti.inviter_id = u.id
-		WHERE ti.acceptance_token = ?
-	`
-	err := s.db.QueryRowContext(ctx, query, token).Scan(
-		&resp.InvitationID, &resp.TeamName, &resp.InviterName, &resp.InviteeEmail,
-		&resp.Status, &inviteeID, &tokenExpiresAt, &inviteCode,
-	)
-	if err == sql.ErrNoRows {
-		respondError(w, http.StatusNotFound, "invitation not found or token is invalid", "not_found")
-		return
-	} else if err != nil {
+	// Get invitation by token with team and inviter edges
+	entInv, err := s.db.Client.TeamInvitation.Query().
+		Where(teaminvitation.AcceptanceToken(token)).
+		WithTeam().
+		WithInviter().
+		Only(ctx)
+	if err != nil {
+		if ent.IsNotFound(err) {
+			respondError(w, http.StatusNotFound, "invitation not found or token is invalid", "not_found")
+			return
+		}
 		s.logger.Error("Failed to get invitation by token", zap.Error(err))
 		respondError(w, http.StatusInternalServerError, "failed to fetch invitation", "internal_error")
 		return
 	}
 
 	// Check token expiry
-	if time.Now().After(tokenExpiresAt) {
+	if entInv.TokenExpiresAt != nil && time.Now().After(*entInv.TokenExpiresAt) {
 		respondError(w, http.StatusGone, "invitation link has expired", "token_expired")
 		return
 	}
 
 	// Check if invitation is still pending
-	if resp.Status != "pending" {
-		respondError(w, http.StatusConflict, "invitation has already been "+resp.Status, "already_responded")
+	if entInv.Status != "pending" {
+		respondError(w, http.StatusConflict, "invitation has already been "+entInv.Status, "already_responded")
 		return
 	}
 
-	// Determine if user needs to sign up
-	resp.RequiresSignup = (inviteeID == nil)
-	if resp.RequiresSignup && inviteCode != nil {
-		resp.InviteCode = *inviteCode
+	// Build response
+	resp := TokenInvitationResponse{
+		InvitationID: entInv.ID,
+		InviteeEmail: entInv.InviteeEmail,
+		Status:       entInv.Status,
+		RequiresSignup: entInv.InviteeID == nil,
+	}
+
+	if entInv.Edges.Team != nil {
+		resp.TeamName = entInv.Edges.Team.Name
+	}
+
+	if entInv.Edges.Inviter != nil {
+		inviterName := ""
+		if entInv.Edges.Inviter.Name != nil {
+			inviterName = *entInv.Edges.Inviter.Name
+		} else {
+			inviterName = entInv.Edges.Inviter.Email
+		}
+		resp.InviterName = inviterName
+	}
+
+	if resp.RequiresSignup && entInv.InviteCode != nil {
+		resp.InviteCode = *entInv.InviteCode
 	}
 
 	respondJSON(w, http.StatusOK, resp)
@@ -721,52 +782,39 @@ func (s *Server) HandleAcceptInvitationByToken(w http.ResponseWriter, r *http.Re
 	}
 
 	// Find invitation by token
-	var inv struct {
-		ID           int64
-		TeamID       int64
-		InviteeEmail string
-		InviteeID    *int64
-		Status       string
-		TokenExpires time.Time
-	}
-
-	query := `
-		SELECT id, team_id, invitee_email, invitee_id, status, token_expires_at
-		FROM team_invitations
-		WHERE acceptance_token = ?
-	`
-	err := s.db.QueryRowContext(ctx, query, req.Token).Scan(
-		&inv.ID, &inv.TeamID, &inv.InviteeEmail, &inv.InviteeID, &inv.Status, &inv.TokenExpires,
-	)
-	if err == sql.ErrNoRows {
-		respondError(w, http.StatusNotFound, "invitation not found or token is invalid", "not_found")
-		return
-	} else if err != nil {
+	entInv, err := s.db.Client.TeamInvitation.Query().
+		Where(teaminvitation.AcceptanceToken(req.Token)).
+		Only(ctx)
+	if err != nil {
+		if ent.IsNotFound(err) {
+			respondError(w, http.StatusNotFound, "invitation not found or token is invalid", "not_found")
+			return
+		}
 		s.logger.Error("Failed to get invitation by token", zap.Error(err))
 		respondError(w, http.StatusInternalServerError, "failed to fetch invitation", "internal_error")
 		return
 	}
 
 	// Check token expiry
-	if time.Now().After(inv.TokenExpires) {
+	if entInv.TokenExpiresAt != nil && time.Now().After(*entInv.TokenExpiresAt) {
 		respondError(w, http.StatusGone, "invitation link has expired", "token_expired")
 		return
 	}
 
 	// Verify invitation is for this user
-	if inv.InviteeEmail != email {
+	if entInv.InviteeEmail != email {
 		respondError(w, http.StatusForbidden, "this invitation is for a different email address", "forbidden")
 		return
 	}
 
 	// Check if invitation is still pending
-	if inv.Status != "pending" {
-		respondError(w, http.StatusConflict, "invitation has already been "+inv.Status, "already_responded")
+	if entInv.Status != "pending" {
+		respondError(w, http.StatusConflict, "invitation has already been "+entInv.Status, "already_responded")
 		return
 	}
 
-	// Begin transaction
-	tx, err := s.db.BeginTx(ctx, nil)
+	// Begin Ent transaction
+	tx, err := s.db.Client.Tx(ctx)
 	if err != nil {
 		s.logger.Error("Failed to begin transaction", zap.Error(err))
 		respondError(w, http.StatusInternalServerError, "failed to process invitation", "internal_error")
@@ -775,10 +823,12 @@ func (s *Server) HandleAcceptInvitationByToken(w http.ResponseWriter, r *http.Re
 	defer tx.Rollback()
 
 	// Update invitation status
-	_, err = tx.ExecContext(ctx,
-		`UPDATE team_invitations SET status = 'accepted', invitee_id = ?, responded_at = CURRENT_TIMESTAMP WHERE id = ?`,
-		userID, inv.ID,
-	)
+	now := time.Now()
+	_, err = tx.TeamInvitation.UpdateOneID(entInv.ID).
+		SetStatus("accepted").
+		SetInviteeID(userID).
+		SetRespondedAt(now).
+		Save(ctx)
 	if err != nil {
 		s.logger.Error("Failed to update invitation", zap.Error(err))
 		respondError(w, http.StatusInternalServerError, "failed to update invitation", "internal_error")
@@ -786,10 +836,12 @@ func (s *Server) HandleAcceptInvitationByToken(w http.ResponseWriter, r *http.Re
 	}
 
 	// Add user to team
-	_, err = tx.ExecContext(ctx,
-		`INSERT INTO team_members (team_id, user_id, role, status, joined_at) VALUES (?, ?, 'member', 'active', CURRENT_TIMESTAMP)`,
-		inv.TeamID, userID,
-	)
+	_, err = tx.TeamMember.Create().
+		SetTeamID(entInv.TeamID).
+		SetUserID(userID).
+		SetRole("member").
+		SetStatus("active").
+		Save(ctx)
 	if err != nil {
 		s.logger.Error("Failed to add team member", zap.Error(err))
 		respondError(w, http.StatusInternalServerError, "failed to add team member", "internal_error")
@@ -797,16 +849,27 @@ func (s *Server) HandleAcceptInvitationByToken(w http.ResponseWriter, r *http.Re
 	}
 
 	// Add user to all existing team projects
-	_, err = tx.ExecContext(ctx,
-		`INSERT INTO project_members (project_id, user_id, role, granted_by, granted_at)
-		 SELECT p.id, ?, 'member', p.owner_id, CURRENT_TIMESTAMP
-		 FROM projects p WHERE p.team_id = ?`,
-		userID, inv.TeamID,
-	)
+	projects, err := tx.Project.Query().
+		Where(project.TeamID(entInv.TeamID)).
+		All(ctx)
 	if err != nil {
-		s.logger.Error("Failed to add user to team projects", zap.Error(err))
-		respondError(w, http.StatusInternalServerError, "failed to add to team projects", "internal_error")
+		s.logger.Error("Failed to get team projects", zap.Error(err))
+		respondError(w, http.StatusInternalServerError, "failed to get team projects", "internal_error")
 		return
+	}
+
+	for _, proj := range projects {
+		_, err := tx.ProjectMember.Create().
+			SetProjectID(proj.ID).
+			SetUserID(userID).
+			SetRole("member").
+			SetGrantedBy(proj.OwnerID).
+			Save(ctx)
+		if err != nil {
+			s.logger.Error("Failed to add user to project", zap.Error(err), zap.Int64("project_id", proj.ID))
+			respondError(w, http.StatusInternalServerError, "failed to add to team projects", "internal_error")
+			return
+		}
 	}
 
 	if err := tx.Commit(); err != nil {
@@ -816,9 +879,9 @@ func (s *Server) HandleAcceptInvitationByToken(w http.ResponseWriter, r *http.Re
 	}
 
 	s.logger.Info("Invitation accepted via token",
-		zap.Int64("invitation_id", inv.ID),
+		zap.Int64("invitation_id", entInv.ID),
 		zap.Int64("user_id", userID),
-		zap.Int64("team_id", inv.TeamID),
+		zap.Int64("team_id", entInv.TeamID),
 	)
 
 	respondJSON(w, http.StatusOK, map[string]string{"message": "invitation accepted"})

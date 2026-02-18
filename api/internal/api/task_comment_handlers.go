@@ -2,13 +2,15 @@ package api
 
 import (
 	"context"
-	"database/sql"
 	"encoding/json"
 	"net/http"
 	"strconv"
 	"time"
 
 	"github.com/go-chi/chi/v5"
+
+	"taskai/ent"
+	"taskai/ent/taskcomment"
 )
 
 type TaskComment struct {
@@ -37,16 +39,18 @@ func (s *Server) HandleListTaskComments(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	// Get task's project ID and verify user has access
-	var projectID int64
-	projectQuery := `SELECT project_id FROM tasks WHERE id = ?`
-	if err := s.db.QueryRowContext(ctx, projectQuery, taskID).Scan(&projectID); err == sql.ErrNoRows {
-		respondError(w, http.StatusNotFound, "task not found", "not_found")
-		return
-	} else if err != nil {
-		respondError(w, http.StatusInternalServerError, "failed to get task project", "internal_error")
+	// Get task and verify user has access to the project
+	taskEntity, err := s.db.Client.Task.Get(ctx, taskID)
+	if err != nil {
+		if ent.IsNotFound(err) {
+			respondError(w, http.StatusNotFound, "task not found", "not_found")
+			return
+		}
+		respondError(w, http.StatusInternalServerError, "failed to get task", "internal_error")
 		return
 	}
+
+	projectID := taskEntity.ProjectID
 
 	// Verify user has access to the project
 	hasAccess, err := s.checkProjectAccess(ctx, userID, projectID)
@@ -59,35 +63,33 @@ func (s *Server) HandleListTaskComments(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	// Fetch comments with user names
-	query := `
-		SELECT c.id, c.task_id, c.user_id, u.name as user_name, c.comment, c.created_at, c.updated_at
-		FROM task_comments c
-		LEFT JOIN users u ON c.user_id = u.id
-		WHERE c.task_id = ?
-		ORDER BY c.created_at ASC
-	`
-
-	rows, err := s.db.QueryContext(ctx, query, taskID)
+	// Fetch comments with user info
+	entComments, err := s.db.Client.TaskComment.Query().
+		Where(taskcomment.TaskID(taskID)).
+		WithUser().
+		Order(ent.Asc(taskcomment.FieldCreatedAt)).
+		All(ctx)
 	if err != nil {
 		respondError(w, http.StatusInternalServerError, "failed to fetch comments", "internal_error")
 		return
 	}
-	defer rows.Close()
 
-	comments := []TaskComment{}
-	for rows.Next() {
-		var c TaskComment
-		if err := rows.Scan(&c.ID, &c.TaskID, &c.UserID, &c.UserName, &c.Comment, &c.CreatedAt, &c.UpdatedAt); err != nil {
-			respondError(w, http.StatusInternalServerError, "failed to scan comment", "internal_error")
-			return
+	comments := make([]TaskComment, 0, len(entComments))
+	for _, ec := range entComments {
+		c := TaskComment{
+			ID:        ec.ID,
+			TaskID:    ec.TaskID,
+			UserID:    ec.UserID,
+			Comment:   ec.Comment,
+			CreatedAt: ec.CreatedAt,
+			UpdatedAt: ec.UpdatedAt,
 		}
-		comments = append(comments, c)
-	}
 
-	if err := rows.Err(); err != nil {
-		respondError(w, http.StatusInternalServerError, "error iterating comments", "internal_error")
-		return
+		if ec.Edges.User != nil {
+			c.UserName = ec.Edges.User.Name
+		}
+
+		comments = append(comments, c)
 	}
 
 	respondJSON(w, http.StatusOK, comments)
@@ -105,16 +107,18 @@ func (s *Server) HandleCreateTaskComment(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	// Get task's project ID and verify user has access
-	var projectID int64
-	projectQuery := `SELECT project_id FROM tasks WHERE id = ?`
-	if err := s.db.QueryRowContext(ctx, projectQuery, taskID).Scan(&projectID); err == sql.ErrNoRows {
-		respondError(w, http.StatusNotFound, "task not found", "not_found")
-		return
-	} else if err != nil {
-		respondError(w, http.StatusInternalServerError, "failed to get task project", "internal_error")
+	// Get task and verify user has access to the project
+	taskEntity, err := s.db.Client.Task.Get(ctx, taskID)
+	if err != nil {
+		if ent.IsNotFound(err) {
+			respondError(w, http.StatusNotFound, "task not found", "not_found")
+			return
+		}
+		respondError(w, http.StatusInternalServerError, "failed to get task", "internal_error")
 		return
 	}
+
+	projectID := taskEntity.ProjectID
 
 	// Verify user has access to the project
 	hasAccess, err := s.checkProjectAccess(ctx, userID, projectID)
@@ -143,37 +147,37 @@ func (s *Server) HandleCreateTaskComment(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	query := `
-		INSERT INTO task_comments (task_id, user_id, comment, created_at, updated_at)
-		VALUES (?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
-	`
-
-	result, err := s.db.ExecContext(ctx, query, taskID, userID, req.Comment)
+	newComment, err := s.db.Client.TaskComment.Create().
+		SetTaskID(taskID).
+		SetUserID(userID).
+		SetComment(req.Comment).
+		Save(ctx)
 	if err != nil {
 		respondError(w, http.StatusInternalServerError, "failed to create comment", "internal_error")
 		return
 	}
 
-	commentID, err := result.LastInsertId()
-	if err != nil {
-		respondError(w, http.StatusInternalServerError, "failed to get comment ID", "internal_error")
-		return
-	}
-
-	// Fetch the created comment
-	var c TaskComment
-	fetchQuery := `
-		SELECT c.id, c.task_id, c.user_id, u.name as user_name, c.comment, c.created_at, c.updated_at
-		FROM task_comments c
-		LEFT JOIN users u ON c.user_id = u.id
-		WHERE c.id = ?
-	`
-	err = s.db.QueryRowContext(ctx, fetchQuery, commentID).Scan(
-		&c.ID, &c.TaskID, &c.UserID, &c.UserName, &c.Comment, &c.CreatedAt, &c.UpdatedAt,
-	)
+	// Fetch with user info
+	commentWithUser, err := s.db.Client.TaskComment.Query().
+		Where(taskcomment.ID(newComment.ID)).
+		WithUser().
+		Only(ctx)
 	if err != nil {
 		respondError(w, http.StatusInternalServerError, "failed to fetch created comment", "internal_error")
 		return
+	}
+
+	c := TaskComment{
+		ID:        commentWithUser.ID,
+		TaskID:    commentWithUser.TaskID,
+		UserID:    commentWithUser.UserID,
+		Comment:   commentWithUser.Comment,
+		CreatedAt: commentWithUser.CreatedAt,
+		UpdatedAt: commentWithUser.UpdatedAt,
+	}
+
+	if commentWithUser.Edges.User != nil {
+		c.UserName = commentWithUser.Edges.User.Name
 	}
 
 	respondJSON(w, http.StatusCreated, c)

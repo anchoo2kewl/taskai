@@ -136,10 +136,10 @@ const (
 	// APIKeysColumn is the table column denoting the api_keys relation/edge.
 	APIKeysColumn = "user_id"
 	// UserActivitiesTable is the table that holds the user_activities relation/edge.
-	UserActivitiesTable = "user_activities"
+	UserActivitiesTable = "user_activity"
 	// UserActivitiesInverseTable is the table name for the UserActivity entity.
 	// It exists in this package in order to avoid circular dependency with the "useractivity" package.
-	UserActivitiesInverseTable = "user_activities"
+	UserActivitiesInverseTable = "user_activity"
 	// UserActivitiesColumn is the table column denoting the user_activities relation/edge.
 	UserActivitiesColumn = "user_id"
 	// TaskCommentsTable is the table that holds the task_comments relation/edge.

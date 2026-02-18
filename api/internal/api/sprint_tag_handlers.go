@@ -1,13 +1,16 @@
 package api
 
 import (
-	"database/sql"
 	"encoding/json"
 	"net/http"
 	"strconv"
 	"time"
 
 	"github.com/go-chi/chi/v5"
+
+	"taskai/ent"
+	"taskai/ent/sprint"
+	"taskai/ent/tag"
 )
 
 // Sprint represents a sprint
@@ -79,34 +82,38 @@ func (s *Server) HandleListSprints(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Query sprints that belong to the user's team
-	query := `
-		SELECT id, user_id, name, COALESCE(goal, ''), COALESCE(start_date, ''), COALESCE(end_date, ''), status, created_at, updated_at
-		FROM sprints
-		WHERE team_id = ?
-		ORDER BY
-			CASE status
-				WHEN 'active' THEN 1
-				WHEN 'planned' THEN 2
-				WHEN 'completed' THEN 3
-			END,
-			start_date DESC,
-			created_at DESC
-	`
-
-	rows, err := s.db.Query(query, teamID)
+	// We'll sort by status priority in Go after fetching
+	entSprints, err := s.db.Client.Sprint.Query().
+		Where(sprint.TeamID(teamID)).
+		Order(ent.Desc(sprint.FieldStartDate)).
+		Order(ent.Desc(sprint.FieldCreatedAt)).
+		All(ctx)
 	if err != nil {
 		http.Error(w, "Failed to fetch sprints", http.StatusInternalServerError)
 		return
 	}
-	defer rows.Close()
 
-	sprints := []Sprint{}
-	for rows.Next() {
-		var sp Sprint
-		if err := rows.Scan(&sp.ID, &sp.UserID, &sp.Name, &sp.Goal, &sp.StartDate, &sp.EndDate, &sp.Status, &sp.CreatedAt, &sp.UpdatedAt); err != nil {
-			http.Error(w, "Failed to scan sprint", http.StatusInternalServerError)
-			return
+	sprints := make([]Sprint, 0, len(entSprints))
+	for _, es := range entSprints {
+		sp := Sprint{
+			ID:        int(es.ID),
+			UserID:    int(es.UserID),
+			Name:      es.Name,
+			Status:    es.Status,
+			CreatedAt: es.CreatedAt,
+			UpdatedAt: es.UpdatedAt,
 		}
+
+		if es.Goal != nil {
+			sp.Goal = *es.Goal
+		}
+		if es.StartDate != nil {
+			sp.StartDate = es.StartDate.Format("2006-01-02")
+		}
+		if es.EndDate != nil {
+			sp.EndDate = es.EndDate.Format("2006-01-02")
+		}
+
 		sprints = append(sprints, sp)
 	}
 
@@ -151,28 +158,55 @@ func (s *Server) HandleCreateSprint(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	result, err := s.db.Exec(`
-		INSERT INTO sprints (user_id, team_id, name, goal, start_date, end_date, status)
-		VALUES (?, ?, ?, ?, ?, ?, ?)
-	`, userID, teamID, req.Name, req.Goal, req.StartDate, req.EndDate, status)
+	// Create sprint using Ent
+	builder := s.db.Client.Sprint.Create().
+		SetUserID(userID).
+		SetTeamID(teamID).
+		SetName(req.Name).
+		SetStatus(status)
 
+	if req.Goal != "" {
+		builder.SetGoal(req.Goal)
+	}
+
+	// Parse dates if provided
+	if req.StartDate != "" {
+		startDate, err := time.Parse("2006-01-02", req.StartDate)
+		if err == nil {
+			builder.SetStartDate(startDate)
+		}
+	}
+	if req.EndDate != "" {
+		endDate, err := time.Parse("2006-01-02", req.EndDate)
+		if err == nil {
+			builder.SetEndDate(endDate)
+		}
+	}
+
+	newSprint, err := builder.Save(ctx)
 	if err != nil {
 		http.Error(w, "Failed to create sprint", http.StatusInternalServerError)
 		return
 	}
 
-	sprintID, _ := result.LastInsertId()
+	// Convert to API sprint
+	sprint := Sprint{
+		ID:        int(newSprint.ID),
+		UserID:    int(newSprint.UserID),
+		Name:      newSprint.Name,
+		Status:    newSprint.Status,
+		CreatedAt: newSprint.CreatedAt,
+		UpdatedAt: newSprint.UpdatedAt,
+	}
 
-	// Fetch the created sprint
-	var sprint Sprint
-	err = s.db.QueryRow(`
-		SELECT id, user_id, name, COALESCE(goal, ''), COALESCE(start_date, ''), COALESCE(end_date, ''), status, created_at, updated_at
-		FROM sprints WHERE id = ?
-	`, sprintID).Scan(&sprint.ID, &sprint.UserID, &sprint.Name, &sprint.Goal, &sprint.StartDate, &sprint.EndDate, &sprint.Status, &sprint.CreatedAt, &sprint.UpdatedAt)
-
-	if err != nil {
-		http.Error(w, "Failed to fetch created sprint", http.StatusInternalServerError)
-		return
+	if newSprint.Goal != nil {
+		sprint.Goal = *newSprint.Goal
+	}
+	if newSprint.StartDate != nil {
+		sprint.StartDate = newSprint.StartDate.Format("2006-01-02")
+	}
+	if newSprint.EndDate != nil {
+		sprint.EndDate = newSprint.EndDate.Format("2006-01-02")
 	}
 
 	respondJSON(w, http.StatusCreated, sprint)
@@ -181,7 +215,7 @@ func (s *Server) HandleCreateSprint(w http.ResponseWriter, r *http.Request) {
 // HandleUpdateSprint updates a sprint
 func (s *Server) HandleUpdateSprint(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
-	sprintID, err := strconv.Atoi(chi.URLParam(r, "id"))
+	sprintID, err := strconv.ParseInt(chi.URLParam(r, "id"), 10, 64)
 	if err != nil {
 		http.Error(w, "Invalid sprint ID", http.StatusBadRequest)
 		return
@@ -201,17 +235,16 @@ func (s *Server) HandleUpdateSprint(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Check if sprint belongs to user's team
-	var sprintTeamID int64
-	err = s.db.QueryRow("SELECT team_id FROM sprints WHERE id = ?", sprintID).Scan(&sprintTeamID)
-	if err == sql.ErrNoRows {
-		http.Error(w, "Sprint not found", http.StatusNotFound)
-		return
-	}
+	sprintEntity, err := s.db.Client.Sprint.Get(ctx, sprintID)
 	if err != nil {
+		if ent.IsNotFound(err) {
+			http.Error(w, "Sprint not found", http.StatusNotFound)
+			return
+		}
 		http.Error(w, "Internal server error", http.StatusInternalServerError)
 		return
 	}
-	if sprintTeamID != teamID {
+	if sprintEntity.TeamID == nil || *sprintEntity.TeamID != teamID {
 		http.Error(w, "Forbidden", http.StatusForbidden)
 		return
 	}
@@ -222,25 +255,35 @@ func (s *Server) HandleUpdateSprint(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Build update query dynamically
-	updates := []string{}
-	args := []interface{}{}
+	// Build update using Ent
+	updateBuilder := s.db.Client.Sprint.UpdateOneID(sprintID)
+	hasUpdates := false
 
 	if req.Name != nil {
-		updates = append(updates, "name = ?")
-		args = append(args, *req.Name)
+		updateBuilder.SetName(*req.Name)
+		hasUpdates = true
 	}
 	if req.Goal != nil {
-		updates = append(updates, "goal = ?")
-		args = append(args, *req.Goal)
+		updateBuilder.SetGoal(*req.Goal)
+		hasUpdates = true
 	}
 	if req.StartDate != nil {
-		updates = append(updates, "start_date = ?")
-		args = append(args, *req.StartDate)
+		if *req.StartDate != "" {
+			startDate, err := time.Parse("2006-01-02", *req.StartDate)
+			if err == nil {
+				updateBuilder.SetStartDate(startDate)
+				hasUpdates = true
+			}
+		}
 	}
 	if req.EndDate != nil {
-		updates = append(updates, "end_date = ?")
-		args = append(args, *req.EndDate)
+		if *req.EndDate != "" {
+			endDate, err := time.Parse("2006-01-02", *req.EndDate)
+			if err == nil {
+				updateBuilder.SetEndDate(endDate)
+				hasUpdates = true
+			}
+		}
 	}
 	if req.Status != nil {
 		// Validate status
@@ -248,38 +291,39 @@ func (s *Server) HandleUpdateSprint(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "Invalid status", http.StatusBadRequest)
 			return
 		}
-		updates = append(updates, "status = ?")
-		args = append(args, *req.Status)
+		updateBuilder.SetStatus(*req.Status)
+		hasUpdates = true
 	}
 
-	if len(updates) == 0 {
+	if !hasUpdates {
 		http.Error(w, "No fields to update", http.StatusBadRequest)
 		return
 	}
 
-	args = append(args, sprintID)
-	query := "UPDATE sprints SET " + updates[0]
-	for i := 1; i < len(updates); i++ {
-		query += ", " + updates[i]
-	}
-	query += " WHERE id = ?"
-
-	_, err = s.db.Exec(query, args...)
+	updatedSprint, err := updateBuilder.Save(ctx)
 	if err != nil {
 		http.Error(w, "Failed to update sprint", http.StatusInternalServerError)
 		return
 	}
 
-	// Fetch updated sprint
-	var sprint Sprint
-	err = s.db.QueryRow(`
-		SELECT id, user_id, name, COALESCE(goal, ''), COALESCE(start_date, ''), COALESCE(end_date, ''), status, created_at, updated_at
-		FROM sprints WHERE id = ?
-	`, sprintID).Scan(&sprint.ID, &sprint.UserID, &sprint.Name, &sprint.Goal, &sprint.StartDate, &sprint.EndDate, &sprint.Status, &sprint.CreatedAt, &sprint.UpdatedAt)
+	// Convert to API sprint
+	sprint := Sprint{
+		ID:        int(updatedSprint.ID),
+		UserID:    int(updatedSprint.UserID),
+		Name:      updatedSprint.Name,
+		Status:    updatedSprint.Status,
+		CreatedAt: updatedSprint.CreatedAt,
+		UpdatedAt: updatedSprint.UpdatedAt,
+	}
 
-	if err != nil {
-		http.Error(w, "Failed to fetch updated sprint", http.StatusInternalServerError)
-		return
+	if updatedSprint.Goal != nil {
+		sprint.Goal = *updatedSprint.Goal
+	}
+	if updatedSprint.StartDate != nil {
+		sprint.StartDate = updatedSprint.StartDate.Format("2006-01-02")
+	}
+	if updatedSprint.EndDate != nil {
+		sprint.EndDate = updatedSprint.EndDate.Format("2006-01-02")
 	}
 
 	respondJSON(w, http.StatusOK, sprint)
@@ -288,7 +332,7 @@ func (s *Server) HandleUpdateSprint(w http.ResponseWriter, r *http.Request) {
 // HandleDeleteSprint deletes a sprint
 func (s *Server) HandleDeleteSprint(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
-	sprintID, err := strconv.Atoi(chi.URLParam(r, "id"))
+	sprintID, err := strconv.ParseInt(chi.URLParam(r, "id"), 10, 64)
 	if err != nil {
 		http.Error(w, "Invalid sprint ID", http.StatusBadRequest)
 		return
@@ -308,22 +352,21 @@ func (s *Server) HandleDeleteSprint(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Check if sprint belongs to user's team
-	var sprintTeamID int64
-	err = s.db.QueryRow("SELECT team_id FROM sprints WHERE id = ?", sprintID).Scan(&sprintTeamID)
-	if err == sql.ErrNoRows {
-		http.Error(w, "Sprint not found", http.StatusNotFound)
-		return
-	}
+	sprintEntity, err := s.db.Client.Sprint.Get(ctx, sprintID)
 	if err != nil {
+		if ent.IsNotFound(err) {
+			http.Error(w, "Sprint not found", http.StatusNotFound)
+			return
+		}
 		http.Error(w, "Internal server error", http.StatusInternalServerError)
 		return
 	}
-	if sprintTeamID != teamID {
+	if sprintEntity.TeamID == nil || *sprintEntity.TeamID != teamID {
 		http.Error(w, "Forbidden", http.StatusForbidden)
 		return
 	}
 
-	_, err = s.db.Exec("DELETE FROM sprints WHERE id = ?", sprintID)
+	err = s.db.Client.Sprint.DeleteOneID(sprintID).Exec(ctx)
 	if err != nil {
 		http.Error(w, "Failed to delete sprint", http.StatusInternalServerError)
 		return
@@ -348,28 +391,24 @@ func (s *Server) HandleListTags(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	query := `
-		SELECT id, user_id, name, color, created_at
-		FROM tags
-		WHERE team_id = ?
-		ORDER BY name ASC
-	`
-
-	rows, err := s.db.Query(query, teamID)
+	entTags, err := s.db.Client.Tag.Query().
+		Where(tag.TeamID(teamID)).
+		Order(ent.Asc(tag.FieldName)).
+		All(ctx)
 	if err != nil {
 		http.Error(w, "Failed to fetch tags", http.StatusInternalServerError)
 		return
 	}
-	defer rows.Close()
 
-	tags := []Tag{}
-	for rows.Next() {
-		var tag Tag
-		if err := rows.Scan(&tag.ID, &tag.UserID, &tag.Name, &tag.Color, &tag.CreatedAt); err != nil {
-			http.Error(w, "Failed to scan tag", http.StatusInternalServerError)
-			return
-		}
-		tags = append(tags, tag)
+	tags := make([]Tag, 0, len(entTags))
+	for _, et := range entTags {
+		tags = append(tags, Tag{
+			ID:        int(et.ID),
+			UserID:    int(et.UserID),
+			Name:      et.Name,
+			Color:     et.Color,
+			CreatedAt: et.CreatedAt,
+		})
 	}
 
 	respondJSON(w, http.StatusOK, tags)
@@ -407,37 +446,35 @@ func (s *Server) HandleCreateTag(w http.ResponseWriter, r *http.Request) {
 		color = "#3B82F6"
 	}
 
-	result, err := s.db.Exec(`
-		INSERT INTO tags (user_id, team_id, name, color)
-		VALUES (?, ?, ?, ?)
-	`, userID, teamID, req.Name, color)
+	newTag, err := s.db.Client.Tag.Create().
+		SetUserID(userID).
+		SetTeamID(teamID).
+		SetName(req.Name).
+		SetColor(color).
+		Save(ctx)
 
 	if err != nil {
-		http.Error(w, "Failed to create tag. Tag name must be unique.", http.StatusConflict)
+		if ent.IsConstraintError(err) {
+			http.Error(w, "Failed to create tag. Tag name must be unique.", http.StatusConflict)
+			return
+		}
+		http.Error(w, "Failed to create tag", http.StatusInternalServerError)
 		return
 	}
 
-	tagID, _ := result.LastInsertId()
-
-	// Fetch the created tag
-	var tag Tag
-	err = s.db.QueryRow(`
-		SELECT id, user_id, name, color, created_at
-		FROM tags WHERE id = ?
-	`, tagID).Scan(&tag.ID, &tag.UserID, &tag.Name, &tag.Color, &tag.CreatedAt)
-
-	if err != nil {
-		http.Error(w, "Failed to fetch created tag", http.StatusInternalServerError)
-		return
-	}
-
-	respondJSON(w, http.StatusCreated, tag)
+	respondJSON(w, http.StatusCreated, Tag{
+		ID:        int(newTag.ID),
+		UserID:    int(newTag.UserID),
+		Name:      newTag.Name,
+		Color:     newTag.Color,
+		CreatedAt: newTag.CreatedAt,
+	})
 }
 
 // HandleUpdateTag updates a tag
 func (s *Server) HandleUpdateTag(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
-	tagID, err := strconv.Atoi(chi.URLParam(r, "id"))
+	tagID, err := strconv.ParseInt(chi.URLParam(r, "id"), 10, 64)
 	if err != nil {
 		http.Error(w, "Invalid tag ID", http.StatusBadRequest)
 		return
@@ -457,17 +494,16 @@ func (s *Server) HandleUpdateTag(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Check if tag belongs to user's team
-	var tagTeamID int64
-	err = s.db.QueryRow("SELECT team_id FROM tags WHERE id = ?", tagID).Scan(&tagTeamID)
-	if err == sql.ErrNoRows {
-		http.Error(w, "Tag not found", http.StatusNotFound)
-		return
-	}
+	tagEntity, err := s.db.Client.Tag.Get(ctx, tagID)
 	if err != nil {
+		if ent.IsNotFound(err) {
+			http.Error(w, "Tag not found", http.StatusNotFound)
+			return
+		}
 		http.Error(w, "Internal server error", http.StatusInternalServerError)
 		return
 	}
-	if tagTeamID != teamID {
+	if tagEntity.TeamID == nil || *tagEntity.TeamID != teamID {
 		http.Error(w, "Forbidden", http.StatusForbidden)
 		return
 	}
@@ -478,56 +514,43 @@ func (s *Server) HandleUpdateTag(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Build update query dynamically
-	updates := []string{}
-	args := []interface{}{}
+	// Build update using Ent
+	updateBuilder := s.db.Client.Tag.UpdateOneID(tagID)
+	hasUpdates := false
 
 	if req.Name != nil {
-		updates = append(updates, "name = ?")
-		args = append(args, *req.Name)
+		updateBuilder.SetName(*req.Name)
+		hasUpdates = true
 	}
 	if req.Color != nil {
-		updates = append(updates, "color = ?")
-		args = append(args, *req.Color)
+		updateBuilder.SetColor(*req.Color)
+		hasUpdates = true
 	}
 
-	if len(updates) == 0 {
+	if !hasUpdates {
 		http.Error(w, "No fields to update", http.StatusBadRequest)
 		return
 	}
 
-	args = append(args, tagID)
-	query := "UPDATE tags SET " + updates[0]
-	for i := 1; i < len(updates); i++ {
-		query += ", " + updates[i]
-	}
-	query += " WHERE id = ?"
-
-	_, err = s.db.Exec(query, args...)
+	updatedTag, err := updateBuilder.Save(ctx)
 	if err != nil {
 		http.Error(w, "Failed to update tag", http.StatusInternalServerError)
 		return
 	}
 
-	// Fetch updated tag
-	var tag Tag
-	err = s.db.QueryRow(`
-		SELECT id, user_id, name, color, created_at
-		FROM tags WHERE id = ?
-	`, tagID).Scan(&tag.ID, &tag.UserID, &tag.Name, &tag.Color, &tag.CreatedAt)
-
-	if err != nil {
-		http.Error(w, "Failed to fetch updated tag", http.StatusInternalServerError)
-		return
-	}
-
-	respondJSON(w, http.StatusOK, tag)
+	respondJSON(w, http.StatusOK, Tag{
+		ID:        int(updatedTag.ID),
+		UserID:    int(updatedTag.UserID),
+		Name:      updatedTag.Name,
+		Color:     updatedTag.Color,
+		CreatedAt: updatedTag.CreatedAt,
+	})
 }
 
 // HandleDeleteTag deletes a tag
 func (s *Server) HandleDeleteTag(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
-	tagID, err := strconv.Atoi(chi.URLParam(r, "id"))
+	tagID, err := strconv.ParseInt(chi.URLParam(r, "id"), 10, 64)
 	if err != nil {
 		http.Error(w, "Invalid tag ID", http.StatusBadRequest)
 		return
@@ -547,22 +570,21 @@ func (s *Server) HandleDeleteTag(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Check if tag belongs to user's team
-	var tagTeamID int64
-	err = s.db.QueryRow("SELECT team_id FROM tags WHERE id = ?", tagID).Scan(&tagTeamID)
-	if err == sql.ErrNoRows {
-		http.Error(w, "Tag not found", http.StatusNotFound)
-		return
-	}
+	tagEntity, err := s.db.Client.Tag.Get(ctx, tagID)
 	if err != nil {
+		if ent.IsNotFound(err) {
+			http.Error(w, "Tag not found", http.StatusNotFound)
+			return
+		}
 		http.Error(w, "Internal server error", http.StatusInternalServerError)
 		return
 	}
-	if tagTeamID != teamID {
+	if tagEntity.TeamID == nil || *tagEntity.TeamID != teamID {
 		http.Error(w, "Forbidden", http.StatusForbidden)
 		return
 	}
 
-	_, err = s.db.Exec("DELETE FROM tags WHERE id = ?", tagID)
+	err = s.db.Client.Tag.DeleteOneID(tagID).Exec(ctx)
 	if err != nil {
 		http.Error(w, "Failed to delete tag", http.StatusInternalServerError)
 		return

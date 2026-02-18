@@ -2,7 +2,6 @@ package api
 
 import (
 	"context"
-	"database/sql"
 	"encoding/json"
 	"net/http"
 	"strconv"
@@ -10,6 +9,9 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"go.uber.org/zap"
+
+	"taskai/ent"
+	"taskai/ent/swimlane"
 )
 
 type SwimLane struct {
@@ -63,36 +65,28 @@ func (s *Server) HandleListSwimLanes(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	query := `
-		SELECT id, project_id, name, color, position, status_category, created_at, updated_at
-		FROM swim_lanes
-		WHERE project_id = ?
-		ORDER BY position ASC
-	`
-
-	rows, err := s.db.QueryContext(ctx, query, projectID)
+	entSwimLanes, err := s.db.Client.SwimLane.Query().
+		Where(swimlane.ProjectID(projectID)).
+		Order(ent.Asc(swimlane.FieldPosition)).
+		All(ctx)
 	if err != nil {
 		s.logger.Error("Failed to fetch swim lanes", zap.Error(err), zap.Int64("projectID", projectID))
 		respondError(w, http.StatusInternalServerError, "failed to fetch swim lanes", "internal_error")
 		return
 	}
-	defer rows.Close()
 
-	swimLanes := []SwimLane{}
-	for rows.Next() {
-		var sl SwimLane
-		if err := rows.Scan(&sl.ID, &sl.ProjectID, &sl.Name, &sl.Color, &sl.Position, &sl.StatusCategory, &sl.CreatedAt, &sl.UpdatedAt); err != nil {
-			s.logger.Error("Failed to scan swim lane", zap.Error(err))
-			respondError(w, http.StatusInternalServerError, "failed to scan swim lane", "internal_error")
-			return
-		}
-		swimLanes = append(swimLanes, sl)
-	}
-
-	if err := rows.Err(); err != nil {
-		s.logger.Error("Error iterating swim lanes", zap.Error(err))
-		respondError(w, http.StatusInternalServerError, "error iterating swim lanes", "internal_error")
-		return
+	swimLanes := make([]SwimLane, 0, len(entSwimLanes))
+	for _, esl := range entSwimLanes {
+		swimLanes = append(swimLanes, SwimLane{
+			ID:             esl.ID,
+			ProjectID:      esl.ProjectID,
+			Name:           esl.Name,
+			Color:          esl.Color,
+			Position:       esl.Position,
+			StatusCategory: esl.StatusCategory,
+			CreatedAt:      esl.CreatedAt,
+			UpdatedAt:      esl.UpdatedAt,
+		})
 	}
 
 	respondJSON(w, http.StatusOK, swimLanes)
@@ -155,9 +149,10 @@ func (s *Server) HandleCreateSwimLane(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Check swim lane count limit (max 6)
-	var count int
-	countQuery := `SELECT COUNT(*) FROM swim_lanes WHERE project_id = ?`
-	if err := s.db.QueryRowContext(ctx, countQuery, projectID).Scan(&count); err != nil {
+	count, err := s.db.Client.SwimLane.Query().
+		Where(swimlane.ProjectID(projectID)).
+		Count(ctx)
+	if err != nil {
 		s.logger.Error("Failed to count swim lanes", zap.Error(err), zap.Int64("projectID", projectID))
 		respondError(w, http.StatusInternalServerError, "failed to count swim lanes", "internal_error")
 		return
@@ -172,42 +167,31 @@ func (s *Server) HandleCreateSwimLane(w http.ResponseWriter, r *http.Request) {
 		req.Position = 0
 	}
 
-	query := `
-		INSERT INTO swim_lanes (project_id, name, color, position, status_category, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
-	`
-
-	result, err := s.db.ExecContext(ctx, query, projectID, req.Name, req.Color, req.Position, req.StatusCategory)
+	newSwimLane, err := s.db.Client.SwimLane.Create().
+		SetProjectID(projectID).
+		SetName(req.Name).
+		SetColor(req.Color).
+		SetPosition(req.Position).
+		SetStatusCategory(req.StatusCategory).
+		Save(ctx)
 	if err != nil {
 		s.logger.Error("Failed to create swim lane", zap.Error(err), zap.Int64("projectID", projectID), zap.String("name", req.Name))
 		respondError(w, http.StatusInternalServerError, "failed to create swim lane", "internal_error")
 		return
 	}
 
-	swimLaneID, err := result.LastInsertId()
-	if err != nil {
-		s.logger.Error("Failed to get swim lane ID", zap.Error(err))
-		respondError(w, http.StatusInternalServerError, "failed to get swim lane ID", "internal_error")
-		return
+	sl := SwimLane{
+		ID:             newSwimLane.ID,
+		ProjectID:      newSwimLane.ProjectID,
+		Name:           newSwimLane.Name,
+		Color:          newSwimLane.Color,
+		Position:       newSwimLane.Position,
+		StatusCategory: newSwimLane.StatusCategory,
+		CreatedAt:      newSwimLane.CreatedAt,
+		UpdatedAt:      newSwimLane.UpdatedAt,
 	}
 
-	// Fetch the created swim lane
-	var sl SwimLane
-	fetchQuery := `
-		SELECT id, project_id, name, color, position, status_category, created_at, updated_at
-		FROM swim_lanes
-		WHERE id = ?
-	`
-	err = s.db.QueryRowContext(ctx, fetchQuery, swimLaneID).Scan(
-		&sl.ID, &sl.ProjectID, &sl.Name, &sl.Color, &sl.Position, &sl.StatusCategory, &sl.CreatedAt, &sl.UpdatedAt,
-	)
-	if err != nil {
-		s.logger.Error("Failed to fetch created swim lane", zap.Error(err), zap.Int64("swimLaneID", swimLaneID))
-		respondError(w, http.StatusInternalServerError, "failed to fetch created swim lane", "internal_error")
-		return
-	}
-
-	s.logger.Info("Swim lane created", zap.Int64("swimLaneID", swimLaneID), zap.Int64("projectID", projectID), zap.String("name", req.Name))
+	s.logger.Info("Swim lane created", zap.Int64("swimLaneID", sl.ID), zap.Int64("projectID", projectID), zap.String("name", req.Name))
 	respondJSON(w, http.StatusCreated, sl)
 }
 
@@ -231,17 +215,19 @@ func (s *Server) HandleUpdateSwimLane(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Get swim lane's project ID and verify user has access
-	var projectID int64
-	projectQuery := `SELECT project_id FROM swim_lanes WHERE id = ?`
-	if err := s.db.QueryRowContext(ctx, projectQuery, swimLaneID).Scan(&projectID); err == sql.ErrNoRows {
-		respondError(w, http.StatusNotFound, "swim lane not found", "not_found")
-		return
-	} else if err != nil {
-		s.logger.Error("Failed to get swim lane project", zap.Error(err), zap.Int64("swimLaneID", swimLaneID))
-		respondError(w, http.StatusInternalServerError, "failed to get swim lane project", "internal_error")
+	// Get swim lane and verify user has access
+	swimLaneEntity, err := s.db.Client.SwimLane.Get(ctx, swimLaneID)
+	if err != nil {
+		if ent.IsNotFound(err) {
+			respondError(w, http.StatusNotFound, "swim lane not found", "not_found")
+			return
+		}
+		s.logger.Error("Failed to get swim lane", zap.Error(err), zap.Int64("swimLaneID", swimLaneID))
+		respondError(w, http.StatusInternalServerError, "failed to get swim lane", "internal_error")
 		return
 	}
+
+	projectID := swimLaneEntity.ProjectID
 
 	// Verify user has access to the project
 	hasAccess, err := s.checkProjectAccess(ctx, userID, projectID)
@@ -256,9 +242,8 @@ func (s *Server) HandleUpdateSwimLane(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Build update query dynamically
-	query := "UPDATE swim_lanes SET updated_at = CURRENT_TIMESTAMP"
-	args := []interface{}{}
+	// Build update using Ent
+	updateBuilder := s.db.Client.SwimLane.UpdateOneID(swimLaneID)
 
 	if req.Name != nil {
 		if *req.Name == "" {
@@ -269,13 +254,11 @@ func (s *Server) HandleUpdateSwimLane(w http.ResponseWriter, r *http.Request) {
 			respondError(w, http.StatusBadRequest, "swim lane name is too long (max 50 characters)", "invalid_input")
 			return
 		}
-		query += ", name = ?"
-		args = append(args, *req.Name)
+		updateBuilder.SetName(*req.Name)
 	}
 
 	if req.Color != nil {
-		query += ", color = ?"
-		args = append(args, *req.Color)
+		updateBuilder.SetColor(*req.Color)
 	}
 
 	if req.Position != nil {
@@ -283,8 +266,7 @@ func (s *Server) HandleUpdateSwimLane(w http.ResponseWriter, r *http.Request) {
 			respondError(w, http.StatusBadRequest, "position cannot be negative", "invalid_input")
 			return
 		}
-		query += ", position = ?"
-		args = append(args, *req.Position)
+		updateBuilder.SetPosition(*req.Position)
 	}
 
 	if req.StatusCategory != nil {
@@ -292,34 +274,25 @@ func (s *Server) HandleUpdateSwimLane(w http.ResponseWriter, r *http.Request) {
 			respondError(w, http.StatusBadRequest, "invalid status_category (must be: todo, in_progress, or done)", "invalid_input")
 			return
 		}
-		query += ", status_category = ?"
-		args = append(args, *req.StatusCategory)
+		updateBuilder.SetStatusCategory(*req.StatusCategory)
 	}
 
-	query += " WHERE id = ?"
-	args = append(args, swimLaneID)
-
-	_, err = s.db.ExecContext(ctx, query, args...)
+	updatedSwimLane, err := updateBuilder.Save(ctx)
 	if err != nil {
 		s.logger.Error("Failed to update swim lane", zap.Error(err), zap.Int64("swimLaneID", swimLaneID))
 		respondError(w, http.StatusInternalServerError, "failed to update swim lane", "internal_error")
 		return
 	}
 
-	// Fetch the updated swim lane
-	var sl SwimLane
-	fetchQuery := `
-		SELECT id, project_id, name, color, position, status_category, created_at, updated_at
-		FROM swim_lanes
-		WHERE id = ?
-	`
-	err = s.db.QueryRowContext(ctx, fetchQuery, swimLaneID).Scan(
-		&sl.ID, &sl.ProjectID, &sl.Name, &sl.Color, &sl.Position, &sl.StatusCategory, &sl.CreatedAt, &sl.UpdatedAt,
-	)
-	if err != nil {
-		s.logger.Error("Failed to fetch updated swim lane", zap.Error(err), zap.Int64("swimLaneID", swimLaneID))
-		respondError(w, http.StatusInternalServerError, "failed to fetch updated swim lane", "internal_error")
-		return
+	sl := SwimLane{
+		ID:             updatedSwimLane.ID,
+		ProjectID:      updatedSwimLane.ProjectID,
+		Name:           updatedSwimLane.Name,
+		Color:          updatedSwimLane.Color,
+		Position:       updatedSwimLane.Position,
+		StatusCategory: updatedSwimLane.StatusCategory,
+		CreatedAt:      updatedSwimLane.CreatedAt,
+		UpdatedAt:      updatedSwimLane.UpdatedAt,
 	}
 
 	s.logger.Info("Swim lane updated", zap.Int64("swimLaneID", swimLaneID), zap.Int64("projectID", projectID))
@@ -339,17 +312,19 @@ func (s *Server) HandleDeleteSwimLane(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Get swim lane's project ID and verify user has access
-	var projectID int64
-	projectQuery := `SELECT project_id FROM swim_lanes WHERE id = ?`
-	if err := s.db.QueryRowContext(ctx, projectQuery, swimLaneID).Scan(&projectID); err == sql.ErrNoRows {
-		respondError(w, http.StatusNotFound, "swim lane not found", "not_found")
-		return
-	} else if err != nil {
-		s.logger.Error("Failed to get swim lane project", zap.Error(err), zap.Int64("swimLaneID", swimLaneID))
-		respondError(w, http.StatusInternalServerError, "failed to get swim lane project", "internal_error")
+	// Get swim lane and verify user has access
+	swimLaneEntity, err := s.db.Client.SwimLane.Get(ctx, swimLaneID)
+	if err != nil {
+		if ent.IsNotFound(err) {
+			respondError(w, http.StatusNotFound, "swim lane not found", "not_found")
+			return
+		}
+		s.logger.Error("Failed to get swim lane", zap.Error(err), zap.Int64("swimLaneID", swimLaneID))
+		respondError(w, http.StatusInternalServerError, "failed to get swim lane", "internal_error")
 		return
 	}
+
+	projectID := swimLaneEntity.ProjectID
 
 	// Verify user has access to the project
 	hasAccess, err := s.checkProjectAccess(ctx, userID, projectID)
@@ -365,9 +340,10 @@ func (s *Server) HandleDeleteSwimLane(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Check minimum swim lanes (need at least 2)
-	var count int
-	countQuery := `SELECT COUNT(*) FROM swim_lanes WHERE project_id = ?`
-	if err := s.db.QueryRowContext(ctx, countQuery, projectID).Scan(&count); err != nil {
+	count, err := s.db.Client.SwimLane.Query().
+		Where(swimlane.ProjectID(projectID)).
+		Count(ctx)
+	if err != nil {
 		s.logger.Error("Failed to count swim lanes", zap.Error(err), zap.Int64("projectID", projectID))
 		respondError(w, http.StatusInternalServerError, "failed to count swim lanes", "internal_error")
 		return
@@ -377,23 +353,10 @@ func (s *Server) HandleDeleteSwimLane(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	query := `DELETE FROM swim_lanes WHERE id = ?`
-	result, err := s.db.ExecContext(ctx, query, swimLaneID)
+	err = s.db.Client.SwimLane.DeleteOneID(swimLaneID).Exec(ctx)
 	if err != nil {
 		s.logger.Error("Failed to delete swim lane", zap.Error(err), zap.Int64("swimLaneID", swimLaneID))
 		respondError(w, http.StatusInternalServerError, "failed to delete swim lane", "internal_error")
-		return
-	}
-
-	rowsAffected, err := result.RowsAffected()
-	if err != nil {
-		s.logger.Error("Failed to verify deletion", zap.Error(err))
-		respondError(w, http.StatusInternalServerError, "failed to verify deletion", "internal_error")
-		return
-	}
-
-	if rowsAffected == 0 {
-		respondError(w, http.StatusNotFound, "swim lane not found", "not_found")
 		return
 	}
 

@@ -4,6 +4,8 @@ import (
 	"time"
 
 	"entgo.io/ent"
+	"entgo.io/ent/dialect/entsql"
+	"entgo.io/ent/schema"
 	"entgo.io/ent/schema/edge"
 	"entgo.io/ent/schema/field"
 	"entgo.io/ent/schema/index"
@@ -12,6 +14,13 @@ import (
 // UserActivity holds the schema definition for the UserActivity entity.
 type UserActivity struct {
 	ent.Schema
+}
+
+// Annotations of the UserActivity.
+func (UserActivity) Annotations() []schema.Annotation {
+	return []schema.Annotation{
+		entsql.Annotation{Table: "user_activity"},
+	}
 }
 
 // Fields of the UserActivity.

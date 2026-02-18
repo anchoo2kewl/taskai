@@ -223,8 +223,8 @@ func TestGetAPIKeysByUserID_Empty(t *testing.T) {
 		t.Fatalf("GetAPIKeysByUserID failed: %v", err)
 	}
 
-	if keys != nil {
-		t.Errorf("Expected nil keys for user with no API keys, got %v", keys)
+	if len(keys) != 0 {
+		t.Errorf("Expected empty keys for user with no API keys, got %v", keys)
 	}
 }
 

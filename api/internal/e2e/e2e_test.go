@@ -245,10 +245,11 @@ func ParseJSON(resp *http.Response, v interface{}) error {
 }
 
 // Signup creates a new user
-func (ts *TestServer) Signup(email, password string) (string, map[string]interface{}, error) {
+func (ts *TestServer) Signup(email, password, inviteCode string) (string, map[string]interface{}, error) {
 	body := map[string]string{
-		"email":    email,
-		"password": password,
+		"email":       email,
+		"password":    password,
+		"invite_code": inviteCode,
 	}
 
 	resp, err := ts.DoRequest("POST", "/api/auth/signup", body, "")
@@ -271,6 +272,42 @@ func (ts *TestServer) Signup(email, password string) (string, map[string]interfa
 	}
 
 	return token, result, nil
+}
+
+// CreateTestInvite creates a test invite code in the database
+func (ts *TestServer) CreateTestInvite() (string, error) {
+	// Create a test admin user first
+	ctx := context.Background()
+
+	// Insert directly into database to bypass invite requirement
+	_, err := ts.DB.ExecContext(ctx, `
+		INSERT INTO users (email, password_hash, is_admin, invite_count, created_at, updated_at)
+		VALUES (?, ?, 1, 999, datetime('now'), datetime('now'))
+	`, "admin@test.com", "$2a$10$dummy_hash_for_testing")
+	if err != nil {
+		return "", fmt.Errorf("failed to create admin user: %w", err)
+	}
+
+	// Get the admin user ID
+	var adminID int64
+	err = ts.DB.QueryRowContext(ctx, "SELECT id FROM users WHERE email = ?", "admin@test.com").Scan(&adminID)
+	if err != nil {
+		return "", fmt.Errorf("failed to get admin ID: %w", err)
+	}
+
+	// Create invite code
+	inviteCode := "test-invite-code-123"
+	expiresAt := time.Now().Add(24 * time.Hour)
+
+	_, err = ts.DB.ExecContext(ctx, `
+		INSERT INTO invites (code, inviter_id, expires_at, created_at)
+		VALUES (?, ?, ?, datetime('now'))
+	`, inviteCode, adminID, expiresAt)
+	if err != nil {
+		return "", fmt.Errorf("failed to create invite: %w", err)
+	}
+
+	return inviteCode, nil
 }
 
 // Login authenticates a user
@@ -357,6 +394,12 @@ func TestCompleteUserJourney(t *testing.T) {
 	ts := NewTestServer(t)
 	defer ts.Close()
 
+	// Create test invite code
+	inviteCode, err := ts.CreateTestInvite()
+	if err != nil {
+		t.Fatalf("Failed to create test invite: %v", err)
+	}
+
 	// Test data
 	email := fmt.Sprintf("test-%d@example.com", time.Now().UnixNano())
 	password := "TestPassword123!"
@@ -365,7 +408,7 @@ func TestCompleteUserJourney(t *testing.T) {
 	var userID float64
 
 	t.Run("Signup", func(t *testing.T) {
-		tok, result, err := ts.Signup(email, password)
+		tok, result, err := ts.Signup(email, password, inviteCode)
 		if err != nil {
 			t.Fatalf("Signup failed: %v", err)
 		}
@@ -640,17 +683,31 @@ func TestAuthorizationChecks(t *testing.T) {
 	ts := NewTestServer(t)
 	defer ts.Close()
 
+	// Create test invite codes
+	inviteCode1, err := ts.CreateTestInvite()
+	if err != nil {
+		t.Fatalf("Failed to create test invite 1: %v", err)
+	}
+
 	// Create two users
 	user1Email := fmt.Sprintf("user1-%d@example.com", time.Now().UnixNano())
 	user2Email := fmt.Sprintf("user2-%d@example.com", time.Now().UnixNano()+1)
 	password := "TestPassword123!"
 
-	token1, _, err := ts.Signup(user1Email, password)
+	token1, _, err := ts.Signup(user1Email, password, inviteCode1)
 	if err != nil {
 		t.Fatalf("User 1 signup failed: %v", err)
 	}
 
-	token2, _, err := ts.Signup(user2Email, password)
+	// Create second invite for user 2
+	inviteCode2 := inviteCode1 + "-2"
+	ctx := context.Background()
+	var adminID int64
+	ts.DB.QueryRowContext(ctx, "SELECT id FROM users WHERE email = ?", "admin@test.com").Scan(&adminID)
+	ts.DB.ExecContext(ctx, `INSERT INTO invites (code, inviter_id, expires_at, created_at) VALUES (?, ?, ?, datetime('now'))`,
+		inviteCode2, adminID, time.Now().Add(24*time.Hour))
+
+	token2, _, err := ts.Signup(user2Email, password, inviteCode2)
 	if err != nil {
 		t.Fatalf("User 2 signup failed: %v", err)
 	}
@@ -707,10 +764,16 @@ func TestValidationErrors(t *testing.T) {
 	ts := NewTestServer(t)
 	defer ts.Close()
 
+	// Create test invite code
+	inviteCode, err := ts.CreateTestInvite()
+	if err != nil {
+		t.Fatalf("Failed to create test invite: %v", err)
+	}
+
 	email := fmt.Sprintf("validation-test-%d@example.com", time.Now().UnixNano())
 	password := "TestPassword123!"
 
-	token, _, err := ts.Signup(email, password)
+	token, _, err := ts.Signup(email, password, inviteCode)
 	if err != nil {
 		t.Fatalf("Signup failed: %v", err)
 	}
@@ -760,16 +823,30 @@ func TestTeamProjectAccess(t *testing.T) {
 	ts := NewTestServer(t)
 	defer ts.Close()
 
+	// Create test invite codes
+	inviteCode1, err := ts.CreateTestInvite()
+	if err != nil {
+		t.Fatalf("Failed to create test invite 1: %v", err)
+	}
+
 	// Create first user
 	user1Email := fmt.Sprintf("user1-%d@example.com", time.Now().UnixNano())
-	user1Token, _, err := ts.Signup(user1Email, "password123")
+	user1Token, _, err := ts.Signup(user1Email, "password123", inviteCode1)
 	if err != nil {
 		t.Fatalf("Signup user1 failed: %v", err)
 	}
 
+	// Create second invite for user 2
+	inviteCode2 := inviteCode1 + "-team"
+	ctx := context.Background()
+	var adminID int64
+	ts.DB.QueryRowContext(ctx, "SELECT id FROM users WHERE email = ?", "admin@test.com").Scan(&adminID)
+	ts.DB.ExecContext(ctx, `INSERT INTO invites (code, inviter_id, expires_at, created_at) VALUES (?, ?, ?, datetime('now'))`,
+		inviteCode2, adminID, time.Now().Add(24*time.Hour))
+
 	// Create a second user
 	user2Email := fmt.Sprintf("user2-%d@example.com", time.Now().UnixNano())
-	user2Token, _, err := ts.Signup(user2Email, "password123")
+	user2Token, _, err := ts.Signup(user2Email, "password123", inviteCode2)
 	if err != nil {
 		t.Fatalf("Signup user2 failed: %v", err)
 	}

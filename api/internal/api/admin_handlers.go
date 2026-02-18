@@ -8,6 +8,10 @@ import (
 	"time"
 
 	"go.uber.org/zap"
+
+	"taskai/ent"
+	"taskai/ent/user"
+	"taskai/ent/useractivity"
 )
 
 // UserWithStats represents a user with admin and activity stats
@@ -50,61 +54,66 @@ func (s *Server) HandleGetUsers(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
 	defer cancel()
 
-	query := `
-		SELECT
-			u.id,
-			u.email,
-			u.is_admin,
-			u.created_at,
-			COALESCE(login_stats.login_count, 0) as login_count,
-			login_stats.last_login_at,
-			login_stats.last_login_ip,
-			COALESCE(failed_stats.failed_count, 0) as failed_attempts,
-			u.invite_count
-		FROM users u
-		LEFT JOIN (
-			SELECT user_id, COUNT(*) as login_count, MAX(created_at) as last_login_at,
-				(SELECT ip_address FROM user_activity WHERE user_id = ua.user_id AND activity_type = 'login' ORDER BY created_at DESC LIMIT 1) as last_login_ip
-			FROM user_activity ua
-			WHERE activity_type = 'login'
-			GROUP BY user_id
-		) login_stats ON u.id = login_stats.user_id
-		LEFT JOIN (
-			SELECT user_id, COUNT(*) as failed_count
-			FROM user_activity
-			WHERE activity_type = 'failed_login'
-			GROUP BY user_id
-		) failed_stats ON u.id = failed_stats.user_id
-		ORDER BY u.created_at DESC
-	`
-
-	rows, err := s.db.QueryContext(ctx, query)
+	// Get all users
+	entUsers, err := s.db.Client.User.Query().
+		Order(ent.Desc(user.FieldCreatedAt)).
+		All(ctx)
 	if err != nil {
 		s.logger.Error("Failed to query users", zap.Error(err))
 		respondError(w, http.StatusInternalServerError, "failed to get users", "internal_error")
 		return
 	}
-	defer rows.Close()
 
-	users := []UserWithStats{}
-	for rows.Next() {
-		var u UserWithStats
-		err := rows.Scan(
-			&u.ID,
-			&u.Email,
-			&u.IsAdmin,
-			&u.CreatedAt,
-			&u.LoginCount,
-			&u.LastLoginAt,
-			&u.LastLoginIP,
-			&u.FailedAttempts,
-			&u.InviteCount,
-		)
-		if err != nil {
-			s.logger.Error("Failed to scan user row", zap.Error(err))
-			continue
+	users := make([]UserWithStats, 0, len(entUsers))
+	for _, u := range entUsers {
+		userStats := UserWithStats{
+			ID:          u.ID,
+			Email:       u.Email,
+			IsAdmin:     u.IsAdmin,
+			CreatedAt:   u.CreatedAt,
+			InviteCount: u.InviteCount,
 		}
-		users = append(users, u)
+
+		// Get login count and last login
+		loginActivities, err := s.db.Client.UserActivity.Query().
+			Where(
+				useractivity.UserID(u.ID),
+				useractivity.ActivityType("login"),
+			).
+			Order(ent.Desc(useractivity.FieldCreatedAt)).
+			Limit(1).
+			All(ctx)
+		if err == nil {
+			// Count all logins
+			loginCount, _ := s.db.Client.UserActivity.Query().
+				Where(
+					useractivity.UserID(u.ID),
+					useractivity.ActivityType("login"),
+				).
+				Count(ctx)
+			userStats.LoginCount = loginCount
+
+			// Get last login details
+			if len(loginActivities) > 0 {
+				lastLogin := loginActivities[0]
+				lastLoginStr := lastLogin.CreatedAt.Format(time.RFC3339)
+				userStats.LastLoginAt = &lastLoginStr
+				userStats.LastLoginIP = lastLogin.IPAddress
+			}
+		}
+
+		// Get failed login count
+		failedCount, err := s.db.Client.UserActivity.Query().
+			Where(
+				useractivity.UserID(u.ID),
+				useractivity.ActivityType("failed_login"),
+			).
+			Count(ctx)
+		if err == nil {
+			userStats.FailedAttempts = failedCount
+		}
+
+		users = append(users, userStats)
 	}
 
 	respondJSON(w, http.StatusOK, users)
@@ -140,38 +149,27 @@ func (s *Server) HandleGetUserActivity(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
 	defer cancel()
 
-	query := `
-		SELECT id, user_id, activity_type, ip_address, user_agent, created_at
-		FROM user_activity
-		WHERE user_id = ?
-		ORDER BY created_at DESC
-		LIMIT 100
-	`
-
-	rows, err := s.db.QueryContext(ctx, query, targetUserID)
+	entActivities, err := s.db.Client.UserActivity.Query().
+		Where(useractivity.UserID(targetUserID)).
+		Order(ent.Desc(useractivity.FieldCreatedAt)).
+		Limit(100).
+		All(ctx)
 	if err != nil {
 		s.logger.Error("Failed to query user activity", zap.Error(err))
 		respondError(w, http.StatusInternalServerError, "failed to get activity", "internal_error")
 		return
 	}
-	defer rows.Close()
 
-	activities := []UserActivity{}
-	for rows.Next() {
-		var a UserActivity
-		err := rows.Scan(
-			&a.ID,
-			&a.UserID,
-			&a.ActivityType,
-			&a.IPAddress,
-			&a.UserAgent,
-			&a.CreatedAt,
-		)
-		if err != nil {
-			s.logger.Error("Failed to scan activity row", zap.Error(err))
-			continue
-		}
-		activities = append(activities, a)
+	activities := make([]UserActivity, 0, len(entActivities))
+	for _, ea := range entActivities {
+		activities = append(activities, UserActivity{
+			ID:           ea.ID,
+			UserID:       ea.UserID,
+			ActivityType: ea.ActivityType,
+			IPAddress:    ea.IPAddress,
+			UserAgent:    ea.UserAgent,
+			CreatedAt:    ea.CreatedAt.Format(time.RFC3339),
+		})
 	}
 
 	respondJSON(w, http.StatusOK, activities)
@@ -215,23 +213,16 @@ func (s *Server) HandleUpdateUserAdmin(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
 	defer cancel()
 
-	query := `UPDATE users SET is_admin = ? WHERE id = ?`
-	result, err := s.db.ExecContext(ctx, query, req.IsAdmin, targetUserID)
+	err := s.db.Client.User.UpdateOneID(targetUserID).
+		SetIsAdmin(req.IsAdmin).
+		Exec(ctx)
 	if err != nil {
+		if ent.IsNotFound(err) {
+			respondError(w, http.StatusNotFound, "user not found", "not_found")
+			return
+		}
 		s.logger.Error("Failed to update user admin status", zap.Error(err))
 		respondError(w, http.StatusInternalServerError, "failed to update user", "internal_error")
-		return
-	}
-
-	rowsAffected, err := result.RowsAffected()
-	if err != nil {
-		s.logger.Error("Failed to get rows affected", zap.Error(err))
-		respondError(w, http.StatusInternalServerError, "failed to update user", "internal_error")
-		return
-	}
-
-	if rowsAffected == 0 {
-		respondError(w, http.StatusNotFound, "user not found", "not_found")
 		return
 	}
 
@@ -243,14 +234,12 @@ func (s *Server) HandleUpdateUserAdmin(w http.ResponseWriter, r *http.Request) {
 
 // isAdmin checks if a user is an admin
 func (s *Server) isAdmin(ctx context.Context, userID int64) bool {
-	var isAdmin bool
-	query := `SELECT is_admin FROM users WHERE id = ?`
-	err := s.db.QueryRowContext(ctx, query, userID).Scan(&isAdmin)
+	userEntity, err := s.db.Client.User.Get(ctx, userID)
 	if err != nil {
 		s.logger.Error("Failed to check admin status", zap.Error(err))
 		return false
 	}
-	return isAdmin
+	return userEntity.IsAdmin
 }
 
 // logUserActivity logs a user activity event using Ent

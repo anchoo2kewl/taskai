@@ -253,20 +253,21 @@ func (s *Server) isAdmin(ctx context.Context, userID int64) bool {
 	return isAdmin
 }
 
-// logUserActivity logs a user activity event
+// logUserActivity logs a user activity event using Ent
 func (s *Server) logUserActivity(ctx context.Context, userID int64, activityType, ipAddress, userAgent string) error {
-	query := `INSERT INTO user_activity (user_id, activity_type, ip_address, user_agent) VALUES (?, ?, ?, ?)`
+	creator := s.db.Client.UserActivity.Create().
+		SetUserID(userID).
+		SetActivityType(activityType)
 
-	// Use NULL for empty strings
-	var ip, ua interface{}
+	// Set optional fields only if not empty
 	if ipAddress != "" {
-		ip = ipAddress
+		creator.SetIPAddress(ipAddress)
 	}
 	if userAgent != "" {
-		ua = userAgent
+		creator.SetUserAgent(userAgent)
 	}
 
-	_, err := s.db.ExecContext(ctx, query, userID, activityType, ip, ua)
+	_, err := creator.Save(ctx)
 	if err != nil {
 		s.logger.Error("Failed to log user activity", zap.Error(err))
 	}

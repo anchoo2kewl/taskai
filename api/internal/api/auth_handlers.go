@@ -2,15 +2,16 @@ package api
 
 import (
 	"context"
-	"database/sql"
 	"fmt"
-
 	"net/http"
 	"strings"
 	"time"
 
 	"go.uber.org/zap"
 
+	"taskai/ent"
+	"taskai/ent/invite"
+	"taskai/ent/user"
 	"taskai/internal/auth"
 )
 
@@ -65,35 +66,26 @@ func (s *Server) HandleSignup(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
 	defer cancel()
 
-	// Verify invite code is valid
-	var inviteID int64
-	var usedAt sql.NullString
-	var expiresAt sql.NullString
-	err := s.db.QueryRowContext(ctx,
-		`SELECT id, used_at, expires_at FROM invites WHERE code = ?`, req.InviteCode,
-	).Scan(&inviteID, &usedAt, &expiresAt)
-	if err == sql.ErrNoRows {
-		respondError(w, http.StatusBadRequest, "invalid invite code", "invalid_invite")
-		return
-	}
+	// Verify invite code is valid using Ent
+	inv, err := s.db.Client.Invite.Query().
+		Where(invite.Code(req.InviteCode)).
+		Only(ctx)
 	if err != nil {
+		if ent.IsNotFound(err) {
+			respondError(w, http.StatusBadRequest, "invalid invite code", "invalid_invite")
+			return
+		}
 		s.logger.Error("Failed to validate invite code", zap.Error(err))
 		respondError(w, http.StatusInternalServerError, "failed to create user", "internal_error")
 		return
 	}
-	if usedAt.Valid {
+	if inv.UsedAt != nil {
 		respondError(w, http.StatusBadRequest, "this invite has already been used", "invite_used")
 		return
 	}
-	if expiresAt.Valid {
-		t, parseErr := time.Parse(time.RFC3339, expiresAt.String)
-		if parseErr != nil {
-			t, parseErr = time.Parse("2006-01-02 15:04:05-07:00", expiresAt.String)
-		}
-		if parseErr == nil && time.Now().After(t) {
-			respondError(w, http.StatusBadRequest, "this invite has expired", "invite_expired")
-			return
-		}
+	if inv.ExpiresAt != nil && time.Now().After(*inv.ExpiresAt) {
+		respondError(w, http.StatusBadRequest, "this invite has expired", "invite_expired")
+		return
 	}
 
 	// Hash password
@@ -104,7 +96,8 @@ func (s *Server) HandleSignup(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	tx, err := s.db.BeginTx(ctx, nil)
+	// Use Ent transaction
+	tx, err := s.db.Client.Tx(ctx)
 	if err != nil {
 		s.logger.Error("Failed to begin transaction", zap.Error(err))
 		respondError(w, http.StatusInternalServerError, "failed to create user", "internal_error")
@@ -112,24 +105,13 @@ func (s *Server) HandleSignup(w http.ResponseWriter, r *http.Request) {
 	}
 	defer tx.Rollback()
 
-	// Create user
-	userQuery := `
-		INSERT INTO users (email, password_hash)
-		VALUES (?, ?)
-		RETURNING id, email, name, is_admin, created_at
-	`
-
-	var user User
-	var name sql.NullString
-	err = tx.QueryRowContext(ctx, userQuery, req.Email, hashedPassword).
-		Scan(&user.ID, &user.Email, &name, &user.IsAdmin, &user.CreatedAt)
-
-	if name.Valid {
-		user.Name = name.String
-	}
-
+	// Create user using Ent
+	newUser, err := tx.User.Create().
+		SetEmail(req.Email).
+		SetPasswordHash(hashedPassword).
+		Save(ctx)
 	if err != nil {
-		if strings.Contains(err.Error(), "UNIQUE constraint failed") {
+		if ent.IsConstraintError(err) {
 			respondError(w, http.StatusConflict, "email already exists", "email_exists")
 			return
 		}
@@ -139,46 +121,40 @@ func (s *Server) HandleSignup(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Create team for the user
-	teamName := user.Email + "'s Team"
-	if user.Name != "" {
-		teamName = user.Name + "'s Team"
+	teamName := newUser.Email + "'s Team"
+	if newUser.Name != nil {
+		teamName = *newUser.Name + "'s Team"
 	}
 
-	teamQuery := `
-		INSERT INTO teams (name, owner_id, created_at, updated_at)
-		VALUES (?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
-	`
-	teamResult, err := tx.ExecContext(ctx, teamQuery, teamName, user.ID)
+	team, err := tx.Team.Create().
+		SetName(teamName).
+		SetOwnerID(newUser.ID).
+		Save(ctx)
 	if err != nil {
-		s.logger.Error("Failed to create team", zap.Error(err), zap.Int64("user_id", user.ID))
-		respondError(w, http.StatusInternalServerError, "failed to create team", "internal_error")
-		return
-	}
-
-	teamID, err := teamResult.LastInsertId()
-	if err != nil {
-		s.logger.Error("Failed to get team ID", zap.Error(err))
+		s.logger.Error("Failed to create team", zap.Error(err), zap.Int64("user_id", newUser.ID))
 		respondError(w, http.StatusInternalServerError, "failed to create team", "internal_error")
 		return
 	}
 
 	// Add user to team as owner
-	memberQuery := `
-		INSERT INTO team_members (team_id, user_id, role, status, joined_at)
-		VALUES (?, ?, 'owner', 'active', CURRENT_TIMESTAMP)
-	`
-	_, err = tx.ExecContext(ctx, memberQuery, teamID, user.ID)
+	_, err = tx.TeamMember.Create().
+		SetTeamID(team.ID).
+		SetUserID(newUser.ID).
+		SetRole("owner").
+		SetStatus("active").
+		Save(ctx)
 	if err != nil {
-		s.logger.Error("Failed to add user to team", zap.Error(err), zap.Int64("user_id", user.ID))
+		s.logger.Error("Failed to add user to team", zap.Error(err), zap.Int64("user_id", newUser.ID))
 		respondError(w, http.StatusInternalServerError, "failed to add user to team", "internal_error")
 		return
 	}
 
 	// Mark invite as used
-	_, err = tx.ExecContext(ctx,
-		`UPDATE invites SET invitee_id = ?, used_at = CURRENT_TIMESTAMP WHERE id = ?`,
-		user.ID, inviteID,
-	)
+	now := time.Now()
+	_, err = tx.Invite.UpdateOneID(inv.ID).
+		SetInviteeID(newUser.ID).
+		SetUsedAt(now).
+		Save(ctx)
 	if err != nil {
 		s.logger.Error("Failed to mark invite as used", zap.Error(err))
 		respondError(w, http.StatusInternalServerError, "failed to create user", "internal_error")
@@ -193,13 +169,23 @@ func (s *Server) HandleSignup(w http.ResponseWriter, r *http.Request) {
 	}
 
 	s.logger.Info("User and team created",
-		zap.Int64("user_id", user.ID),
-		zap.Int64("team_id", teamID),
-		zap.String("email", user.Email),
+		zap.Int64("user_id", newUser.ID),
+		zap.Int64("team_id", team.ID),
+		zap.String("email", newUser.Email),
 	)
 
+	// Convert Ent user to API user struct
+	var apiUser User
+	apiUser.ID = newUser.ID
+	apiUser.Email = newUser.Email
+	if newUser.Name != nil {
+		apiUser.Name = *newUser.Name
+	}
+	apiUser.IsAdmin = newUser.IsAdmin
+	apiUser.CreatedAt = newUser.CreatedAt
+
 	// Generate JWT token
-	token, err := auth.GenerateToken(user.ID, user.Email, s.config.JWTSecret, s.config.JWTExpiry())
+	token, err := auth.GenerateToken(apiUser.ID, apiUser.Email, s.config.JWTSecret, s.config.JWTExpiry())
 	if err != nil {
 		s.logger.Error("Failed to generate token", zap.Error(err))
 		respondError(w, http.StatusInternalServerError, "failed to generate token", "internal_error")
@@ -208,7 +194,7 @@ func (s *Server) HandleSignup(w http.ResponseWriter, r *http.Request) {
 
 	respondJSON(w, http.StatusCreated, AuthResponse{
 		Token: token,
-		User:  user,
+		User:  apiUser,
 	})
 }
 
@@ -226,24 +212,15 @@ func (s *Server) HandleLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Get user from database
+	// Get user from database using Ent
 	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
 	defer cancel()
 
-	query := `SELECT id, email, name, password_hash, is_admin, created_at FROM users WHERE email = ?`
-
-	var user User
-	var passwordHash string
-	var name sql.NullString
-	err := s.db.QueryRowContext(ctx, query, req.Email).
-		Scan(&user.ID, &user.Email, &name, &passwordHash, &user.IsAdmin, &user.CreatedAt)
-
-	if name.Valid {
-		user.Name = name.String
-	}
-
+	entUser, err := s.db.Client.User.Query().
+		Where(user.Email(req.Email)).
+		Only(ctx)
 	if err != nil {
-		if err == sql.ErrNoRows {
+		if ent.IsNotFound(err) {
 			// Log failed login attempt
 			respondError(w, http.StatusUnauthorized, "invalid email or password", "invalid_credentials")
 			return
@@ -253,19 +230,32 @@ func (s *Server) HandleLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	passwordHash := entUser.PasswordHash
+
 	// Verify password
 	if err := auth.VerifyPassword(passwordHash, req.Password); err != nil {
 		// Log failed login attempt
-		go s.logUserActivity(context.Background(), user.ID, "failed_login", getClientIP(r), r.UserAgent())
+		go s.logUserActivity(context.Background(), entUser.ID, "failed_login", getClientIP(r), r.UserAgent())
 		respondError(w, http.StatusUnauthorized, "invalid email or password", "invalid_credentials")
 		return
 	}
 
 	// Log successful login
-	go s.logUserActivity(context.Background(), user.ID, "login", getClientIP(r), r.UserAgent())
+	go s.logUserActivity(context.Background(), entUser.ID, "login", getClientIP(r), r.UserAgent())
+
+	// Convert Ent user to API user struct
+	apiUser := User{
+		ID:        entUser.ID,
+		Email:     entUser.Email,
+		IsAdmin:   entUser.IsAdmin,
+		CreatedAt: entUser.CreatedAt,
+	}
+	if entUser.Name != nil {
+		apiUser.Name = *entUser.Name
+	}
 
 	// Generate JWT token
-	token, err := auth.GenerateToken(user.ID, user.Email, s.config.JWTSecret, s.config.JWTExpiry())
+	token, err := auth.GenerateToken(apiUser.ID, apiUser.Email, s.config.JWTSecret, s.config.JWTExpiry())
 	if err != nil {
 		s.logger.Error("Failed to generate token", zap.Error(err))
 		respondError(w, http.StatusInternalServerError, "failed to generate token", "internal_error")
@@ -274,7 +264,7 @@ func (s *Server) HandleLogin(w http.ResponseWriter, r *http.Request) {
 
 	respondJSON(w, http.StatusOK, AuthResponse{
 		Token: token,
-		User:  user,
+		User:  apiUser,
 	})
 }
 
@@ -286,23 +276,13 @@ func (s *Server) HandleMe(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Get user from database
+	// Get user from database using Ent
 	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
 	defer cancel()
 
-	query := `SELECT id, email, name, is_admin, created_at FROM users WHERE id = ?`
-
-	var user User
-	var name sql.NullString
-	err := s.db.QueryRowContext(ctx, query, userID).
-		Scan(&user.ID, &user.Email, &name, &user.IsAdmin, &user.CreatedAt)
-
-	if name.Valid {
-		user.Name = name.String
-	}
-
+	entUser, err := s.db.Client.User.Get(ctx, userID)
 	if err != nil {
-		if err == sql.ErrNoRows {
+		if ent.IsNotFound(err) {
 			respondError(w, http.StatusNotFound, "user not found", "not_found")
 			return
 		}
@@ -311,7 +291,18 @@ func (s *Server) HandleMe(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	respondJSON(w, http.StatusOK, user)
+	// Convert Ent user to API user struct
+	apiUser := User{
+		ID:        entUser.ID,
+		Email:     entUser.Email,
+		IsAdmin:   entUser.IsAdmin,
+		CreatedAt: entUser.CreatedAt,
+	}
+	if entUser.Name != nil {
+		apiUser.Name = *entUser.Name
+	}
+
+	respondJSON(w, http.StatusOK, apiUser)
 }
 
 // UpdateProfileRequest represents the update profile request
@@ -339,36 +330,35 @@ func (s *Server) HandleUpdateProfile(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Update user name
+	// Update user name using Ent
 	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
 	defer cancel()
 
-	query := `UPDATE users SET name = ? WHERE id = ?`
-	_, err := s.db.ExecContext(ctx, query, req.Name, userID)
+	entUser, err := s.db.Client.User.UpdateOneID(userID).
+		SetName(req.Name).
+		Save(ctx)
 	if err != nil {
+		if ent.IsNotFound(err) {
+			respondError(w, http.StatusNotFound, "user not found", "not_found")
+			return
+		}
 		s.logger.Error("Failed to update user profile", zap.Error(err))
 		respondError(w, http.StatusInternalServerError, "failed to update profile", "internal_error")
 		return
 	}
 
-	// Get updated user
-	userQuery := `SELECT id, email, name, is_admin, created_at FROM users WHERE id = ?`
-	var user User
-	var name sql.NullString
-	err = s.db.QueryRowContext(ctx, userQuery, userID).
-		Scan(&user.ID, &user.Email, &name, &user.IsAdmin, &user.CreatedAt)
-
-	if name.Valid {
-		user.Name = name.String
+	// Convert Ent user to API user struct
+	apiUser := User{
+		ID:        entUser.ID,
+		Email:     entUser.Email,
+		IsAdmin:   entUser.IsAdmin,
+		CreatedAt: entUser.CreatedAt,
+	}
+	if entUser.Name != nil {
+		apiUser.Name = *entUser.Name
 	}
 
-	if err != nil {
-		s.logger.Error("Failed to query user", zap.Error(err))
-		respondError(w, http.StatusInternalServerError, "failed to get user", "internal_error")
-		return
-	}
-
-	respondJSON(w, http.StatusOK, user)
+	respondJSON(w, http.StatusOK, apiUser)
 }
 
 // validateSignupRequest validates the signup request

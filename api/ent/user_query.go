@@ -23,6 +23,8 @@ import (
 	"taskai/ent/teammember"
 	"taskai/ent/user"
 	"taskai/ent/useractivity"
+	"taskai/ent/wikipage"
+	"taskai/ent/yjsupdate"
 
 	"entgo.io/ent"
 	"entgo.io/ent/dialect/sql"
@@ -54,6 +56,8 @@ type UserQuery struct {
 	withTeamInvitationsReceived   *TeamInvitationQuery
 	withCloudinaryCredentials     *CloudinaryCredentialQuery
 	withTaskAttachments           *TaskAttachmentQuery
+	withWikiPagesCreated          *WikiPageQuery
+	withYjsUpdates                *YjsUpdateQuery
 	// intermediate query (i.e. traversal path).
 	sql  *sql.Selector
 	path func(context.Context) (*sql.Selector, error)
@@ -464,6 +468,50 @@ func (_q *UserQuery) QueryTaskAttachments() *TaskAttachmentQuery {
 	return query
 }
 
+// QueryWikiPagesCreated chains the current query on the "wiki_pages_created" edge.
+func (_q *UserQuery) QueryWikiPagesCreated() *WikiPageQuery {
+	query := (&WikiPageClient{config: _q.config}).Query()
+	query.path = func(ctx context.Context) (fromU *sql.Selector, err error) {
+		if err := _q.prepareQuery(ctx); err != nil {
+			return nil, err
+		}
+		selector := _q.sqlQuery(ctx)
+		if err := selector.Err(); err != nil {
+			return nil, err
+		}
+		step := sqlgraph.NewStep(
+			sqlgraph.From(user.Table, user.FieldID, selector),
+			sqlgraph.To(wikipage.Table, wikipage.FieldID),
+			sqlgraph.Edge(sqlgraph.O2M, false, user.WikiPagesCreatedTable, user.WikiPagesCreatedColumn),
+		)
+		fromU = sqlgraph.SetNeighbors(_q.driver.Dialect(), step)
+		return fromU, nil
+	}
+	return query
+}
+
+// QueryYjsUpdates chains the current query on the "yjs_updates" edge.
+func (_q *UserQuery) QueryYjsUpdates() *YjsUpdateQuery {
+	query := (&YjsUpdateClient{config: _q.config}).Query()
+	query.path = func(ctx context.Context) (fromU *sql.Selector, err error) {
+		if err := _q.prepareQuery(ctx); err != nil {
+			return nil, err
+		}
+		selector := _q.sqlQuery(ctx)
+		if err := selector.Err(); err != nil {
+			return nil, err
+		}
+		step := sqlgraph.NewStep(
+			sqlgraph.From(user.Table, user.FieldID, selector),
+			sqlgraph.To(yjsupdate.Table, yjsupdate.FieldID),
+			sqlgraph.Edge(sqlgraph.O2M, false, user.YjsUpdatesTable, user.YjsUpdatesColumn),
+		)
+		fromU = sqlgraph.SetNeighbors(_q.driver.Dialect(), step)
+		return fromU, nil
+	}
+	return query
+}
+
 // First returns the first User entity from the query.
 // Returns a *NotFoundError when no User was found.
 func (_q *UserQuery) First(ctx context.Context) (*User, error) {
@@ -673,6 +721,8 @@ func (_q *UserQuery) Clone() *UserQuery {
 		withTeamInvitationsReceived:   _q.withTeamInvitationsReceived.Clone(),
 		withCloudinaryCredentials:     _q.withCloudinaryCredentials.Clone(),
 		withTaskAttachments:           _q.withTaskAttachments.Clone(),
+		withWikiPagesCreated:          _q.withWikiPagesCreated.Clone(),
+		withYjsUpdates:                _q.withYjsUpdates.Clone(),
 		// clone intermediate query.
 		sql:  _q.sql.Clone(),
 		path: _q.path,
@@ -866,6 +916,28 @@ func (_q *UserQuery) WithTaskAttachments(opts ...func(*TaskAttachmentQuery)) *Us
 	return _q
 }
 
+// WithWikiPagesCreated tells the query-builder to eager-load the nodes that are connected to
+// the "wiki_pages_created" edge. The optional arguments are used to configure the query builder of the edge.
+func (_q *UserQuery) WithWikiPagesCreated(opts ...func(*WikiPageQuery)) *UserQuery {
+	query := (&WikiPageClient{config: _q.config}).Query()
+	for _, opt := range opts {
+		opt(query)
+	}
+	_q.withWikiPagesCreated = query
+	return _q
+}
+
+// WithYjsUpdates tells the query-builder to eager-load the nodes that are connected to
+// the "yjs_updates" edge. The optional arguments are used to configure the query builder of the edge.
+func (_q *UserQuery) WithYjsUpdates(opts ...func(*YjsUpdateQuery)) *UserQuery {
+	query := (&YjsUpdateClient{config: _q.config}).Query()
+	for _, opt := range opts {
+		opt(query)
+	}
+	_q.withYjsUpdates = query
+	return _q
+}
+
 // GroupBy is used to group vertices by one or more fields/columns.
 // It is often used with aggregate functions, like: count, max, mean, min, sum.
 //
@@ -944,7 +1016,7 @@ func (_q *UserQuery) sqlAll(ctx context.Context, hooks ...queryHook) ([]*User, e
 	var (
 		nodes       = []*User{}
 		_spec       = _q.querySpec()
-		loadedTypes = [17]bool{
+		loadedTypes = [19]bool{
 			_q.withOwnedProjects != nil,
 			_q.withOwnedTeams != nil,
 			_q.withTeamMemberships != nil,
@@ -962,6 +1034,8 @@ func (_q *UserQuery) sqlAll(ctx context.Context, hooks ...queryHook) ([]*User, e
 			_q.withTeamInvitationsReceived != nil,
 			_q.withCloudinaryCredentials != nil,
 			_q.withTaskAttachments != nil,
+			_q.withWikiPagesCreated != nil,
+			_q.withYjsUpdates != nil,
 		}
 	)
 	_spec.ScanValues = func(columns []string) ([]any, error) {
@@ -1104,6 +1178,20 @@ func (_q *UserQuery) sqlAll(ctx context.Context, hooks ...queryHook) ([]*User, e
 		if err := _q.loadTaskAttachments(ctx, query, nodes,
 			func(n *User) { n.Edges.TaskAttachments = []*TaskAttachment{} },
 			func(n *User, e *TaskAttachment) { n.Edges.TaskAttachments = append(n.Edges.TaskAttachments, e) }); err != nil {
+			return nil, err
+		}
+	}
+	if query := _q.withWikiPagesCreated; query != nil {
+		if err := _q.loadWikiPagesCreated(ctx, query, nodes,
+			func(n *User) { n.Edges.WikiPagesCreated = []*WikiPage{} },
+			func(n *User, e *WikiPage) { n.Edges.WikiPagesCreated = append(n.Edges.WikiPagesCreated, e) }); err != nil {
+			return nil, err
+		}
+	}
+	if query := _q.withYjsUpdates; query != nil {
+		if err := _q.loadYjsUpdates(ctx, query, nodes,
+			func(n *User) { n.Edges.YjsUpdates = []*YjsUpdate{} },
+			func(n *User, e *YjsUpdate) { n.Edges.YjsUpdates = append(n.Edges.YjsUpdates, e) }); err != nil {
 			return nil, err
 		}
 	}
@@ -1624,6 +1712,69 @@ func (_q *UserQuery) loadTaskAttachments(ctx context.Context, query *TaskAttachm
 		node, ok := nodeids[fk]
 		if !ok {
 			return fmt.Errorf(`unexpected referenced foreign-key "user_id" returned %v for node %v`, fk, n.ID)
+		}
+		assign(node, n)
+	}
+	return nil
+}
+func (_q *UserQuery) loadWikiPagesCreated(ctx context.Context, query *WikiPageQuery, nodes []*User, init func(*User), assign func(*User, *WikiPage)) error {
+	fks := make([]driver.Value, 0, len(nodes))
+	nodeids := make(map[int64]*User)
+	for i := range nodes {
+		fks = append(fks, nodes[i].ID)
+		nodeids[nodes[i].ID] = nodes[i]
+		if init != nil {
+			init(nodes[i])
+		}
+	}
+	if len(query.ctx.Fields) > 0 {
+		query.ctx.AppendFieldOnce(wikipage.FieldCreatedBy)
+	}
+	query.Where(predicate.WikiPage(func(s *sql.Selector) {
+		s.Where(sql.InValues(s.C(user.WikiPagesCreatedColumn), fks...))
+	}))
+	neighbors, err := query.All(ctx)
+	if err != nil {
+		return err
+	}
+	for _, n := range neighbors {
+		fk := n.CreatedBy
+		node, ok := nodeids[fk]
+		if !ok {
+			return fmt.Errorf(`unexpected referenced foreign-key "created_by" returned %v for node %v`, fk, n.ID)
+		}
+		assign(node, n)
+	}
+	return nil
+}
+func (_q *UserQuery) loadYjsUpdates(ctx context.Context, query *YjsUpdateQuery, nodes []*User, init func(*User), assign func(*User, *YjsUpdate)) error {
+	fks := make([]driver.Value, 0, len(nodes))
+	nodeids := make(map[int64]*User)
+	for i := range nodes {
+		fks = append(fks, nodes[i].ID)
+		nodeids[nodes[i].ID] = nodes[i]
+		if init != nil {
+			init(nodes[i])
+		}
+	}
+	if len(query.ctx.Fields) > 0 {
+		query.ctx.AppendFieldOnce(yjsupdate.FieldCreatedBy)
+	}
+	query.Where(predicate.YjsUpdate(func(s *sql.Selector) {
+		s.Where(sql.InValues(s.C(user.YjsUpdatesColumn), fks...))
+	}))
+	neighbors, err := query.All(ctx)
+	if err != nil {
+		return err
+	}
+	for _, n := range neighbors {
+		fk := n.CreatedBy
+		if fk == nil {
+			return fmt.Errorf(`foreign-key "created_by" is nil for node %v`, n.ID)
+		}
+		node, ok := nodeids[*fk]
+		if !ok {
+			return fmt.Errorf(`unexpected referenced foreign-key "created_by" returned %v for node %v`, *fk, n.ID)
 		}
 		assign(node, n)
 	}

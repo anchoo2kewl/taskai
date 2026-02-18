@@ -52,6 +52,8 @@ func (User) Edges() []ent.Edge {
 		edge.To("team_invitations_received", TeamInvitation.Type),
 		edge.To("cloudinary_credentials", CloudinaryCredential.Type),
 		edge.To("task_attachments", TaskAttachment.Type),
+		edge.To("wiki_pages_created", WikiPage.Type),
+		edge.To("yjs_updates", YjsUpdate.Type),
 	}
 }
 

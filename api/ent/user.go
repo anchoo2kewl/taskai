@@ -81,9 +81,13 @@ type UserEdges struct {
 	CloudinaryCredentials []*CloudinaryCredential `json:"cloudinary_credentials,omitempty"`
 	// TaskAttachments holds the value of the task_attachments edge.
 	TaskAttachments []*TaskAttachment `json:"task_attachments,omitempty"`
+	// WikiPagesCreated holds the value of the wiki_pages_created edge.
+	WikiPagesCreated []*WikiPage `json:"wiki_pages_created,omitempty"`
+	// YjsUpdates holds the value of the yjs_updates edge.
+	YjsUpdates []*YjsUpdate `json:"yjs_updates,omitempty"`
 	// loadedTypes holds the information for reporting if a
 	// type was loaded (or requested) in eager-loading or not.
-	loadedTypes [17]bool
+	loadedTypes [19]bool
 }
 
 // OwnedProjectsOrErr returns the OwnedProjects value or an error if the edge
@@ -237,6 +241,24 @@ func (e UserEdges) TaskAttachmentsOrErr() ([]*TaskAttachment, error) {
 		return e.TaskAttachments, nil
 	}
 	return nil, &NotLoadedError{edge: "task_attachments"}
+}
+
+// WikiPagesCreatedOrErr returns the WikiPagesCreated value or an error if the edge
+// was not loaded in eager-loading.
+func (e UserEdges) WikiPagesCreatedOrErr() ([]*WikiPage, error) {
+	if e.loadedTypes[17] {
+		return e.WikiPagesCreated, nil
+	}
+	return nil, &NotLoadedError{edge: "wiki_pages_created"}
+}
+
+// YjsUpdatesOrErr returns the YjsUpdates value or an error if the edge
+// was not loaded in eager-loading.
+func (e UserEdges) YjsUpdatesOrErr() ([]*YjsUpdate, error) {
+	if e.loadedTypes[18] {
+		return e.YjsUpdates, nil
+	}
+	return nil, &NotLoadedError{edge: "yjs_updates"}
 }
 
 // scanValues returns the types for scanning values from sql.Rows.
@@ -439,6 +461,16 @@ func (_m *User) QueryCloudinaryCredentials() *CloudinaryCredentialQuery {
 // QueryTaskAttachments queries the "task_attachments" edge of the User entity.
 func (_m *User) QueryTaskAttachments() *TaskAttachmentQuery {
 	return NewUserClient(_m.config).QueryTaskAttachments(_m)
+}
+
+// QueryWikiPagesCreated queries the "wiki_pages_created" edge of the User entity.
+func (_m *User) QueryWikiPagesCreated() *WikiPageQuery {
+	return NewUserClient(_m.config).QueryWikiPagesCreated(_m)
+}
+
+// QueryYjsUpdates queries the "yjs_updates" edge of the User entity.
+func (_m *User) QueryYjsUpdates() *YjsUpdateQuery {
+	return NewUserClient(_m.config).QueryYjsUpdates(_m)
 }
 
 // Update returns a builder for updating this User.

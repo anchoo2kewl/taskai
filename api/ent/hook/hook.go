@@ -56,6 +56,18 @@ func (f InviteFunc) Mutate(ctx context.Context, m ent.Mutation) (ent.Value, erro
 	return nil, fmt.Errorf("unexpected mutation type %T. expect *ent.InviteMutation", m)
 }
 
+// The PageVersionFunc type is an adapter to allow the use of ordinary
+// function as PageVersion mutator.
+type PageVersionFunc func(context.Context, *ent.PageVersionMutation) (ent.Value, error)
+
+// Mutate calls f(ctx, m).
+func (f PageVersionFunc) Mutate(ctx context.Context, m ent.Mutation) (ent.Value, error) {
+	if mv, ok := m.(*ent.PageVersionMutation); ok {
+		return f(ctx, mv)
+	}
+	return nil, fmt.Errorf("unexpected mutation type %T. expect *ent.PageVersionMutation", m)
+}
+
 // The ProjectFunc type is an adapter to allow the use of ordinary
 // function as Project mutator.
 type ProjectFunc func(context.Context, *ent.ProjectMutation) (ent.Value, error)
@@ -222,6 +234,42 @@ func (f UserActivityFunc) Mutate(ctx context.Context, m ent.Mutation) (ent.Value
 		return f(ctx, mv)
 	}
 	return nil, fmt.Errorf("unexpected mutation type %T. expect *ent.UserActivityMutation", m)
+}
+
+// The WikiBlockFunc type is an adapter to allow the use of ordinary
+// function as WikiBlock mutator.
+type WikiBlockFunc func(context.Context, *ent.WikiBlockMutation) (ent.Value, error)
+
+// Mutate calls f(ctx, m).
+func (f WikiBlockFunc) Mutate(ctx context.Context, m ent.Mutation) (ent.Value, error) {
+	if mv, ok := m.(*ent.WikiBlockMutation); ok {
+		return f(ctx, mv)
+	}
+	return nil, fmt.Errorf("unexpected mutation type %T. expect *ent.WikiBlockMutation", m)
+}
+
+// The WikiPageFunc type is an adapter to allow the use of ordinary
+// function as WikiPage mutator.
+type WikiPageFunc func(context.Context, *ent.WikiPageMutation) (ent.Value, error)
+
+// Mutate calls f(ctx, m).
+func (f WikiPageFunc) Mutate(ctx context.Context, m ent.Mutation) (ent.Value, error) {
+	if mv, ok := m.(*ent.WikiPageMutation); ok {
+		return f(ctx, mv)
+	}
+	return nil, fmt.Errorf("unexpected mutation type %T. expect *ent.WikiPageMutation", m)
+}
+
+// The YjsUpdateFunc type is an adapter to allow the use of ordinary
+// function as YjsUpdate mutator.
+type YjsUpdateFunc func(context.Context, *ent.YjsUpdateMutation) (ent.Value, error)
+
+// Mutate calls f(ctx, m).
+func (f YjsUpdateFunc) Mutate(ctx context.Context, m ent.Mutation) (ent.Value, error) {
+	if mv, ok := m.(*ent.YjsUpdateMutation); ok {
+		return f(ctx, mv)
+	}
+	return nil, fmt.Errorf("unexpected mutation type %T. expect *ent.YjsUpdateMutation", m)
 }
 
 // Condition is a hook condition function.

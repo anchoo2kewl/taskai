@@ -50,6 +50,8 @@ const (
 	EdgeSwimLanes = "swim_lanes"
 	// EdgeAttachments holds the string denoting the attachments edge name in mutations.
 	EdgeAttachments = "attachments"
+	// EdgeWikiPages holds the string denoting the wiki_pages edge name in mutations.
+	EdgeWikiPages = "wiki_pages"
 	// Table holds the table name of the project in the database.
 	Table = "projects"
 	// OwnerTable is the table that holds the owner relation/edge.
@@ -94,6 +96,13 @@ const (
 	AttachmentsInverseTable = "task_attachments"
 	// AttachmentsColumn is the table column denoting the attachments relation/edge.
 	AttachmentsColumn = "project_id"
+	// WikiPagesTable is the table that holds the wiki_pages relation/edge.
+	WikiPagesTable = "wiki_pages"
+	// WikiPagesInverseTable is the table name for the WikiPage entity.
+	// It exists in this package in order to avoid circular dependency with the "wikipage" package.
+	WikiPagesInverseTable = "wiki_pages"
+	// WikiPagesColumn is the table column denoting the wiki_pages relation/edge.
+	WikiPagesColumn = "project_id"
 )
 
 // Columns holds all SQL columns for project fields.
@@ -275,6 +284,20 @@ func ByAttachments(term sql.OrderTerm, terms ...sql.OrderTerm) OrderOption {
 		sqlgraph.OrderByNeighborTerms(s, newAttachmentsStep(), append([]sql.OrderTerm{term}, terms...)...)
 	}
 }
+
+// ByWikiPagesCount orders the results by wiki_pages count.
+func ByWikiPagesCount(opts ...sql.OrderTermOption) OrderOption {
+	return func(s *sql.Selector) {
+		sqlgraph.OrderByNeighborsCount(s, newWikiPagesStep(), opts...)
+	}
+}
+
+// ByWikiPages orders the results by wiki_pages terms.
+func ByWikiPages(term sql.OrderTerm, terms ...sql.OrderTerm) OrderOption {
+	return func(s *sql.Selector) {
+		sqlgraph.OrderByNeighborTerms(s, newWikiPagesStep(), append([]sql.OrderTerm{term}, terms...)...)
+	}
+}
 func newOwnerStep() *sqlgraph.Step {
 	return sqlgraph.NewStep(
 		sqlgraph.From(Table, FieldID),
@@ -315,5 +338,12 @@ func newAttachmentsStep() *sqlgraph.Step {
 		sqlgraph.From(Table, FieldID),
 		sqlgraph.To(AttachmentsInverseTable, FieldID),
 		sqlgraph.Edge(sqlgraph.O2M, false, AttachmentsTable, AttachmentsColumn),
+	)
+}
+func newWikiPagesStep() *sqlgraph.Step {
+	return sqlgraph.NewStep(
+		sqlgraph.From(Table, FieldID),
+		sqlgraph.To(WikiPagesInverseTable, FieldID),
+		sqlgraph.Edge(sqlgraph.O2M, false, WikiPagesTable, WikiPagesColumn),
 	)
 }

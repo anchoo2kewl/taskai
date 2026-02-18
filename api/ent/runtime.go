@@ -7,6 +7,7 @@ import (
 	"taskai/ent/cloudinarycredential"
 	"taskai/ent/emailprovider"
 	"taskai/ent/invite"
+	"taskai/ent/pageversion"
 	"taskai/ent/project"
 	"taskai/ent/projectmember"
 	"taskai/ent/schema"
@@ -22,6 +23,9 @@ import (
 	"taskai/ent/teammember"
 	"taskai/ent/user"
 	"taskai/ent/useractivity"
+	"taskai/ent/wikiblock"
+	"taskai/ent/wikipage"
+	"taskai/ent/yjsupdate"
 	"time"
 )
 
@@ -137,6 +141,16 @@ func init() {
 	inviteDescCreatedAt := inviteFields[6].Descriptor()
 	// invite.DefaultCreatedAt holds the default value on creation for the created_at field.
 	invite.DefaultCreatedAt = inviteDescCreatedAt.Default.(func() time.Time)
+	pageversionFields := schema.PageVersion{}.Fields()
+	_ = pageversionFields
+	// pageversionDescYjsState is the schema descriptor for yjs_state field.
+	pageversionDescYjsState := pageversionFields[3].Descriptor()
+	// pageversion.YjsStateValidator is a validator for the "yjs_state" field. It is called by the builders before save.
+	pageversion.YjsStateValidator = pageversionDescYjsState.Validators[0].(func([]byte) error)
+	// pageversionDescCreatedAt is the schema descriptor for created_at field.
+	pageversionDescCreatedAt := pageversionFields[4].Descriptor()
+	// pageversion.DefaultCreatedAt holds the default value on creation for the created_at field.
+	pageversion.DefaultCreatedAt = pageversionDescCreatedAt.Default.(func() time.Time)
 	projectFields := schema.Project{}.Fields()
 	_ = projectFields
 	// projectDescName is the schema descriptor for name field.
@@ -391,4 +405,82 @@ func init() {
 	useractivityDescCreatedAt := useractivityFields[5].Descriptor()
 	// useractivity.DefaultCreatedAt holds the default value on creation for the created_at field.
 	useractivity.DefaultCreatedAt = useractivityDescCreatedAt.Default.(func() time.Time)
+	wikiblockFields := schema.WikiBlock{}.Fields()
+	_ = wikiblockFields
+	// wikiblockDescBlockType is the schema descriptor for block_type field.
+	wikiblockDescBlockType := wikiblockFields[2].Descriptor()
+	// wikiblock.BlockTypeValidator is a validator for the "block_type" field. It is called by the builders before save.
+	wikiblock.BlockTypeValidator = func() func(string) error {
+		validators := wikiblockDescBlockType.Validators
+		fns := [...]func(string) error{
+			validators[0].(func(string) error),
+			validators[1].(func(string) error),
+		}
+		return func(block_type string) error {
+			for _, fn := range fns {
+				if err := fn(block_type); err != nil {
+					return err
+				}
+			}
+			return nil
+		}
+	}()
+	wikipageFields := schema.WikiPage{}.Fields()
+	_ = wikipageFields
+	// wikipageDescTitle is the schema descriptor for title field.
+	wikipageDescTitle := wikipageFields[2].Descriptor()
+	// wikipage.TitleValidator is a validator for the "title" field. It is called by the builders before save.
+	wikipage.TitleValidator = func() func(string) error {
+		validators := wikipageDescTitle.Validators
+		fns := [...]func(string) error{
+			validators[0].(func(string) error),
+			validators[1].(func(string) error),
+		}
+		return func(title string) error {
+			for _, fn := range fns {
+				if err := fn(title); err != nil {
+					return err
+				}
+			}
+			return nil
+		}
+	}()
+	// wikipageDescSlug is the schema descriptor for slug field.
+	wikipageDescSlug := wikipageFields[3].Descriptor()
+	// wikipage.SlugValidator is a validator for the "slug" field. It is called by the builders before save.
+	wikipage.SlugValidator = func() func(string) error {
+		validators := wikipageDescSlug.Validators
+		fns := [...]func(string) error{
+			validators[0].(func(string) error),
+			validators[1].(func(string) error),
+		}
+		return func(slug string) error {
+			for _, fn := range fns {
+				if err := fn(slug); err != nil {
+					return err
+				}
+			}
+			return nil
+		}
+	}()
+	// wikipageDescCreatedAt is the schema descriptor for created_at field.
+	wikipageDescCreatedAt := wikipageFields[5].Descriptor()
+	// wikipage.DefaultCreatedAt holds the default value on creation for the created_at field.
+	wikipage.DefaultCreatedAt = wikipageDescCreatedAt.Default.(func() time.Time)
+	// wikipageDescUpdatedAt is the schema descriptor for updated_at field.
+	wikipageDescUpdatedAt := wikipageFields[6].Descriptor()
+	// wikipage.DefaultUpdatedAt holds the default value on creation for the updated_at field.
+	wikipage.DefaultUpdatedAt = wikipageDescUpdatedAt.Default.(func() time.Time)
+	// wikipage.UpdateDefaultUpdatedAt holds the default value on update for the updated_at field.
+	wikipage.UpdateDefaultUpdatedAt = wikipageDescUpdatedAt.UpdateDefault.(func() time.Time)
+	yjsupdateFields := schema.YjsUpdate{}.Fields()
+	_ = yjsupdateFields
+	// yjsupdateDescUpdateData is the schema descriptor for update_data field.
+	yjsupdateDescUpdateData := yjsupdateFields[2].Descriptor()
+	// yjsupdate.UpdateDataValidator is a validator for the "update_data" field. It is called by the builders before save.
+	yjsupdate.UpdateDataValidator = yjsupdateDescUpdateData.Validators[0].(func([]byte) error)
+	// yjsupdateDescCreatedAt is the schema descriptor for created_at field.
+	yjsupdateDescCreatedAt := yjsupdateFields[3].Descriptor()
+	// yjsupdate.DefaultCreatedAt holds the default value on creation for the created_at field.
+	yjsupdate.DefaultCreatedAt = yjsupdateDescCreatedAt.Default.(func() time.Time)
 }

@@ -1046,6 +1046,52 @@ func HasTaskAttachmentsWith(preds ...predicate.TaskAttachment) predicate.User {
 	})
 }
 
+// HasWikiPagesCreated applies the HasEdge predicate on the "wiki_pages_created" edge.
+func HasWikiPagesCreated() predicate.User {
+	return predicate.User(func(s *sql.Selector) {
+		step := sqlgraph.NewStep(
+			sqlgraph.From(Table, FieldID),
+			sqlgraph.Edge(sqlgraph.O2M, false, WikiPagesCreatedTable, WikiPagesCreatedColumn),
+		)
+		sqlgraph.HasNeighbors(s, step)
+	})
+}
+
+// HasWikiPagesCreatedWith applies the HasEdge predicate on the "wiki_pages_created" edge with a given conditions (other predicates).
+func HasWikiPagesCreatedWith(preds ...predicate.WikiPage) predicate.User {
+	return predicate.User(func(s *sql.Selector) {
+		step := newWikiPagesCreatedStep()
+		sqlgraph.HasNeighborsWith(s, step, func(s *sql.Selector) {
+			for _, p := range preds {
+				p(s)
+			}
+		})
+	})
+}
+
+// HasYjsUpdates applies the HasEdge predicate on the "yjs_updates" edge.
+func HasYjsUpdates() predicate.User {
+	return predicate.User(func(s *sql.Selector) {
+		step := sqlgraph.NewStep(
+			sqlgraph.From(Table, FieldID),
+			sqlgraph.Edge(sqlgraph.O2M, false, YjsUpdatesTable, YjsUpdatesColumn),
+		)
+		sqlgraph.HasNeighbors(s, step)
+	})
+}
+
+// HasYjsUpdatesWith applies the HasEdge predicate on the "yjs_updates" edge with a given conditions (other predicates).
+func HasYjsUpdatesWith(preds ...predicate.YjsUpdate) predicate.User {
+	return predicate.User(func(s *sql.Selector) {
+		step := newYjsUpdatesStep()
+		sqlgraph.HasNeighborsWith(s, step, func(s *sql.Selector) {
+			for _, p := range preds {
+				p(s)
+			}
+		})
+	})
+}
+
 // And groups predicates with the AND operator between them.
 func And(predicates ...predicate.User) predicate.User {
 	return predicate.User(sql.AndPredicates(predicates...))

@@ -70,6 +70,10 @@ const (
 	EdgeCloudinaryCredentials = "cloudinary_credentials"
 	// EdgeTaskAttachments holds the string denoting the task_attachments edge name in mutations.
 	EdgeTaskAttachments = "task_attachments"
+	// EdgeWikiPagesCreated holds the string denoting the wiki_pages_created edge name in mutations.
+	EdgeWikiPagesCreated = "wiki_pages_created"
+	// EdgeYjsUpdates holds the string denoting the yjs_updates edge name in mutations.
+	EdgeYjsUpdates = "yjs_updates"
 	// Table holds the table name of the user in the database.
 	Table = "users"
 	// OwnedProjectsTable is the table that holds the owned_projects relation/edge.
@@ -191,6 +195,20 @@ const (
 	TaskAttachmentsInverseTable = "task_attachments"
 	// TaskAttachmentsColumn is the table column denoting the task_attachments relation/edge.
 	TaskAttachmentsColumn = "user_id"
+	// WikiPagesCreatedTable is the table that holds the wiki_pages_created relation/edge.
+	WikiPagesCreatedTable = "wiki_pages"
+	// WikiPagesCreatedInverseTable is the table name for the WikiPage entity.
+	// It exists in this package in order to avoid circular dependency with the "wikipage" package.
+	WikiPagesCreatedInverseTable = "wiki_pages"
+	// WikiPagesCreatedColumn is the table column denoting the wiki_pages_created relation/edge.
+	WikiPagesCreatedColumn = "created_by"
+	// YjsUpdatesTable is the table that holds the yjs_updates relation/edge.
+	YjsUpdatesTable = "yjs_updates"
+	// YjsUpdatesInverseTable is the table name for the YjsUpdate entity.
+	// It exists in this package in order to avoid circular dependency with the "yjsupdate" package.
+	YjsUpdatesInverseTable = "yjs_updates"
+	// YjsUpdatesColumn is the table column denoting the yjs_updates relation/edge.
+	YjsUpdatesColumn = "created_by"
 )
 
 // Columns holds all SQL columns for user fields.
@@ -538,6 +556,34 @@ func ByTaskAttachments(term sql.OrderTerm, terms ...sql.OrderTerm) OrderOption {
 		sqlgraph.OrderByNeighborTerms(s, newTaskAttachmentsStep(), append([]sql.OrderTerm{term}, terms...)...)
 	}
 }
+
+// ByWikiPagesCreatedCount orders the results by wiki_pages_created count.
+func ByWikiPagesCreatedCount(opts ...sql.OrderTermOption) OrderOption {
+	return func(s *sql.Selector) {
+		sqlgraph.OrderByNeighborsCount(s, newWikiPagesCreatedStep(), opts...)
+	}
+}
+
+// ByWikiPagesCreated orders the results by wiki_pages_created terms.
+func ByWikiPagesCreated(term sql.OrderTerm, terms ...sql.OrderTerm) OrderOption {
+	return func(s *sql.Selector) {
+		sqlgraph.OrderByNeighborTerms(s, newWikiPagesCreatedStep(), append([]sql.OrderTerm{term}, terms...)...)
+	}
+}
+
+// ByYjsUpdatesCount orders the results by yjs_updates count.
+func ByYjsUpdatesCount(opts ...sql.OrderTermOption) OrderOption {
+	return func(s *sql.Selector) {
+		sqlgraph.OrderByNeighborsCount(s, newYjsUpdatesStep(), opts...)
+	}
+}
+
+// ByYjsUpdates orders the results by yjs_updates terms.
+func ByYjsUpdates(term sql.OrderTerm, terms ...sql.OrderTerm) OrderOption {
+	return func(s *sql.Selector) {
+		sqlgraph.OrderByNeighborTerms(s, newYjsUpdatesStep(), append([]sql.OrderTerm{term}, terms...)...)
+	}
+}
 func newOwnedProjectsStep() *sqlgraph.Step {
 	return sqlgraph.NewStep(
 		sqlgraph.From(Table, FieldID),
@@ -655,5 +701,19 @@ func newTaskAttachmentsStep() *sqlgraph.Step {
 		sqlgraph.From(Table, FieldID),
 		sqlgraph.To(TaskAttachmentsInverseTable, FieldID),
 		sqlgraph.Edge(sqlgraph.O2M, false, TaskAttachmentsTable, TaskAttachmentsColumn),
+	)
+}
+func newWikiPagesCreatedStep() *sqlgraph.Step {
+	return sqlgraph.NewStep(
+		sqlgraph.From(Table, FieldID),
+		sqlgraph.To(WikiPagesCreatedInverseTable, FieldID),
+		sqlgraph.Edge(sqlgraph.O2M, false, WikiPagesCreatedTable, WikiPagesCreatedColumn),
+	)
+}
+func newYjsUpdatesStep() *sqlgraph.Step {
+	return sqlgraph.NewStep(
+		sqlgraph.From(Table, FieldID),
+		sqlgraph.To(YjsUpdatesInverseTable, FieldID),
+		sqlgraph.Edge(sqlgraph.O2M, false, YjsUpdatesTable, YjsUpdatesColumn),
 	)
 }

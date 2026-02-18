@@ -160,6 +160,13 @@ func main() {
 			r.Patch("/swim-lanes/{id}", server.HandleUpdateSwimLane)
 			r.Delete("/swim-lanes/{id}", server.HandleDeleteSwimLane)
 
+			// Wiki routes
+			r.Get("/projects/{projectId}/wiki/pages", server.HandleListWikiPages)
+			r.Post("/projects/{projectId}/wiki/pages", server.HandleCreateWikiPage)
+			r.Get("/wiki/pages/{pageId}", server.HandleGetWikiPage)
+			r.Patch("/wiki/pages/{pageId}", server.HandleUpdateWikiPage)
+			r.Delete("/wiki/pages/{pageId}", server.HandleDeleteWikiPage)
+
 			// Task comment routes
 			r.Get("/tasks/{taskId}/comments", server.HandleListTaskComments)
 			r.Post("/tasks/{taskId}/comments", server.HandleCreateTaskComment)

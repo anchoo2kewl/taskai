@@ -20,6 +20,8 @@ type Tx struct {
 	EmailProvider *EmailProviderClient
 	// Invite is the client for interacting with the Invite builders.
 	Invite *InviteClient
+	// PageVersion is the client for interacting with the PageVersion builders.
+	PageVersion *PageVersionClient
 	// Project is the client for interacting with the Project builders.
 	Project *ProjectClient
 	// ProjectMember is the client for interacting with the ProjectMember builders.
@@ -48,6 +50,12 @@ type Tx struct {
 	User *UserClient
 	// UserActivity is the client for interacting with the UserActivity builders.
 	UserActivity *UserActivityClient
+	// WikiBlock is the client for interacting with the WikiBlock builders.
+	WikiBlock *WikiBlockClient
+	// WikiPage is the client for interacting with the WikiPage builders.
+	WikiPage *WikiPageClient
+	// YjsUpdate is the client for interacting with the YjsUpdate builders.
+	YjsUpdate *YjsUpdateClient
 
 	// lazily loaded.
 	client     *Client
@@ -183,6 +191,7 @@ func (tx *Tx) init() {
 	tx.CloudinaryCredential = NewCloudinaryCredentialClient(tx.config)
 	tx.EmailProvider = NewEmailProviderClient(tx.config)
 	tx.Invite = NewInviteClient(tx.config)
+	tx.PageVersion = NewPageVersionClient(tx.config)
 	tx.Project = NewProjectClient(tx.config)
 	tx.ProjectMember = NewProjectMemberClient(tx.config)
 	tx.Sprint = NewSprintClient(tx.config)
@@ -197,6 +206,9 @@ func (tx *Tx) init() {
 	tx.TeamMember = NewTeamMemberClient(tx.config)
 	tx.User = NewUserClient(tx.config)
 	tx.UserActivity = NewUserActivityClient(tx.config)
+	tx.WikiBlock = NewWikiBlockClient(tx.config)
+	tx.WikiPage = NewWikiPageClient(tx.config)
+	tx.YjsUpdate = NewYjsUpdateClient(tx.config)
 }
 
 // txDriver wraps the given dialect.Tx with a nop dialect.Driver implementation.

@@ -63,9 +63,11 @@ type ProjectEdges struct {
 	SwimLanes []*SwimLane `json:"swim_lanes,omitempty"`
 	// Attachments holds the value of the attachments edge.
 	Attachments []*TaskAttachment `json:"attachments,omitempty"`
+	// WikiPages holds the value of the wiki_pages edge.
+	WikiPages []*WikiPage `json:"wiki_pages,omitempty"`
 	// loadedTypes holds the information for reporting if a
 	// type was loaded (or requested) in eager-loading or not.
-	loadedTypes [6]bool
+	loadedTypes [7]bool
 }
 
 // OwnerOrErr returns the Owner value or an error if the edge
@@ -124,6 +126,15 @@ func (e ProjectEdges) AttachmentsOrErr() ([]*TaskAttachment, error) {
 		return e.Attachments, nil
 	}
 	return nil, &NotLoadedError{edge: "attachments"}
+}
+
+// WikiPagesOrErr returns the WikiPages value or an error if the edge
+// was not loaded in eager-loading.
+func (e ProjectEdges) WikiPagesOrErr() ([]*WikiPage, error) {
+	if e.loadedTypes[6] {
+		return e.WikiPages, nil
+	}
+	return nil, &NotLoadedError{edge: "wiki_pages"}
 }
 
 // scanValues returns the types for scanning values from sql.Rows.
@@ -279,6 +290,11 @@ func (_m *Project) QuerySwimLanes() *SwimLaneQuery {
 // QueryAttachments queries the "attachments" edge of the Project entity.
 func (_m *Project) QueryAttachments() *TaskAttachmentQuery {
 	return NewProjectClient(_m.config).QueryAttachments(_m)
+}
+
+// QueryWikiPages queries the "wiki_pages" edge of the Project entity.
+func (_m *Project) QueryWikiPages() *WikiPageQuery {
+	return NewProjectClient(_m.config).QueryWikiPages(_m)
 }
 
 // Update returns a builder for updating this Project.

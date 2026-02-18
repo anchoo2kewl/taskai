@@ -12,6 +12,7 @@ import (
 	"taskai/ent/cloudinarycredential"
 	"taskai/ent/emailprovider"
 	"taskai/ent/invite"
+	"taskai/ent/pageversion"
 	"taskai/ent/project"
 	"taskai/ent/projectmember"
 	"taskai/ent/sprint"
@@ -26,6 +27,9 @@ import (
 	"taskai/ent/teammember"
 	"taskai/ent/user"
 	"taskai/ent/useractivity"
+	"taskai/ent/wikiblock"
+	"taskai/ent/wikipage"
+	"taskai/ent/yjsupdate"
 
 	"entgo.io/ent"
 	"entgo.io/ent/dialect/sql"
@@ -94,6 +98,7 @@ func checkColumn(t, c string) error {
 			cloudinarycredential.Table: cloudinarycredential.ValidColumn,
 			emailprovider.Table:        emailprovider.ValidColumn,
 			invite.Table:               invite.ValidColumn,
+			pageversion.Table:          pageversion.ValidColumn,
 			project.Table:              project.ValidColumn,
 			projectmember.Table:        projectmember.ValidColumn,
 			sprint.Table:               sprint.ValidColumn,
@@ -108,6 +113,9 @@ func checkColumn(t, c string) error {
 			teammember.Table:           teammember.ValidColumn,
 			user.Table:                 user.ValidColumn,
 			useractivity.Table:         useractivity.ValidColumn,
+			wikiblock.Table:            wikiblock.ValidColumn,
+			wikipage.Table:             wikipage.ValidColumn,
+			yjsupdate.Table:            yjsupdate.ValidColumn,
 		})
 	})
 	return columnCheck(t, c)

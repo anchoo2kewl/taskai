@@ -18,6 +18,9 @@ type EmailProvider func(*sql.Selector)
 // Invite is the predicate function for invite builders.
 type Invite func(*sql.Selector)
 
+// PageVersion is the predicate function for pageversion builders.
+type PageVersion func(*sql.Selector)
+
 // Project is the predicate function for project builders.
 type Project func(*sql.Selector)
 
@@ -59,3 +62,12 @@ type User func(*sql.Selector)
 
 // UserActivity is the predicate function for useractivity builders.
 type UserActivity func(*sql.Selector)
+
+// WikiBlock is the predicate function for wikiblock builders.
+type WikiBlock func(*sql.Selector)
+
+// WikiPage is the predicate function for wikipage builders.
+type WikiPage func(*sql.Selector)
+
+// YjsUpdate is the predicate function for yjsupdate builders.
+type YjsUpdate func(*sql.Selector)

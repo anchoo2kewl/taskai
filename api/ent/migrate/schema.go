@@ -144,6 +144,40 @@ var (
 			},
 		},
 	}
+	// PageVersionsColumns holds the columns for the "page_versions" table.
+	PageVersionsColumns = []*schema.Column{
+		{Name: "id", Type: field.TypeInt64, Increment: true},
+		{Name: "version_number", Type: field.TypeInt},
+		{Name: "yjs_state", Type: field.TypeBytes},
+		{Name: "created_at", Type: field.TypeTime},
+		{Name: "page_id", Type: field.TypeInt64},
+	}
+	// PageVersionsTable holds the schema information for the "page_versions" table.
+	PageVersionsTable = &schema.Table{
+		Name:       "page_versions",
+		Columns:    PageVersionsColumns,
+		PrimaryKey: []*schema.Column{PageVersionsColumns[0]},
+		ForeignKeys: []*schema.ForeignKey{
+			{
+				Symbol:     "page_versions_wiki_pages_versions",
+				Columns:    []*schema.Column{PageVersionsColumns[4]},
+				RefColumns: []*schema.Column{WikiPagesColumns[0]},
+				OnDelete:   schema.NoAction,
+			},
+		},
+		Indexes: []*schema.Index{
+			{
+				Name:    "pageversion_page_id",
+				Unique:  false,
+				Columns: []*schema.Column{PageVersionsColumns[4]},
+			},
+			{
+				Name:    "pageversion_page_id_version_number",
+				Unique:  true,
+				Columns: []*schema.Column{PageVersionsColumns[4], PageVersionsColumns[1]},
+			},
+		},
+	}
 	// ProjectsColumns holds the columns for the "projects" table.
 	ProjectsColumns = []*schema.Column{
 		{Name: "id", Type: field.TypeInt64, Increment: true},
@@ -822,12 +856,128 @@ var (
 			},
 		},
 	}
+	// WikiBlocksColumns holds the columns for the "wiki_blocks" table.
+	WikiBlocksColumns = []*schema.Column{
+		{Name: "id", Type: field.TypeInt64, Increment: true},
+		{Name: "block_type", Type: field.TypeString, Size: 50},
+		{Name: "level", Type: field.TypeInt, Nullable: true},
+		{Name: "headings_path", Type: field.TypeString, Nullable: true},
+		{Name: "canonical_json", Type: field.TypeString, Nullable: true},
+		{Name: "plain_text", Type: field.TypeString, Nullable: true, Size: 2147483647},
+		{Name: "position", Type: field.TypeInt},
+		{Name: "search_text", Type: field.TypeString, Nullable: true},
+		{Name: "page_id", Type: field.TypeInt64},
+	}
+	// WikiBlocksTable holds the schema information for the "wiki_blocks" table.
+	WikiBlocksTable = &schema.Table{
+		Name:       "wiki_blocks",
+		Columns:    WikiBlocksColumns,
+		PrimaryKey: []*schema.Column{WikiBlocksColumns[0]},
+		ForeignKeys: []*schema.ForeignKey{
+			{
+				Symbol:     "wiki_blocks_wiki_pages_blocks",
+				Columns:    []*schema.Column{WikiBlocksColumns[8]},
+				RefColumns: []*schema.Column{WikiPagesColumns[0]},
+				OnDelete:   schema.NoAction,
+			},
+		},
+		Indexes: []*schema.Index{
+			{
+				Name:    "wikiblock_page_id",
+				Unique:  false,
+				Columns: []*schema.Column{WikiBlocksColumns[8]},
+			},
+		},
+	}
+	// WikiPagesColumns holds the columns for the "wiki_pages" table.
+	WikiPagesColumns = []*schema.Column{
+		{Name: "id", Type: field.TypeInt64, Increment: true},
+		{Name: "title", Type: field.TypeString, Size: 500},
+		{Name: "slug", Type: field.TypeString, Size: 500},
+		{Name: "created_at", Type: field.TypeTime},
+		{Name: "updated_at", Type: field.TypeTime},
+		{Name: "project_id", Type: field.TypeInt64},
+		{Name: "created_by", Type: field.TypeInt64},
+	}
+	// WikiPagesTable holds the schema information for the "wiki_pages" table.
+	WikiPagesTable = &schema.Table{
+		Name:       "wiki_pages",
+		Columns:    WikiPagesColumns,
+		PrimaryKey: []*schema.Column{WikiPagesColumns[0]},
+		ForeignKeys: []*schema.ForeignKey{
+			{
+				Symbol:     "wiki_pages_projects_wiki_pages",
+				Columns:    []*schema.Column{WikiPagesColumns[5]},
+				RefColumns: []*schema.Column{ProjectsColumns[0]},
+				OnDelete:   schema.NoAction,
+			},
+			{
+				Symbol:     "wiki_pages_users_wiki_pages_created",
+				Columns:    []*schema.Column{WikiPagesColumns[6]},
+				RefColumns: []*schema.Column{UsersColumns[0]},
+				OnDelete:   schema.NoAction,
+			},
+		},
+		Indexes: []*schema.Index{
+			{
+				Name:    "wikipage_project_id",
+				Unique:  false,
+				Columns: []*schema.Column{WikiPagesColumns[5]},
+			},
+			{
+				Name:    "wikipage_slug",
+				Unique:  false,
+				Columns: []*schema.Column{WikiPagesColumns[2]},
+			},
+			{
+				Name:    "wikipage_project_id_slug",
+				Unique:  true,
+				Columns: []*schema.Column{WikiPagesColumns[5], WikiPagesColumns[2]},
+			},
+		},
+	}
+	// YjsUpdatesColumns holds the columns for the "yjs_updates" table.
+	YjsUpdatesColumns = []*schema.Column{
+		{Name: "id", Type: field.TypeInt64, Increment: true},
+		{Name: "update_data", Type: field.TypeBytes},
+		{Name: "created_at", Type: field.TypeTime},
+		{Name: "created_by", Type: field.TypeInt64, Nullable: true},
+		{Name: "page_id", Type: field.TypeInt64},
+	}
+	// YjsUpdatesTable holds the schema information for the "yjs_updates" table.
+	YjsUpdatesTable = &schema.Table{
+		Name:       "yjs_updates",
+		Columns:    YjsUpdatesColumns,
+		PrimaryKey: []*schema.Column{YjsUpdatesColumns[0]},
+		ForeignKeys: []*schema.ForeignKey{
+			{
+				Symbol:     "yjs_updates_users_yjs_updates",
+				Columns:    []*schema.Column{YjsUpdatesColumns[3]},
+				RefColumns: []*schema.Column{UsersColumns[0]},
+				OnDelete:   schema.SetNull,
+			},
+			{
+				Symbol:     "yjs_updates_wiki_pages_yjs_updates",
+				Columns:    []*schema.Column{YjsUpdatesColumns[4]},
+				RefColumns: []*schema.Column{WikiPagesColumns[0]},
+				OnDelete:   schema.NoAction,
+			},
+		},
+		Indexes: []*schema.Index{
+			{
+				Name:    "yjsupdate_page_id",
+				Unique:  false,
+				Columns: []*schema.Column{YjsUpdatesColumns[4]},
+			},
+		},
+	}
 	// Tables holds all the tables in the schema.
 	Tables = []*schema.Table{
 		APIKeysTable,
 		CloudinaryCredentialsTable,
 		EmailProvidersTable,
 		InvitesTable,
+		PageVersionsTable,
 		ProjectsTable,
 		ProjectMembersTable,
 		SprintsTable,
@@ -842,6 +992,9 @@ var (
 		TeamMembersTable,
 		UsersTable,
 		UserActivityTable,
+		WikiBlocksTable,
+		WikiPagesTable,
+		YjsUpdatesTable,
 	}
 )
 
@@ -850,6 +1003,7 @@ func init() {
 	CloudinaryCredentialsTable.ForeignKeys[0].RefTable = UsersTable
 	InvitesTable.ForeignKeys[0].RefTable = UsersTable
 	InvitesTable.ForeignKeys[1].RefTable = UsersTable
+	PageVersionsTable.ForeignKeys[0].RefTable = WikiPagesTable
 	ProjectsTable.ForeignKeys[0].RefTable = TeamsTable
 	ProjectsTable.ForeignKeys[1].RefTable = UsersTable
 	ProjectMembersTable.ForeignKeys[0].RefTable = ProjectsTable
@@ -881,4 +1035,9 @@ func init() {
 	UserActivityTable.Annotation = &entsql.Annotation{
 		Table: "user_activity",
 	}
+	WikiBlocksTable.ForeignKeys[0].RefTable = WikiPagesTable
+	WikiPagesTable.ForeignKeys[0].RefTable = ProjectsTable
+	WikiPagesTable.ForeignKeys[1].RefTable = UsersTable
+	YjsUpdatesTable.ForeignKeys[0].RefTable = UsersTable
+	YjsUpdatesTable.ForeignKeys[1].RefTable = WikiPagesTable
 }

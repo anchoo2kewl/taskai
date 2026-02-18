@@ -11,6 +11,7 @@ import (
 	"taskai/ent/cloudinarycredential"
 	"taskai/ent/emailprovider"
 	"taskai/ent/invite"
+	"taskai/ent/pageversion"
 	"taskai/ent/predicate"
 	"taskai/ent/project"
 	"taskai/ent/projectmember"
@@ -26,6 +27,9 @@ import (
 	"taskai/ent/teammember"
 	"taskai/ent/user"
 	"taskai/ent/useractivity"
+	"taskai/ent/wikiblock"
+	"taskai/ent/wikipage"
+	"taskai/ent/yjsupdate"
 	"time"
 
 	"entgo.io/ent"
@@ -45,6 +49,7 @@ const (
 	TypeCloudinaryCredential = "CloudinaryCredential"
 	TypeEmailProvider        = "EmailProvider"
 	TypeInvite               = "Invite"
+	TypePageVersion          = "PageVersion"
 	TypeProject              = "Project"
 	TypeProjectMember        = "ProjectMember"
 	TypeSprint               = "Sprint"
@@ -59,6 +64,9 @@ const (
 	TypeTeamMember           = "TeamMember"
 	TypeUser                 = "User"
 	TypeUserActivity         = "UserActivity"
+	TypeWikiBlock            = "WikiBlock"
+	TypeWikiPage             = "WikiPage"
+	TypeYjsUpdate            = "YjsUpdate"
 )
 
 // APIKeyMutation represents an operation that mutates the APIKey nodes in the graph.
@@ -3473,6 +3481,590 @@ func (m *InviteMutation) ResetEdge(name string) error {
 	return fmt.Errorf("unknown Invite edge %s", name)
 }
 
+// PageVersionMutation represents an operation that mutates the PageVersion nodes in the graph.
+type PageVersionMutation struct {
+	config
+	op                Op
+	typ               string
+	id                *int64
+	version_number    *int
+	addversion_number *int
+	yjs_state         *[]byte
+	created_at        *time.Time
+	clearedFields     map[string]struct{}
+	page              *int64
+	clearedpage       bool
+	done              bool
+	oldValue          func(context.Context) (*PageVersion, error)
+	predicates        []predicate.PageVersion
+}
+
+var _ ent.Mutation = (*PageVersionMutation)(nil)
+
+// pageversionOption allows management of the mutation configuration using functional options.
+type pageversionOption func(*PageVersionMutation)
+
+// newPageVersionMutation creates new mutation for the PageVersion entity.
+func newPageVersionMutation(c config, op Op, opts ...pageversionOption) *PageVersionMutation {
+	m := &PageVersionMutation{
+		config:        c,
+		op:            op,
+		typ:           TypePageVersion,
+		clearedFields: make(map[string]struct{}),
+	}
+	for _, opt := range opts {
+		opt(m)
+	}
+	return m
+}
+
+// withPageVersionID sets the ID field of the mutation.
+func withPageVersionID(id int64) pageversionOption {
+	return func(m *PageVersionMutation) {
+		var (
+			err   error
+			once  sync.Once
+			value *PageVersion
+		)
+		m.oldValue = func(ctx context.Context) (*PageVersion, error) {
+			once.Do(func() {
+				if m.done {
+					err = errors.New("querying old values post mutation is not allowed")
+				} else {
+					value, err = m.Client().PageVersion.Get(ctx, id)
+				}
+			})
+			return value, err
+		}
+		m.id = &id
+	}
+}
+
+// withPageVersion sets the old PageVersion of the mutation.
+func withPageVersion(node *PageVersion) pageversionOption {
+	return func(m *PageVersionMutation) {
+		m.oldValue = func(context.Context) (*PageVersion, error) {
+			return node, nil
+		}
+		m.id = &node.ID
+	}
+}
+
+// Client returns a new `ent.Client` from the mutation. If the mutation was
+// executed in a transaction (ent.Tx), a transactional client is returned.
+func (m PageVersionMutation) Client() *Client {
+	client := &Client{config: m.config}
+	client.init()
+	return client
+}
+
+// Tx returns an `ent.Tx` for mutations that were executed in transactions;
+// it returns an error otherwise.
+func (m PageVersionMutation) Tx() (*Tx, error) {
+	if _, ok := m.driver.(*txDriver); !ok {
+		return nil, errors.New("ent: mutation is not running in a transaction")
+	}
+	tx := &Tx{config: m.config}
+	tx.init()
+	return tx, nil
+}
+
+// SetID sets the value of the id field. Note that this
+// operation is only accepted on creation of PageVersion entities.
+func (m *PageVersionMutation) SetID(id int64) {
+	m.id = &id
+}
+
+// ID returns the ID value in the mutation. Note that the ID is only available
+// if it was provided to the builder or after it was returned from the database.
+func (m *PageVersionMutation) ID() (id int64, exists bool) {
+	if m.id == nil {
+		return
+	}
+	return *m.id, true
+}
+
+// IDs queries the database and returns the entity ids that match the mutation's predicate.
+// That means, if the mutation is applied within a transaction with an isolation level such
+// as sql.LevelSerializable, the returned ids match the ids of the rows that will be updated
+// or updated by the mutation.
+func (m *PageVersionMutation) IDs(ctx context.Context) ([]int64, error) {
+	switch {
+	case m.op.Is(OpUpdateOne | OpDeleteOne):
+		id, exists := m.ID()
+		if exists {
+			return []int64{id}, nil
+		}
+		fallthrough
+	case m.op.Is(OpUpdate | OpDelete):
+		return m.Client().PageVersion.Query().Where(m.predicates...).IDs(ctx)
+	default:
+		return nil, fmt.Errorf("IDs is not allowed on %s operations", m.op)
+	}
+}
+
+// SetPageID sets the "page_id" field.
+func (m *PageVersionMutation) SetPageID(i int64) {
+	m.page = &i
+}
+
+// PageID returns the value of the "page_id" field in the mutation.
+func (m *PageVersionMutation) PageID() (r int64, exists bool) {
+	v := m.page
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldPageID returns the old "page_id" field's value of the PageVersion entity.
+// If the PageVersion object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *PageVersionMutation) OldPageID(ctx context.Context) (v int64, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldPageID is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldPageID requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldPageID: %w", err)
+	}
+	return oldValue.PageID, nil
+}
+
+// ResetPageID resets all changes to the "page_id" field.
+func (m *PageVersionMutation) ResetPageID() {
+	m.page = nil
+}
+
+// SetVersionNumber sets the "version_number" field.
+func (m *PageVersionMutation) SetVersionNumber(i int) {
+	m.version_number = &i
+	m.addversion_number = nil
+}
+
+// VersionNumber returns the value of the "version_number" field in the mutation.
+func (m *PageVersionMutation) VersionNumber() (r int, exists bool) {
+	v := m.version_number
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldVersionNumber returns the old "version_number" field's value of the PageVersion entity.
+// If the PageVersion object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *PageVersionMutation) OldVersionNumber(ctx context.Context) (v int, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldVersionNumber is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldVersionNumber requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldVersionNumber: %w", err)
+	}
+	return oldValue.VersionNumber, nil
+}
+
+// AddVersionNumber adds i to the "version_number" field.
+func (m *PageVersionMutation) AddVersionNumber(i int) {
+	if m.addversion_number != nil {
+		*m.addversion_number += i
+	} else {
+		m.addversion_number = &i
+	}
+}
+
+// AddedVersionNumber returns the value that was added to the "version_number" field in this mutation.
+func (m *PageVersionMutation) AddedVersionNumber() (r int, exists bool) {
+	v := m.addversion_number
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// ResetVersionNumber resets all changes to the "version_number" field.
+func (m *PageVersionMutation) ResetVersionNumber() {
+	m.version_number = nil
+	m.addversion_number = nil
+}
+
+// SetYjsState sets the "yjs_state" field.
+func (m *PageVersionMutation) SetYjsState(b []byte) {
+	m.yjs_state = &b
+}
+
+// YjsState returns the value of the "yjs_state" field in the mutation.
+func (m *PageVersionMutation) YjsState() (r []byte, exists bool) {
+	v := m.yjs_state
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldYjsState returns the old "yjs_state" field's value of the PageVersion entity.
+// If the PageVersion object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *PageVersionMutation) OldYjsState(ctx context.Context) (v []byte, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldYjsState is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldYjsState requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldYjsState: %w", err)
+	}
+	return oldValue.YjsState, nil
+}
+
+// ResetYjsState resets all changes to the "yjs_state" field.
+func (m *PageVersionMutation) ResetYjsState() {
+	m.yjs_state = nil
+}
+
+// SetCreatedAt sets the "created_at" field.
+func (m *PageVersionMutation) SetCreatedAt(t time.Time) {
+	m.created_at = &t
+}
+
+// CreatedAt returns the value of the "created_at" field in the mutation.
+func (m *PageVersionMutation) CreatedAt() (r time.Time, exists bool) {
+	v := m.created_at
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldCreatedAt returns the old "created_at" field's value of the PageVersion entity.
+// If the PageVersion object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *PageVersionMutation) OldCreatedAt(ctx context.Context) (v time.Time, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldCreatedAt is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldCreatedAt requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldCreatedAt: %w", err)
+	}
+	return oldValue.CreatedAt, nil
+}
+
+// ResetCreatedAt resets all changes to the "created_at" field.
+func (m *PageVersionMutation) ResetCreatedAt() {
+	m.created_at = nil
+}
+
+// ClearPage clears the "page" edge to the WikiPage entity.
+func (m *PageVersionMutation) ClearPage() {
+	m.clearedpage = true
+	m.clearedFields[pageversion.FieldPageID] = struct{}{}
+}
+
+// PageCleared reports if the "page" edge to the WikiPage entity was cleared.
+func (m *PageVersionMutation) PageCleared() bool {
+	return m.clearedpage
+}
+
+// PageIDs returns the "page" edge IDs in the mutation.
+// Note that IDs always returns len(IDs) <= 1 for unique edges, and you should use
+// PageID instead. It exists only for internal usage by the builders.
+func (m *PageVersionMutation) PageIDs() (ids []int64) {
+	if id := m.page; id != nil {
+		ids = append(ids, *id)
+	}
+	return
+}
+
+// ResetPage resets all changes to the "page" edge.
+func (m *PageVersionMutation) ResetPage() {
+	m.page = nil
+	m.clearedpage = false
+}
+
+// Where appends a list predicates to the PageVersionMutation builder.
+func (m *PageVersionMutation) Where(ps ...predicate.PageVersion) {
+	m.predicates = append(m.predicates, ps...)
+}
+
+// WhereP appends storage-level predicates to the PageVersionMutation builder. Using this method,
+// users can use type-assertion to append predicates that do not depend on any generated package.
+func (m *PageVersionMutation) WhereP(ps ...func(*sql.Selector)) {
+	p := make([]predicate.PageVersion, len(ps))
+	for i := range ps {
+		p[i] = ps[i]
+	}
+	m.Where(p...)
+}
+
+// Op returns the operation name.
+func (m *PageVersionMutation) Op() Op {
+	return m.op
+}
+
+// SetOp allows setting the mutation operation.
+func (m *PageVersionMutation) SetOp(op Op) {
+	m.op = op
+}
+
+// Type returns the node type of this mutation (PageVersion).
+func (m *PageVersionMutation) Type() string {
+	return m.typ
+}
+
+// Fields returns all fields that were changed during this mutation. Note that in
+// order to get all numeric fields that were incremented/decremented, call
+// AddedFields().
+func (m *PageVersionMutation) Fields() []string {
+	fields := make([]string, 0, 4)
+	if m.page != nil {
+		fields = append(fields, pageversion.FieldPageID)
+	}
+	if m.version_number != nil {
+		fields = append(fields, pageversion.FieldVersionNumber)
+	}
+	if m.yjs_state != nil {
+		fields = append(fields, pageversion.FieldYjsState)
+	}
+	if m.created_at != nil {
+		fields = append(fields, pageversion.FieldCreatedAt)
+	}
+	return fields
+}
+
+// Field returns the value of a field with the given name. The second boolean
+// return value indicates that this field was not set, or was not defined in the
+// schema.
+func (m *PageVersionMutation) Field(name string) (ent.Value, bool) {
+	switch name {
+	case pageversion.FieldPageID:
+		return m.PageID()
+	case pageversion.FieldVersionNumber:
+		return m.VersionNumber()
+	case pageversion.FieldYjsState:
+		return m.YjsState()
+	case pageversion.FieldCreatedAt:
+		return m.CreatedAt()
+	}
+	return nil, false
+}
+
+// OldField returns the old value of the field from the database. An error is
+// returned if the mutation operation is not UpdateOne, or the query to the
+// database failed.
+func (m *PageVersionMutation) OldField(ctx context.Context, name string) (ent.Value, error) {
+	switch name {
+	case pageversion.FieldPageID:
+		return m.OldPageID(ctx)
+	case pageversion.FieldVersionNumber:
+		return m.OldVersionNumber(ctx)
+	case pageversion.FieldYjsState:
+		return m.OldYjsState(ctx)
+	case pageversion.FieldCreatedAt:
+		return m.OldCreatedAt(ctx)
+	}
+	return nil, fmt.Errorf("unknown PageVersion field %s", name)
+}
+
+// SetField sets the value of a field with the given name. It returns an error if
+// the field is not defined in the schema, or if the type mismatched the field
+// type.
+func (m *PageVersionMutation) SetField(name string, value ent.Value) error {
+	switch name {
+	case pageversion.FieldPageID:
+		v, ok := value.(int64)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetPageID(v)
+		return nil
+	case pageversion.FieldVersionNumber:
+		v, ok := value.(int)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetVersionNumber(v)
+		return nil
+	case pageversion.FieldYjsState:
+		v, ok := value.([]byte)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetYjsState(v)
+		return nil
+	case pageversion.FieldCreatedAt:
+		v, ok := value.(time.Time)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetCreatedAt(v)
+		return nil
+	}
+	return fmt.Errorf("unknown PageVersion field %s", name)
+}
+
+// AddedFields returns all numeric fields that were incremented/decremented during
+// this mutation.
+func (m *PageVersionMutation) AddedFields() []string {
+	var fields []string
+	if m.addversion_number != nil {
+		fields = append(fields, pageversion.FieldVersionNumber)
+	}
+	return fields
+}
+
+// AddedField returns the numeric value that was incremented/decremented on a field
+// with the given name. The second boolean return value indicates that this field
+// was not set, or was not defined in the schema.
+func (m *PageVersionMutation) AddedField(name string) (ent.Value, bool) {
+	switch name {
+	case pageversion.FieldVersionNumber:
+		return m.AddedVersionNumber()
+	}
+	return nil, false
+}
+
+// AddField adds the value to the field with the given name. It returns an error if
+// the field is not defined in the schema, or if the type mismatched the field
+// type.
+func (m *PageVersionMutation) AddField(name string, value ent.Value) error {
+	switch name {
+	case pageversion.FieldVersionNumber:
+		v, ok := value.(int)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.AddVersionNumber(v)
+		return nil
+	}
+	return fmt.Errorf("unknown PageVersion numeric field %s", name)
+}
+
+// ClearedFields returns all nullable fields that were cleared during this
+// mutation.
+func (m *PageVersionMutation) ClearedFields() []string {
+	return nil
+}
+
+// FieldCleared returns a boolean indicating if a field with the given name was
+// cleared in this mutation.
+func (m *PageVersionMutation) FieldCleared(name string) bool {
+	_, ok := m.clearedFields[name]
+	return ok
+}
+
+// ClearField clears the value of the field with the given name. It returns an
+// error if the field is not defined in the schema.
+func (m *PageVersionMutation) ClearField(name string) error {
+	return fmt.Errorf("unknown PageVersion nullable field %s", name)
+}
+
+// ResetField resets all changes in the mutation for the field with the given name.
+// It returns an error if the field is not defined in the schema.
+func (m *PageVersionMutation) ResetField(name string) error {
+	switch name {
+	case pageversion.FieldPageID:
+		m.ResetPageID()
+		return nil
+	case pageversion.FieldVersionNumber:
+		m.ResetVersionNumber()
+		return nil
+	case pageversion.FieldYjsState:
+		m.ResetYjsState()
+		return nil
+	case pageversion.FieldCreatedAt:
+		m.ResetCreatedAt()
+		return nil
+	}
+	return fmt.Errorf("unknown PageVersion field %s", name)
+}
+
+// AddedEdges returns all edge names that were set/added in this mutation.
+func (m *PageVersionMutation) AddedEdges() []string {
+	edges := make([]string, 0, 1)
+	if m.page != nil {
+		edges = append(edges, pageversion.EdgePage)
+	}
+	return edges
+}
+
+// AddedIDs returns all IDs (to other nodes) that were added for the given edge
+// name in this mutation.
+func (m *PageVersionMutation) AddedIDs(name string) []ent.Value {
+	switch name {
+	case pageversion.EdgePage:
+		if id := m.page; id != nil {
+			return []ent.Value{*id}
+		}
+	}
+	return nil
+}
+
+// RemovedEdges returns all edge names that were removed in this mutation.
+func (m *PageVersionMutation) RemovedEdges() []string {
+	edges := make([]string, 0, 1)
+	return edges
+}
+
+// RemovedIDs returns all IDs (to other nodes) that were removed for the edge with
+// the given name in this mutation.
+func (m *PageVersionMutation) RemovedIDs(name string) []ent.Value {
+	return nil
+}
+
+// ClearedEdges returns all edge names that were cleared in this mutation.
+func (m *PageVersionMutation) ClearedEdges() []string {
+	edges := make([]string, 0, 1)
+	if m.clearedpage {
+		edges = append(edges, pageversion.EdgePage)
+	}
+	return edges
+}
+
+// EdgeCleared returns a boolean which indicates if the edge with the given name
+// was cleared in this mutation.
+func (m *PageVersionMutation) EdgeCleared(name string) bool {
+	switch name {
+	case pageversion.EdgePage:
+		return m.clearedpage
+	}
+	return false
+}
+
+// ClearEdge clears the value of the edge with the given name. It returns an error
+// if that edge is not defined in the schema.
+func (m *PageVersionMutation) ClearEdge(name string) error {
+	switch name {
+	case pageversion.EdgePage:
+		m.ClearPage()
+		return nil
+	}
+	return fmt.Errorf("unknown PageVersion unique edge %s", name)
+}
+
+// ResetEdge resets all changes to the edge with the given name in this mutation.
+// It returns an error if the edge is not defined in the schema.
+func (m *PageVersionMutation) ResetEdge(name string) error {
+	switch name {
+	case pageversion.EdgePage:
+		m.ResetPage()
+		return nil
+	}
+	return fmt.Errorf("unknown PageVersion edge %s", name)
+}
+
 // ProjectMutation represents an operation that mutates the Project nodes in the graph.
 type ProjectMutation struct {
 	config
@@ -3506,6 +4098,9 @@ type ProjectMutation struct {
 	attachments         map[int64]struct{}
 	removedattachments  map[int64]struct{}
 	clearedattachments  bool
+	wiki_pages          map[int64]struct{}
+	removedwiki_pages   map[int64]struct{}
+	clearedwiki_pages   bool
 	done                bool
 	oldValue            func(context.Context) (*Project, error)
 	predicates          []predicate.Project
@@ -4395,6 +4990,60 @@ func (m *ProjectMutation) ResetAttachments() {
 	m.removedattachments = nil
 }
 
+// AddWikiPageIDs adds the "wiki_pages" edge to the WikiPage entity by ids.
+func (m *ProjectMutation) AddWikiPageIDs(ids ...int64) {
+	if m.wiki_pages == nil {
+		m.wiki_pages = make(map[int64]struct{})
+	}
+	for i := range ids {
+		m.wiki_pages[ids[i]] = struct{}{}
+	}
+}
+
+// ClearWikiPages clears the "wiki_pages" edge to the WikiPage entity.
+func (m *ProjectMutation) ClearWikiPages() {
+	m.clearedwiki_pages = true
+}
+
+// WikiPagesCleared reports if the "wiki_pages" edge to the WikiPage entity was cleared.
+func (m *ProjectMutation) WikiPagesCleared() bool {
+	return m.clearedwiki_pages
+}
+
+// RemoveWikiPageIDs removes the "wiki_pages" edge to the WikiPage entity by IDs.
+func (m *ProjectMutation) RemoveWikiPageIDs(ids ...int64) {
+	if m.removedwiki_pages == nil {
+		m.removedwiki_pages = make(map[int64]struct{})
+	}
+	for i := range ids {
+		delete(m.wiki_pages, ids[i])
+		m.removedwiki_pages[ids[i]] = struct{}{}
+	}
+}
+
+// RemovedWikiPages returns the removed IDs of the "wiki_pages" edge to the WikiPage entity.
+func (m *ProjectMutation) RemovedWikiPagesIDs() (ids []int64) {
+	for id := range m.removedwiki_pages {
+		ids = append(ids, id)
+	}
+	return
+}
+
+// WikiPagesIDs returns the "wiki_pages" edge IDs in the mutation.
+func (m *ProjectMutation) WikiPagesIDs() (ids []int64) {
+	for id := range m.wiki_pages {
+		ids = append(ids, id)
+	}
+	return
+}
+
+// ResetWikiPages resets all changes to the "wiki_pages" edge.
+func (m *ProjectMutation) ResetWikiPages() {
+	m.wiki_pages = nil
+	m.clearedwiki_pages = false
+	m.removedwiki_pages = nil
+}
+
 // Where appends a list predicates to the ProjectMutation builder.
 func (m *ProjectMutation) Where(ps ...predicate.Project) {
 	m.predicates = append(m.predicates, ps...)
@@ -4757,7 +5406,7 @@ func (m *ProjectMutation) ResetField(name string) error {
 
 // AddedEdges returns all edge names that were set/added in this mutation.
 func (m *ProjectMutation) AddedEdges() []string {
-	edges := make([]string, 0, 6)
+	edges := make([]string, 0, 7)
 	if m.owner != nil {
 		edges = append(edges, project.EdgeOwner)
 	}
@@ -4775,6 +5424,9 @@ func (m *ProjectMutation) AddedEdges() []string {
 	}
 	if m.attachments != nil {
 		edges = append(edges, project.EdgeAttachments)
+	}
+	if m.wiki_pages != nil {
+		edges = append(edges, project.EdgeWikiPages)
 	}
 	return edges
 }
@@ -4815,13 +5467,19 @@ func (m *ProjectMutation) AddedIDs(name string) []ent.Value {
 			ids = append(ids, id)
 		}
 		return ids
+	case project.EdgeWikiPages:
+		ids := make([]ent.Value, 0, len(m.wiki_pages))
+		for id := range m.wiki_pages {
+			ids = append(ids, id)
+		}
+		return ids
 	}
 	return nil
 }
 
 // RemovedEdges returns all edge names that were removed in this mutation.
 func (m *ProjectMutation) RemovedEdges() []string {
-	edges := make([]string, 0, 6)
+	edges := make([]string, 0, 7)
 	if m.removedmembers != nil {
 		edges = append(edges, project.EdgeMembers)
 	}
@@ -4833,6 +5491,9 @@ func (m *ProjectMutation) RemovedEdges() []string {
 	}
 	if m.removedattachments != nil {
 		edges = append(edges, project.EdgeAttachments)
+	}
+	if m.removedwiki_pages != nil {
+		edges = append(edges, project.EdgeWikiPages)
 	}
 	return edges
 }
@@ -4865,13 +5526,19 @@ func (m *ProjectMutation) RemovedIDs(name string) []ent.Value {
 			ids = append(ids, id)
 		}
 		return ids
+	case project.EdgeWikiPages:
+		ids := make([]ent.Value, 0, len(m.removedwiki_pages))
+		for id := range m.removedwiki_pages {
+			ids = append(ids, id)
+		}
+		return ids
 	}
 	return nil
 }
 
 // ClearedEdges returns all edge names that were cleared in this mutation.
 func (m *ProjectMutation) ClearedEdges() []string {
-	edges := make([]string, 0, 6)
+	edges := make([]string, 0, 7)
 	if m.clearedowner {
 		edges = append(edges, project.EdgeOwner)
 	}
@@ -4889,6 +5556,9 @@ func (m *ProjectMutation) ClearedEdges() []string {
 	}
 	if m.clearedattachments {
 		edges = append(edges, project.EdgeAttachments)
+	}
+	if m.clearedwiki_pages {
+		edges = append(edges, project.EdgeWikiPages)
 	}
 	return edges
 }
@@ -4909,6 +5579,8 @@ func (m *ProjectMutation) EdgeCleared(name string) bool {
 		return m.clearedswim_lanes
 	case project.EdgeAttachments:
 		return m.clearedattachments
+	case project.EdgeWikiPages:
+		return m.clearedwiki_pages
 	}
 	return false
 }
@@ -4948,6 +5620,9 @@ func (m *ProjectMutation) ResetEdge(name string) error {
 		return nil
 	case project.EdgeAttachments:
 		m.ResetAttachments()
+		return nil
+	case project.EdgeWikiPages:
+		m.ResetWikiPages()
 		return nil
 	}
 	return fmt.Errorf("unknown Project edge %s", name)
@@ -15016,6 +15691,12 @@ type UserMutation struct {
 	task_attachments                   map[int64]struct{}
 	removedtask_attachments            map[int64]struct{}
 	clearedtask_attachments            bool
+	wiki_pages_created                 map[int64]struct{}
+	removedwiki_pages_created          map[int64]struct{}
+	clearedwiki_pages_created          bool
+	yjs_updates                        map[int64]struct{}
+	removedyjs_updates                 map[int64]struct{}
+	clearedyjs_updates                 bool
 	done                               bool
 	oldValue                           func(context.Context) (*User, error)
 	predicates                         []predicate.User
@@ -16511,6 +17192,114 @@ func (m *UserMutation) ResetTaskAttachments() {
 	m.removedtask_attachments = nil
 }
 
+// AddWikiPagesCreatedIDs adds the "wiki_pages_created" edge to the WikiPage entity by ids.
+func (m *UserMutation) AddWikiPagesCreatedIDs(ids ...int64) {
+	if m.wiki_pages_created == nil {
+		m.wiki_pages_created = make(map[int64]struct{})
+	}
+	for i := range ids {
+		m.wiki_pages_created[ids[i]] = struct{}{}
+	}
+}
+
+// ClearWikiPagesCreated clears the "wiki_pages_created" edge to the WikiPage entity.
+func (m *UserMutation) ClearWikiPagesCreated() {
+	m.clearedwiki_pages_created = true
+}
+
+// WikiPagesCreatedCleared reports if the "wiki_pages_created" edge to the WikiPage entity was cleared.
+func (m *UserMutation) WikiPagesCreatedCleared() bool {
+	return m.clearedwiki_pages_created
+}
+
+// RemoveWikiPagesCreatedIDs removes the "wiki_pages_created" edge to the WikiPage entity by IDs.
+func (m *UserMutation) RemoveWikiPagesCreatedIDs(ids ...int64) {
+	if m.removedwiki_pages_created == nil {
+		m.removedwiki_pages_created = make(map[int64]struct{})
+	}
+	for i := range ids {
+		delete(m.wiki_pages_created, ids[i])
+		m.removedwiki_pages_created[ids[i]] = struct{}{}
+	}
+}
+
+// RemovedWikiPagesCreated returns the removed IDs of the "wiki_pages_created" edge to the WikiPage entity.
+func (m *UserMutation) RemovedWikiPagesCreatedIDs() (ids []int64) {
+	for id := range m.removedwiki_pages_created {
+		ids = append(ids, id)
+	}
+	return
+}
+
+// WikiPagesCreatedIDs returns the "wiki_pages_created" edge IDs in the mutation.
+func (m *UserMutation) WikiPagesCreatedIDs() (ids []int64) {
+	for id := range m.wiki_pages_created {
+		ids = append(ids, id)
+	}
+	return
+}
+
+// ResetWikiPagesCreated resets all changes to the "wiki_pages_created" edge.
+func (m *UserMutation) ResetWikiPagesCreated() {
+	m.wiki_pages_created = nil
+	m.clearedwiki_pages_created = false
+	m.removedwiki_pages_created = nil
+}
+
+// AddYjsUpdateIDs adds the "yjs_updates" edge to the YjsUpdate entity by ids.
+func (m *UserMutation) AddYjsUpdateIDs(ids ...int64) {
+	if m.yjs_updates == nil {
+		m.yjs_updates = make(map[int64]struct{})
+	}
+	for i := range ids {
+		m.yjs_updates[ids[i]] = struct{}{}
+	}
+}
+
+// ClearYjsUpdates clears the "yjs_updates" edge to the YjsUpdate entity.
+func (m *UserMutation) ClearYjsUpdates() {
+	m.clearedyjs_updates = true
+}
+
+// YjsUpdatesCleared reports if the "yjs_updates" edge to the YjsUpdate entity was cleared.
+func (m *UserMutation) YjsUpdatesCleared() bool {
+	return m.clearedyjs_updates
+}
+
+// RemoveYjsUpdateIDs removes the "yjs_updates" edge to the YjsUpdate entity by IDs.
+func (m *UserMutation) RemoveYjsUpdateIDs(ids ...int64) {
+	if m.removedyjs_updates == nil {
+		m.removedyjs_updates = make(map[int64]struct{})
+	}
+	for i := range ids {
+		delete(m.yjs_updates, ids[i])
+		m.removedyjs_updates[ids[i]] = struct{}{}
+	}
+}
+
+// RemovedYjsUpdates returns the removed IDs of the "yjs_updates" edge to the YjsUpdate entity.
+func (m *UserMutation) RemovedYjsUpdatesIDs() (ids []int64) {
+	for id := range m.removedyjs_updates {
+		ids = append(ids, id)
+	}
+	return
+}
+
+// YjsUpdatesIDs returns the "yjs_updates" edge IDs in the mutation.
+func (m *UserMutation) YjsUpdatesIDs() (ids []int64) {
+	for id := range m.yjs_updates {
+		ids = append(ids, id)
+	}
+	return
+}
+
+// ResetYjsUpdates resets all changes to the "yjs_updates" edge.
+func (m *UserMutation) ResetYjsUpdates() {
+	m.yjs_updates = nil
+	m.clearedyjs_updates = false
+	m.removedyjs_updates = nil
+}
+
 // Where appends a list predicates to the UserMutation builder.
 func (m *UserMutation) Where(ps ...predicate.User) {
 	m.predicates = append(m.predicates, ps...)
@@ -16856,7 +17645,7 @@ func (m *UserMutation) ResetField(name string) error {
 
 // AddedEdges returns all edge names that were set/added in this mutation.
 func (m *UserMutation) AddedEdges() []string {
-	edges := make([]string, 0, 17)
+	edges := make([]string, 0, 19)
 	if m.owned_projects != nil {
 		edges = append(edges, user.EdgeOwnedProjects)
 	}
@@ -16907,6 +17696,12 @@ func (m *UserMutation) AddedEdges() []string {
 	}
 	if m.task_attachments != nil {
 		edges = append(edges, user.EdgeTaskAttachments)
+	}
+	if m.wiki_pages_created != nil {
+		edges = append(edges, user.EdgeWikiPagesCreated)
+	}
+	if m.yjs_updates != nil {
+		edges = append(edges, user.EdgeYjsUpdates)
 	}
 	return edges
 }
@@ -17017,13 +17812,25 @@ func (m *UserMutation) AddedIDs(name string) []ent.Value {
 			ids = append(ids, id)
 		}
 		return ids
+	case user.EdgeWikiPagesCreated:
+		ids := make([]ent.Value, 0, len(m.wiki_pages_created))
+		for id := range m.wiki_pages_created {
+			ids = append(ids, id)
+		}
+		return ids
+	case user.EdgeYjsUpdates:
+		ids := make([]ent.Value, 0, len(m.yjs_updates))
+		for id := range m.yjs_updates {
+			ids = append(ids, id)
+		}
+		return ids
 	}
 	return nil
 }
 
 // RemovedEdges returns all edge names that were removed in this mutation.
 func (m *UserMutation) RemovedEdges() []string {
-	edges := make([]string, 0, 17)
+	edges := make([]string, 0, 19)
 	if m.removedowned_projects != nil {
 		edges = append(edges, user.EdgeOwnedProjects)
 	}
@@ -17074,6 +17881,12 @@ func (m *UserMutation) RemovedEdges() []string {
 	}
 	if m.removedtask_attachments != nil {
 		edges = append(edges, user.EdgeTaskAttachments)
+	}
+	if m.removedwiki_pages_created != nil {
+		edges = append(edges, user.EdgeWikiPagesCreated)
+	}
+	if m.removedyjs_updates != nil {
+		edges = append(edges, user.EdgeYjsUpdates)
 	}
 	return edges
 }
@@ -17184,13 +17997,25 @@ func (m *UserMutation) RemovedIDs(name string) []ent.Value {
 			ids = append(ids, id)
 		}
 		return ids
+	case user.EdgeWikiPagesCreated:
+		ids := make([]ent.Value, 0, len(m.removedwiki_pages_created))
+		for id := range m.removedwiki_pages_created {
+			ids = append(ids, id)
+		}
+		return ids
+	case user.EdgeYjsUpdates:
+		ids := make([]ent.Value, 0, len(m.removedyjs_updates))
+		for id := range m.removedyjs_updates {
+			ids = append(ids, id)
+		}
+		return ids
 	}
 	return nil
 }
 
 // ClearedEdges returns all edge names that were cleared in this mutation.
 func (m *UserMutation) ClearedEdges() []string {
-	edges := make([]string, 0, 17)
+	edges := make([]string, 0, 19)
 	if m.clearedowned_projects {
 		edges = append(edges, user.EdgeOwnedProjects)
 	}
@@ -17242,6 +18067,12 @@ func (m *UserMutation) ClearedEdges() []string {
 	if m.clearedtask_attachments {
 		edges = append(edges, user.EdgeTaskAttachments)
 	}
+	if m.clearedwiki_pages_created {
+		edges = append(edges, user.EdgeWikiPagesCreated)
+	}
+	if m.clearedyjs_updates {
+		edges = append(edges, user.EdgeYjsUpdates)
+	}
 	return edges
 }
 
@@ -17283,6 +18114,10 @@ func (m *UserMutation) EdgeCleared(name string) bool {
 		return m.clearedcloudinary_credentials
 	case user.EdgeTaskAttachments:
 		return m.clearedtask_attachments
+	case user.EdgeWikiPagesCreated:
+		return m.clearedwiki_pages_created
+	case user.EdgeYjsUpdates:
+		return m.clearedyjs_updates
 	}
 	return false
 }
@@ -17349,6 +18184,12 @@ func (m *UserMutation) ResetEdge(name string) error {
 		return nil
 	case user.EdgeTaskAttachments:
 		m.ResetTaskAttachments()
+		return nil
+	case user.EdgeWikiPagesCreated:
+		m.ResetWikiPagesCreated()
+		return nil
+	case user.EdgeYjsUpdates:
+		m.ResetYjsUpdates()
 		return nil
 	}
 	return fmt.Errorf("unknown User edge %s", name)
@@ -17998,4 +18839,2537 @@ func (m *UserActivityMutation) ResetEdge(name string) error {
 		return nil
 	}
 	return fmt.Errorf("unknown UserActivity edge %s", name)
+}
+
+// WikiBlockMutation represents an operation that mutates the WikiBlock nodes in the graph.
+type WikiBlockMutation struct {
+	config
+	op             Op
+	typ            string
+	id             *int64
+	block_type     *string
+	level          *int
+	addlevel       *int
+	headings_path  *string
+	canonical_json *string
+	plain_text     *string
+	position       *int
+	addposition    *int
+	search_text    *string
+	clearedFields  map[string]struct{}
+	page           *int64
+	clearedpage    bool
+	done           bool
+	oldValue       func(context.Context) (*WikiBlock, error)
+	predicates     []predicate.WikiBlock
+}
+
+var _ ent.Mutation = (*WikiBlockMutation)(nil)
+
+// wikiblockOption allows management of the mutation configuration using functional options.
+type wikiblockOption func(*WikiBlockMutation)
+
+// newWikiBlockMutation creates new mutation for the WikiBlock entity.
+func newWikiBlockMutation(c config, op Op, opts ...wikiblockOption) *WikiBlockMutation {
+	m := &WikiBlockMutation{
+		config:        c,
+		op:            op,
+		typ:           TypeWikiBlock,
+		clearedFields: make(map[string]struct{}),
+	}
+	for _, opt := range opts {
+		opt(m)
+	}
+	return m
+}
+
+// withWikiBlockID sets the ID field of the mutation.
+func withWikiBlockID(id int64) wikiblockOption {
+	return func(m *WikiBlockMutation) {
+		var (
+			err   error
+			once  sync.Once
+			value *WikiBlock
+		)
+		m.oldValue = func(ctx context.Context) (*WikiBlock, error) {
+			once.Do(func() {
+				if m.done {
+					err = errors.New("querying old values post mutation is not allowed")
+				} else {
+					value, err = m.Client().WikiBlock.Get(ctx, id)
+				}
+			})
+			return value, err
+		}
+		m.id = &id
+	}
+}
+
+// withWikiBlock sets the old WikiBlock of the mutation.
+func withWikiBlock(node *WikiBlock) wikiblockOption {
+	return func(m *WikiBlockMutation) {
+		m.oldValue = func(context.Context) (*WikiBlock, error) {
+			return node, nil
+		}
+		m.id = &node.ID
+	}
+}
+
+// Client returns a new `ent.Client` from the mutation. If the mutation was
+// executed in a transaction (ent.Tx), a transactional client is returned.
+func (m WikiBlockMutation) Client() *Client {
+	client := &Client{config: m.config}
+	client.init()
+	return client
+}
+
+// Tx returns an `ent.Tx` for mutations that were executed in transactions;
+// it returns an error otherwise.
+func (m WikiBlockMutation) Tx() (*Tx, error) {
+	if _, ok := m.driver.(*txDriver); !ok {
+		return nil, errors.New("ent: mutation is not running in a transaction")
+	}
+	tx := &Tx{config: m.config}
+	tx.init()
+	return tx, nil
+}
+
+// SetID sets the value of the id field. Note that this
+// operation is only accepted on creation of WikiBlock entities.
+func (m *WikiBlockMutation) SetID(id int64) {
+	m.id = &id
+}
+
+// ID returns the ID value in the mutation. Note that the ID is only available
+// if it was provided to the builder or after it was returned from the database.
+func (m *WikiBlockMutation) ID() (id int64, exists bool) {
+	if m.id == nil {
+		return
+	}
+	return *m.id, true
+}
+
+// IDs queries the database and returns the entity ids that match the mutation's predicate.
+// That means, if the mutation is applied within a transaction with an isolation level such
+// as sql.LevelSerializable, the returned ids match the ids of the rows that will be updated
+// or updated by the mutation.
+func (m *WikiBlockMutation) IDs(ctx context.Context) ([]int64, error) {
+	switch {
+	case m.op.Is(OpUpdateOne | OpDeleteOne):
+		id, exists := m.ID()
+		if exists {
+			return []int64{id}, nil
+		}
+		fallthrough
+	case m.op.Is(OpUpdate | OpDelete):
+		return m.Client().WikiBlock.Query().Where(m.predicates...).IDs(ctx)
+	default:
+		return nil, fmt.Errorf("IDs is not allowed on %s operations", m.op)
+	}
+}
+
+// SetPageID sets the "page_id" field.
+func (m *WikiBlockMutation) SetPageID(i int64) {
+	m.page = &i
+}
+
+// PageID returns the value of the "page_id" field in the mutation.
+func (m *WikiBlockMutation) PageID() (r int64, exists bool) {
+	v := m.page
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldPageID returns the old "page_id" field's value of the WikiBlock entity.
+// If the WikiBlock object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *WikiBlockMutation) OldPageID(ctx context.Context) (v int64, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldPageID is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldPageID requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldPageID: %w", err)
+	}
+	return oldValue.PageID, nil
+}
+
+// ResetPageID resets all changes to the "page_id" field.
+func (m *WikiBlockMutation) ResetPageID() {
+	m.page = nil
+}
+
+// SetBlockType sets the "block_type" field.
+func (m *WikiBlockMutation) SetBlockType(s string) {
+	m.block_type = &s
+}
+
+// BlockType returns the value of the "block_type" field in the mutation.
+func (m *WikiBlockMutation) BlockType() (r string, exists bool) {
+	v := m.block_type
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldBlockType returns the old "block_type" field's value of the WikiBlock entity.
+// If the WikiBlock object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *WikiBlockMutation) OldBlockType(ctx context.Context) (v string, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldBlockType is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldBlockType requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldBlockType: %w", err)
+	}
+	return oldValue.BlockType, nil
+}
+
+// ResetBlockType resets all changes to the "block_type" field.
+func (m *WikiBlockMutation) ResetBlockType() {
+	m.block_type = nil
+}
+
+// SetLevel sets the "level" field.
+func (m *WikiBlockMutation) SetLevel(i int) {
+	m.level = &i
+	m.addlevel = nil
+}
+
+// Level returns the value of the "level" field in the mutation.
+func (m *WikiBlockMutation) Level() (r int, exists bool) {
+	v := m.level
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldLevel returns the old "level" field's value of the WikiBlock entity.
+// If the WikiBlock object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *WikiBlockMutation) OldLevel(ctx context.Context) (v *int, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldLevel is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldLevel requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldLevel: %w", err)
+	}
+	return oldValue.Level, nil
+}
+
+// AddLevel adds i to the "level" field.
+func (m *WikiBlockMutation) AddLevel(i int) {
+	if m.addlevel != nil {
+		*m.addlevel += i
+	} else {
+		m.addlevel = &i
+	}
+}
+
+// AddedLevel returns the value that was added to the "level" field in this mutation.
+func (m *WikiBlockMutation) AddedLevel() (r int, exists bool) {
+	v := m.addlevel
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// ClearLevel clears the value of the "level" field.
+func (m *WikiBlockMutation) ClearLevel() {
+	m.level = nil
+	m.addlevel = nil
+	m.clearedFields[wikiblock.FieldLevel] = struct{}{}
+}
+
+// LevelCleared returns if the "level" field was cleared in this mutation.
+func (m *WikiBlockMutation) LevelCleared() bool {
+	_, ok := m.clearedFields[wikiblock.FieldLevel]
+	return ok
+}
+
+// ResetLevel resets all changes to the "level" field.
+func (m *WikiBlockMutation) ResetLevel() {
+	m.level = nil
+	m.addlevel = nil
+	delete(m.clearedFields, wikiblock.FieldLevel)
+}
+
+// SetHeadingsPath sets the "headings_path" field.
+func (m *WikiBlockMutation) SetHeadingsPath(s string) {
+	m.headings_path = &s
+}
+
+// HeadingsPath returns the value of the "headings_path" field in the mutation.
+func (m *WikiBlockMutation) HeadingsPath() (r string, exists bool) {
+	v := m.headings_path
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldHeadingsPath returns the old "headings_path" field's value of the WikiBlock entity.
+// If the WikiBlock object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *WikiBlockMutation) OldHeadingsPath(ctx context.Context) (v *string, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldHeadingsPath is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldHeadingsPath requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldHeadingsPath: %w", err)
+	}
+	return oldValue.HeadingsPath, nil
+}
+
+// ClearHeadingsPath clears the value of the "headings_path" field.
+func (m *WikiBlockMutation) ClearHeadingsPath() {
+	m.headings_path = nil
+	m.clearedFields[wikiblock.FieldHeadingsPath] = struct{}{}
+}
+
+// HeadingsPathCleared returns if the "headings_path" field was cleared in this mutation.
+func (m *WikiBlockMutation) HeadingsPathCleared() bool {
+	_, ok := m.clearedFields[wikiblock.FieldHeadingsPath]
+	return ok
+}
+
+// ResetHeadingsPath resets all changes to the "headings_path" field.
+func (m *WikiBlockMutation) ResetHeadingsPath() {
+	m.headings_path = nil
+	delete(m.clearedFields, wikiblock.FieldHeadingsPath)
+}
+
+// SetCanonicalJSON sets the "canonical_json" field.
+func (m *WikiBlockMutation) SetCanonicalJSON(s string) {
+	m.canonical_json = &s
+}
+
+// CanonicalJSON returns the value of the "canonical_json" field in the mutation.
+func (m *WikiBlockMutation) CanonicalJSON() (r string, exists bool) {
+	v := m.canonical_json
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldCanonicalJSON returns the old "canonical_json" field's value of the WikiBlock entity.
+// If the WikiBlock object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *WikiBlockMutation) OldCanonicalJSON(ctx context.Context) (v *string, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldCanonicalJSON is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldCanonicalJSON requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldCanonicalJSON: %w", err)
+	}
+	return oldValue.CanonicalJSON, nil
+}
+
+// ClearCanonicalJSON clears the value of the "canonical_json" field.
+func (m *WikiBlockMutation) ClearCanonicalJSON() {
+	m.canonical_json = nil
+	m.clearedFields[wikiblock.FieldCanonicalJSON] = struct{}{}
+}
+
+// CanonicalJSONCleared returns if the "canonical_json" field was cleared in this mutation.
+func (m *WikiBlockMutation) CanonicalJSONCleared() bool {
+	_, ok := m.clearedFields[wikiblock.FieldCanonicalJSON]
+	return ok
+}
+
+// ResetCanonicalJSON resets all changes to the "canonical_json" field.
+func (m *WikiBlockMutation) ResetCanonicalJSON() {
+	m.canonical_json = nil
+	delete(m.clearedFields, wikiblock.FieldCanonicalJSON)
+}
+
+// SetPlainText sets the "plain_text" field.
+func (m *WikiBlockMutation) SetPlainText(s string) {
+	m.plain_text = &s
+}
+
+// PlainText returns the value of the "plain_text" field in the mutation.
+func (m *WikiBlockMutation) PlainText() (r string, exists bool) {
+	v := m.plain_text
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldPlainText returns the old "plain_text" field's value of the WikiBlock entity.
+// If the WikiBlock object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *WikiBlockMutation) OldPlainText(ctx context.Context) (v *string, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldPlainText is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldPlainText requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldPlainText: %w", err)
+	}
+	return oldValue.PlainText, nil
+}
+
+// ClearPlainText clears the value of the "plain_text" field.
+func (m *WikiBlockMutation) ClearPlainText() {
+	m.plain_text = nil
+	m.clearedFields[wikiblock.FieldPlainText] = struct{}{}
+}
+
+// PlainTextCleared returns if the "plain_text" field was cleared in this mutation.
+func (m *WikiBlockMutation) PlainTextCleared() bool {
+	_, ok := m.clearedFields[wikiblock.FieldPlainText]
+	return ok
+}
+
+// ResetPlainText resets all changes to the "plain_text" field.
+func (m *WikiBlockMutation) ResetPlainText() {
+	m.plain_text = nil
+	delete(m.clearedFields, wikiblock.FieldPlainText)
+}
+
+// SetPosition sets the "position" field.
+func (m *WikiBlockMutation) SetPosition(i int) {
+	m.position = &i
+	m.addposition = nil
+}
+
+// Position returns the value of the "position" field in the mutation.
+func (m *WikiBlockMutation) Position() (r int, exists bool) {
+	v := m.position
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldPosition returns the old "position" field's value of the WikiBlock entity.
+// If the WikiBlock object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *WikiBlockMutation) OldPosition(ctx context.Context) (v int, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldPosition is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldPosition requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldPosition: %w", err)
+	}
+	return oldValue.Position, nil
+}
+
+// AddPosition adds i to the "position" field.
+func (m *WikiBlockMutation) AddPosition(i int) {
+	if m.addposition != nil {
+		*m.addposition += i
+	} else {
+		m.addposition = &i
+	}
+}
+
+// AddedPosition returns the value that was added to the "position" field in this mutation.
+func (m *WikiBlockMutation) AddedPosition() (r int, exists bool) {
+	v := m.addposition
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// ResetPosition resets all changes to the "position" field.
+func (m *WikiBlockMutation) ResetPosition() {
+	m.position = nil
+	m.addposition = nil
+}
+
+// SetSearchText sets the "search_text" field.
+func (m *WikiBlockMutation) SetSearchText(s string) {
+	m.search_text = &s
+}
+
+// SearchText returns the value of the "search_text" field in the mutation.
+func (m *WikiBlockMutation) SearchText() (r string, exists bool) {
+	v := m.search_text
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldSearchText returns the old "search_text" field's value of the WikiBlock entity.
+// If the WikiBlock object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *WikiBlockMutation) OldSearchText(ctx context.Context) (v *string, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldSearchText is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldSearchText requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldSearchText: %w", err)
+	}
+	return oldValue.SearchText, nil
+}
+
+// ClearSearchText clears the value of the "search_text" field.
+func (m *WikiBlockMutation) ClearSearchText() {
+	m.search_text = nil
+	m.clearedFields[wikiblock.FieldSearchText] = struct{}{}
+}
+
+// SearchTextCleared returns if the "search_text" field was cleared in this mutation.
+func (m *WikiBlockMutation) SearchTextCleared() bool {
+	_, ok := m.clearedFields[wikiblock.FieldSearchText]
+	return ok
+}
+
+// ResetSearchText resets all changes to the "search_text" field.
+func (m *WikiBlockMutation) ResetSearchText() {
+	m.search_text = nil
+	delete(m.clearedFields, wikiblock.FieldSearchText)
+}
+
+// ClearPage clears the "page" edge to the WikiPage entity.
+func (m *WikiBlockMutation) ClearPage() {
+	m.clearedpage = true
+	m.clearedFields[wikiblock.FieldPageID] = struct{}{}
+}
+
+// PageCleared reports if the "page" edge to the WikiPage entity was cleared.
+func (m *WikiBlockMutation) PageCleared() bool {
+	return m.clearedpage
+}
+
+// PageIDs returns the "page" edge IDs in the mutation.
+// Note that IDs always returns len(IDs) <= 1 for unique edges, and you should use
+// PageID instead. It exists only for internal usage by the builders.
+func (m *WikiBlockMutation) PageIDs() (ids []int64) {
+	if id := m.page; id != nil {
+		ids = append(ids, *id)
+	}
+	return
+}
+
+// ResetPage resets all changes to the "page" edge.
+func (m *WikiBlockMutation) ResetPage() {
+	m.page = nil
+	m.clearedpage = false
+}
+
+// Where appends a list predicates to the WikiBlockMutation builder.
+func (m *WikiBlockMutation) Where(ps ...predicate.WikiBlock) {
+	m.predicates = append(m.predicates, ps...)
+}
+
+// WhereP appends storage-level predicates to the WikiBlockMutation builder. Using this method,
+// users can use type-assertion to append predicates that do not depend on any generated package.
+func (m *WikiBlockMutation) WhereP(ps ...func(*sql.Selector)) {
+	p := make([]predicate.WikiBlock, len(ps))
+	for i := range ps {
+		p[i] = ps[i]
+	}
+	m.Where(p...)
+}
+
+// Op returns the operation name.
+func (m *WikiBlockMutation) Op() Op {
+	return m.op
+}
+
+// SetOp allows setting the mutation operation.
+func (m *WikiBlockMutation) SetOp(op Op) {
+	m.op = op
+}
+
+// Type returns the node type of this mutation (WikiBlock).
+func (m *WikiBlockMutation) Type() string {
+	return m.typ
+}
+
+// Fields returns all fields that were changed during this mutation. Note that in
+// order to get all numeric fields that were incremented/decremented, call
+// AddedFields().
+func (m *WikiBlockMutation) Fields() []string {
+	fields := make([]string, 0, 8)
+	if m.page != nil {
+		fields = append(fields, wikiblock.FieldPageID)
+	}
+	if m.block_type != nil {
+		fields = append(fields, wikiblock.FieldBlockType)
+	}
+	if m.level != nil {
+		fields = append(fields, wikiblock.FieldLevel)
+	}
+	if m.headings_path != nil {
+		fields = append(fields, wikiblock.FieldHeadingsPath)
+	}
+	if m.canonical_json != nil {
+		fields = append(fields, wikiblock.FieldCanonicalJSON)
+	}
+	if m.plain_text != nil {
+		fields = append(fields, wikiblock.FieldPlainText)
+	}
+	if m.position != nil {
+		fields = append(fields, wikiblock.FieldPosition)
+	}
+	if m.search_text != nil {
+		fields = append(fields, wikiblock.FieldSearchText)
+	}
+	return fields
+}
+
+// Field returns the value of a field with the given name. The second boolean
+// return value indicates that this field was not set, or was not defined in the
+// schema.
+func (m *WikiBlockMutation) Field(name string) (ent.Value, bool) {
+	switch name {
+	case wikiblock.FieldPageID:
+		return m.PageID()
+	case wikiblock.FieldBlockType:
+		return m.BlockType()
+	case wikiblock.FieldLevel:
+		return m.Level()
+	case wikiblock.FieldHeadingsPath:
+		return m.HeadingsPath()
+	case wikiblock.FieldCanonicalJSON:
+		return m.CanonicalJSON()
+	case wikiblock.FieldPlainText:
+		return m.PlainText()
+	case wikiblock.FieldPosition:
+		return m.Position()
+	case wikiblock.FieldSearchText:
+		return m.SearchText()
+	}
+	return nil, false
+}
+
+// OldField returns the old value of the field from the database. An error is
+// returned if the mutation operation is not UpdateOne, or the query to the
+// database failed.
+func (m *WikiBlockMutation) OldField(ctx context.Context, name string) (ent.Value, error) {
+	switch name {
+	case wikiblock.FieldPageID:
+		return m.OldPageID(ctx)
+	case wikiblock.FieldBlockType:
+		return m.OldBlockType(ctx)
+	case wikiblock.FieldLevel:
+		return m.OldLevel(ctx)
+	case wikiblock.FieldHeadingsPath:
+		return m.OldHeadingsPath(ctx)
+	case wikiblock.FieldCanonicalJSON:
+		return m.OldCanonicalJSON(ctx)
+	case wikiblock.FieldPlainText:
+		return m.OldPlainText(ctx)
+	case wikiblock.FieldPosition:
+		return m.OldPosition(ctx)
+	case wikiblock.FieldSearchText:
+		return m.OldSearchText(ctx)
+	}
+	return nil, fmt.Errorf("unknown WikiBlock field %s", name)
+}
+
+// SetField sets the value of a field with the given name. It returns an error if
+// the field is not defined in the schema, or if the type mismatched the field
+// type.
+func (m *WikiBlockMutation) SetField(name string, value ent.Value) error {
+	switch name {
+	case wikiblock.FieldPageID:
+		v, ok := value.(int64)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetPageID(v)
+		return nil
+	case wikiblock.FieldBlockType:
+		v, ok := value.(string)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetBlockType(v)
+		return nil
+	case wikiblock.FieldLevel:
+		v, ok := value.(int)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetLevel(v)
+		return nil
+	case wikiblock.FieldHeadingsPath:
+		v, ok := value.(string)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetHeadingsPath(v)
+		return nil
+	case wikiblock.FieldCanonicalJSON:
+		v, ok := value.(string)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetCanonicalJSON(v)
+		return nil
+	case wikiblock.FieldPlainText:
+		v, ok := value.(string)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetPlainText(v)
+		return nil
+	case wikiblock.FieldPosition:
+		v, ok := value.(int)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetPosition(v)
+		return nil
+	case wikiblock.FieldSearchText:
+		v, ok := value.(string)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetSearchText(v)
+		return nil
+	}
+	return fmt.Errorf("unknown WikiBlock field %s", name)
+}
+
+// AddedFields returns all numeric fields that were incremented/decremented during
+// this mutation.
+func (m *WikiBlockMutation) AddedFields() []string {
+	var fields []string
+	if m.addlevel != nil {
+		fields = append(fields, wikiblock.FieldLevel)
+	}
+	if m.addposition != nil {
+		fields = append(fields, wikiblock.FieldPosition)
+	}
+	return fields
+}
+
+// AddedField returns the numeric value that was incremented/decremented on a field
+// with the given name. The second boolean return value indicates that this field
+// was not set, or was not defined in the schema.
+func (m *WikiBlockMutation) AddedField(name string) (ent.Value, bool) {
+	switch name {
+	case wikiblock.FieldLevel:
+		return m.AddedLevel()
+	case wikiblock.FieldPosition:
+		return m.AddedPosition()
+	}
+	return nil, false
+}
+
+// AddField adds the value to the field with the given name. It returns an error if
+// the field is not defined in the schema, or if the type mismatched the field
+// type.
+func (m *WikiBlockMutation) AddField(name string, value ent.Value) error {
+	switch name {
+	case wikiblock.FieldLevel:
+		v, ok := value.(int)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.AddLevel(v)
+		return nil
+	case wikiblock.FieldPosition:
+		v, ok := value.(int)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.AddPosition(v)
+		return nil
+	}
+	return fmt.Errorf("unknown WikiBlock numeric field %s", name)
+}
+
+// ClearedFields returns all nullable fields that were cleared during this
+// mutation.
+func (m *WikiBlockMutation) ClearedFields() []string {
+	var fields []string
+	if m.FieldCleared(wikiblock.FieldLevel) {
+		fields = append(fields, wikiblock.FieldLevel)
+	}
+	if m.FieldCleared(wikiblock.FieldHeadingsPath) {
+		fields = append(fields, wikiblock.FieldHeadingsPath)
+	}
+	if m.FieldCleared(wikiblock.FieldCanonicalJSON) {
+		fields = append(fields, wikiblock.FieldCanonicalJSON)
+	}
+	if m.FieldCleared(wikiblock.FieldPlainText) {
+		fields = append(fields, wikiblock.FieldPlainText)
+	}
+	if m.FieldCleared(wikiblock.FieldSearchText) {
+		fields = append(fields, wikiblock.FieldSearchText)
+	}
+	return fields
+}
+
+// FieldCleared returns a boolean indicating if a field with the given name was
+// cleared in this mutation.
+func (m *WikiBlockMutation) FieldCleared(name string) bool {
+	_, ok := m.clearedFields[name]
+	return ok
+}
+
+// ClearField clears the value of the field with the given name. It returns an
+// error if the field is not defined in the schema.
+func (m *WikiBlockMutation) ClearField(name string) error {
+	switch name {
+	case wikiblock.FieldLevel:
+		m.ClearLevel()
+		return nil
+	case wikiblock.FieldHeadingsPath:
+		m.ClearHeadingsPath()
+		return nil
+	case wikiblock.FieldCanonicalJSON:
+		m.ClearCanonicalJSON()
+		return nil
+	case wikiblock.FieldPlainText:
+		m.ClearPlainText()
+		return nil
+	case wikiblock.FieldSearchText:
+		m.ClearSearchText()
+		return nil
+	}
+	return fmt.Errorf("unknown WikiBlock nullable field %s", name)
+}
+
+// ResetField resets all changes in the mutation for the field with the given name.
+// It returns an error if the field is not defined in the schema.
+func (m *WikiBlockMutation) ResetField(name string) error {
+	switch name {
+	case wikiblock.FieldPageID:
+		m.ResetPageID()
+		return nil
+	case wikiblock.FieldBlockType:
+		m.ResetBlockType()
+		return nil
+	case wikiblock.FieldLevel:
+		m.ResetLevel()
+		return nil
+	case wikiblock.FieldHeadingsPath:
+		m.ResetHeadingsPath()
+		return nil
+	case wikiblock.FieldCanonicalJSON:
+		m.ResetCanonicalJSON()
+		return nil
+	case wikiblock.FieldPlainText:
+		m.ResetPlainText()
+		return nil
+	case wikiblock.FieldPosition:
+		m.ResetPosition()
+		return nil
+	case wikiblock.FieldSearchText:
+		m.ResetSearchText()
+		return nil
+	}
+	return fmt.Errorf("unknown WikiBlock field %s", name)
+}
+
+// AddedEdges returns all edge names that were set/added in this mutation.
+func (m *WikiBlockMutation) AddedEdges() []string {
+	edges := make([]string, 0, 1)
+	if m.page != nil {
+		edges = append(edges, wikiblock.EdgePage)
+	}
+	return edges
+}
+
+// AddedIDs returns all IDs (to other nodes) that were added for the given edge
+// name in this mutation.
+func (m *WikiBlockMutation) AddedIDs(name string) []ent.Value {
+	switch name {
+	case wikiblock.EdgePage:
+		if id := m.page; id != nil {
+			return []ent.Value{*id}
+		}
+	}
+	return nil
+}
+
+// RemovedEdges returns all edge names that were removed in this mutation.
+func (m *WikiBlockMutation) RemovedEdges() []string {
+	edges := make([]string, 0, 1)
+	return edges
+}
+
+// RemovedIDs returns all IDs (to other nodes) that were removed for the edge with
+// the given name in this mutation.
+func (m *WikiBlockMutation) RemovedIDs(name string) []ent.Value {
+	return nil
+}
+
+// ClearedEdges returns all edge names that were cleared in this mutation.
+func (m *WikiBlockMutation) ClearedEdges() []string {
+	edges := make([]string, 0, 1)
+	if m.clearedpage {
+		edges = append(edges, wikiblock.EdgePage)
+	}
+	return edges
+}
+
+// EdgeCleared returns a boolean which indicates if the edge with the given name
+// was cleared in this mutation.
+func (m *WikiBlockMutation) EdgeCleared(name string) bool {
+	switch name {
+	case wikiblock.EdgePage:
+		return m.clearedpage
+	}
+	return false
+}
+
+// ClearEdge clears the value of the edge with the given name. It returns an error
+// if that edge is not defined in the schema.
+func (m *WikiBlockMutation) ClearEdge(name string) error {
+	switch name {
+	case wikiblock.EdgePage:
+		m.ClearPage()
+		return nil
+	}
+	return fmt.Errorf("unknown WikiBlock unique edge %s", name)
+}
+
+// ResetEdge resets all changes to the edge with the given name in this mutation.
+// It returns an error if the edge is not defined in the schema.
+func (m *WikiBlockMutation) ResetEdge(name string) error {
+	switch name {
+	case wikiblock.EdgePage:
+		m.ResetPage()
+		return nil
+	}
+	return fmt.Errorf("unknown WikiBlock edge %s", name)
+}
+
+// WikiPageMutation represents an operation that mutates the WikiPage nodes in the graph.
+type WikiPageMutation struct {
+	config
+	op                 Op
+	typ                string
+	id                 *int64
+	title              *string
+	slug               *string
+	created_at         *time.Time
+	updated_at         *time.Time
+	clearedFields      map[string]struct{}
+	project            *int64
+	clearedproject     bool
+	creator            *int64
+	clearedcreator     bool
+	yjs_updates        map[int64]struct{}
+	removedyjs_updates map[int64]struct{}
+	clearedyjs_updates bool
+	versions           map[int64]struct{}
+	removedversions    map[int64]struct{}
+	clearedversions    bool
+	blocks             map[int64]struct{}
+	removedblocks      map[int64]struct{}
+	clearedblocks      bool
+	done               bool
+	oldValue           func(context.Context) (*WikiPage, error)
+	predicates         []predicate.WikiPage
+}
+
+var _ ent.Mutation = (*WikiPageMutation)(nil)
+
+// wikipageOption allows management of the mutation configuration using functional options.
+type wikipageOption func(*WikiPageMutation)
+
+// newWikiPageMutation creates new mutation for the WikiPage entity.
+func newWikiPageMutation(c config, op Op, opts ...wikipageOption) *WikiPageMutation {
+	m := &WikiPageMutation{
+		config:        c,
+		op:            op,
+		typ:           TypeWikiPage,
+		clearedFields: make(map[string]struct{}),
+	}
+	for _, opt := range opts {
+		opt(m)
+	}
+	return m
+}
+
+// withWikiPageID sets the ID field of the mutation.
+func withWikiPageID(id int64) wikipageOption {
+	return func(m *WikiPageMutation) {
+		var (
+			err   error
+			once  sync.Once
+			value *WikiPage
+		)
+		m.oldValue = func(ctx context.Context) (*WikiPage, error) {
+			once.Do(func() {
+				if m.done {
+					err = errors.New("querying old values post mutation is not allowed")
+				} else {
+					value, err = m.Client().WikiPage.Get(ctx, id)
+				}
+			})
+			return value, err
+		}
+		m.id = &id
+	}
+}
+
+// withWikiPage sets the old WikiPage of the mutation.
+func withWikiPage(node *WikiPage) wikipageOption {
+	return func(m *WikiPageMutation) {
+		m.oldValue = func(context.Context) (*WikiPage, error) {
+			return node, nil
+		}
+		m.id = &node.ID
+	}
+}
+
+// Client returns a new `ent.Client` from the mutation. If the mutation was
+// executed in a transaction (ent.Tx), a transactional client is returned.
+func (m WikiPageMutation) Client() *Client {
+	client := &Client{config: m.config}
+	client.init()
+	return client
+}
+
+// Tx returns an `ent.Tx` for mutations that were executed in transactions;
+// it returns an error otherwise.
+func (m WikiPageMutation) Tx() (*Tx, error) {
+	if _, ok := m.driver.(*txDriver); !ok {
+		return nil, errors.New("ent: mutation is not running in a transaction")
+	}
+	tx := &Tx{config: m.config}
+	tx.init()
+	return tx, nil
+}
+
+// SetID sets the value of the id field. Note that this
+// operation is only accepted on creation of WikiPage entities.
+func (m *WikiPageMutation) SetID(id int64) {
+	m.id = &id
+}
+
+// ID returns the ID value in the mutation. Note that the ID is only available
+// if it was provided to the builder or after it was returned from the database.
+func (m *WikiPageMutation) ID() (id int64, exists bool) {
+	if m.id == nil {
+		return
+	}
+	return *m.id, true
+}
+
+// IDs queries the database and returns the entity ids that match the mutation's predicate.
+// That means, if the mutation is applied within a transaction with an isolation level such
+// as sql.LevelSerializable, the returned ids match the ids of the rows that will be updated
+// or updated by the mutation.
+func (m *WikiPageMutation) IDs(ctx context.Context) ([]int64, error) {
+	switch {
+	case m.op.Is(OpUpdateOne | OpDeleteOne):
+		id, exists := m.ID()
+		if exists {
+			return []int64{id}, nil
+		}
+		fallthrough
+	case m.op.Is(OpUpdate | OpDelete):
+		return m.Client().WikiPage.Query().Where(m.predicates...).IDs(ctx)
+	default:
+		return nil, fmt.Errorf("IDs is not allowed on %s operations", m.op)
+	}
+}
+
+// SetProjectID sets the "project_id" field.
+func (m *WikiPageMutation) SetProjectID(i int64) {
+	m.project = &i
+}
+
+// ProjectID returns the value of the "project_id" field in the mutation.
+func (m *WikiPageMutation) ProjectID() (r int64, exists bool) {
+	v := m.project
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldProjectID returns the old "project_id" field's value of the WikiPage entity.
+// If the WikiPage object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *WikiPageMutation) OldProjectID(ctx context.Context) (v int64, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldProjectID is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldProjectID requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldProjectID: %w", err)
+	}
+	return oldValue.ProjectID, nil
+}
+
+// ResetProjectID resets all changes to the "project_id" field.
+func (m *WikiPageMutation) ResetProjectID() {
+	m.project = nil
+}
+
+// SetTitle sets the "title" field.
+func (m *WikiPageMutation) SetTitle(s string) {
+	m.title = &s
+}
+
+// Title returns the value of the "title" field in the mutation.
+func (m *WikiPageMutation) Title() (r string, exists bool) {
+	v := m.title
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldTitle returns the old "title" field's value of the WikiPage entity.
+// If the WikiPage object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *WikiPageMutation) OldTitle(ctx context.Context) (v string, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldTitle is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldTitle requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldTitle: %w", err)
+	}
+	return oldValue.Title, nil
+}
+
+// ResetTitle resets all changes to the "title" field.
+func (m *WikiPageMutation) ResetTitle() {
+	m.title = nil
+}
+
+// SetSlug sets the "slug" field.
+func (m *WikiPageMutation) SetSlug(s string) {
+	m.slug = &s
+}
+
+// Slug returns the value of the "slug" field in the mutation.
+func (m *WikiPageMutation) Slug() (r string, exists bool) {
+	v := m.slug
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldSlug returns the old "slug" field's value of the WikiPage entity.
+// If the WikiPage object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *WikiPageMutation) OldSlug(ctx context.Context) (v string, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldSlug is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldSlug requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldSlug: %w", err)
+	}
+	return oldValue.Slug, nil
+}
+
+// ResetSlug resets all changes to the "slug" field.
+func (m *WikiPageMutation) ResetSlug() {
+	m.slug = nil
+}
+
+// SetCreatedBy sets the "created_by" field.
+func (m *WikiPageMutation) SetCreatedBy(i int64) {
+	m.creator = &i
+}
+
+// CreatedBy returns the value of the "created_by" field in the mutation.
+func (m *WikiPageMutation) CreatedBy() (r int64, exists bool) {
+	v := m.creator
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldCreatedBy returns the old "created_by" field's value of the WikiPage entity.
+// If the WikiPage object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *WikiPageMutation) OldCreatedBy(ctx context.Context) (v int64, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldCreatedBy is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldCreatedBy requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldCreatedBy: %w", err)
+	}
+	return oldValue.CreatedBy, nil
+}
+
+// ResetCreatedBy resets all changes to the "created_by" field.
+func (m *WikiPageMutation) ResetCreatedBy() {
+	m.creator = nil
+}
+
+// SetCreatedAt sets the "created_at" field.
+func (m *WikiPageMutation) SetCreatedAt(t time.Time) {
+	m.created_at = &t
+}
+
+// CreatedAt returns the value of the "created_at" field in the mutation.
+func (m *WikiPageMutation) CreatedAt() (r time.Time, exists bool) {
+	v := m.created_at
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldCreatedAt returns the old "created_at" field's value of the WikiPage entity.
+// If the WikiPage object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *WikiPageMutation) OldCreatedAt(ctx context.Context) (v time.Time, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldCreatedAt is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldCreatedAt requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldCreatedAt: %w", err)
+	}
+	return oldValue.CreatedAt, nil
+}
+
+// ResetCreatedAt resets all changes to the "created_at" field.
+func (m *WikiPageMutation) ResetCreatedAt() {
+	m.created_at = nil
+}
+
+// SetUpdatedAt sets the "updated_at" field.
+func (m *WikiPageMutation) SetUpdatedAt(t time.Time) {
+	m.updated_at = &t
+}
+
+// UpdatedAt returns the value of the "updated_at" field in the mutation.
+func (m *WikiPageMutation) UpdatedAt() (r time.Time, exists bool) {
+	v := m.updated_at
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldUpdatedAt returns the old "updated_at" field's value of the WikiPage entity.
+// If the WikiPage object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *WikiPageMutation) OldUpdatedAt(ctx context.Context) (v time.Time, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldUpdatedAt is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldUpdatedAt requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldUpdatedAt: %w", err)
+	}
+	return oldValue.UpdatedAt, nil
+}
+
+// ResetUpdatedAt resets all changes to the "updated_at" field.
+func (m *WikiPageMutation) ResetUpdatedAt() {
+	m.updated_at = nil
+}
+
+// ClearProject clears the "project" edge to the Project entity.
+func (m *WikiPageMutation) ClearProject() {
+	m.clearedproject = true
+	m.clearedFields[wikipage.FieldProjectID] = struct{}{}
+}
+
+// ProjectCleared reports if the "project" edge to the Project entity was cleared.
+func (m *WikiPageMutation) ProjectCleared() bool {
+	return m.clearedproject
+}
+
+// ProjectIDs returns the "project" edge IDs in the mutation.
+// Note that IDs always returns len(IDs) <= 1 for unique edges, and you should use
+// ProjectID instead. It exists only for internal usage by the builders.
+func (m *WikiPageMutation) ProjectIDs() (ids []int64) {
+	if id := m.project; id != nil {
+		ids = append(ids, *id)
+	}
+	return
+}
+
+// ResetProject resets all changes to the "project" edge.
+func (m *WikiPageMutation) ResetProject() {
+	m.project = nil
+	m.clearedproject = false
+}
+
+// SetCreatorID sets the "creator" edge to the User entity by id.
+func (m *WikiPageMutation) SetCreatorID(id int64) {
+	m.creator = &id
+}
+
+// ClearCreator clears the "creator" edge to the User entity.
+func (m *WikiPageMutation) ClearCreator() {
+	m.clearedcreator = true
+	m.clearedFields[wikipage.FieldCreatedBy] = struct{}{}
+}
+
+// CreatorCleared reports if the "creator" edge to the User entity was cleared.
+func (m *WikiPageMutation) CreatorCleared() bool {
+	return m.clearedcreator
+}
+
+// CreatorID returns the "creator" edge ID in the mutation.
+func (m *WikiPageMutation) CreatorID() (id int64, exists bool) {
+	if m.creator != nil {
+		return *m.creator, true
+	}
+	return
+}
+
+// CreatorIDs returns the "creator" edge IDs in the mutation.
+// Note that IDs always returns len(IDs) <= 1 for unique edges, and you should use
+// CreatorID instead. It exists only for internal usage by the builders.
+func (m *WikiPageMutation) CreatorIDs() (ids []int64) {
+	if id := m.creator; id != nil {
+		ids = append(ids, *id)
+	}
+	return
+}
+
+// ResetCreator resets all changes to the "creator" edge.
+func (m *WikiPageMutation) ResetCreator() {
+	m.creator = nil
+	m.clearedcreator = false
+}
+
+// AddYjsUpdateIDs adds the "yjs_updates" edge to the YjsUpdate entity by ids.
+func (m *WikiPageMutation) AddYjsUpdateIDs(ids ...int64) {
+	if m.yjs_updates == nil {
+		m.yjs_updates = make(map[int64]struct{})
+	}
+	for i := range ids {
+		m.yjs_updates[ids[i]] = struct{}{}
+	}
+}
+
+// ClearYjsUpdates clears the "yjs_updates" edge to the YjsUpdate entity.
+func (m *WikiPageMutation) ClearYjsUpdates() {
+	m.clearedyjs_updates = true
+}
+
+// YjsUpdatesCleared reports if the "yjs_updates" edge to the YjsUpdate entity was cleared.
+func (m *WikiPageMutation) YjsUpdatesCleared() bool {
+	return m.clearedyjs_updates
+}
+
+// RemoveYjsUpdateIDs removes the "yjs_updates" edge to the YjsUpdate entity by IDs.
+func (m *WikiPageMutation) RemoveYjsUpdateIDs(ids ...int64) {
+	if m.removedyjs_updates == nil {
+		m.removedyjs_updates = make(map[int64]struct{})
+	}
+	for i := range ids {
+		delete(m.yjs_updates, ids[i])
+		m.removedyjs_updates[ids[i]] = struct{}{}
+	}
+}
+
+// RemovedYjsUpdates returns the removed IDs of the "yjs_updates" edge to the YjsUpdate entity.
+func (m *WikiPageMutation) RemovedYjsUpdatesIDs() (ids []int64) {
+	for id := range m.removedyjs_updates {
+		ids = append(ids, id)
+	}
+	return
+}
+
+// YjsUpdatesIDs returns the "yjs_updates" edge IDs in the mutation.
+func (m *WikiPageMutation) YjsUpdatesIDs() (ids []int64) {
+	for id := range m.yjs_updates {
+		ids = append(ids, id)
+	}
+	return
+}
+
+// ResetYjsUpdates resets all changes to the "yjs_updates" edge.
+func (m *WikiPageMutation) ResetYjsUpdates() {
+	m.yjs_updates = nil
+	m.clearedyjs_updates = false
+	m.removedyjs_updates = nil
+}
+
+// AddVersionIDs adds the "versions" edge to the PageVersion entity by ids.
+func (m *WikiPageMutation) AddVersionIDs(ids ...int64) {
+	if m.versions == nil {
+		m.versions = make(map[int64]struct{})
+	}
+	for i := range ids {
+		m.versions[ids[i]] = struct{}{}
+	}
+}
+
+// ClearVersions clears the "versions" edge to the PageVersion entity.
+func (m *WikiPageMutation) ClearVersions() {
+	m.clearedversions = true
+}
+
+// VersionsCleared reports if the "versions" edge to the PageVersion entity was cleared.
+func (m *WikiPageMutation) VersionsCleared() bool {
+	return m.clearedversions
+}
+
+// RemoveVersionIDs removes the "versions" edge to the PageVersion entity by IDs.
+func (m *WikiPageMutation) RemoveVersionIDs(ids ...int64) {
+	if m.removedversions == nil {
+		m.removedversions = make(map[int64]struct{})
+	}
+	for i := range ids {
+		delete(m.versions, ids[i])
+		m.removedversions[ids[i]] = struct{}{}
+	}
+}
+
+// RemovedVersions returns the removed IDs of the "versions" edge to the PageVersion entity.
+func (m *WikiPageMutation) RemovedVersionsIDs() (ids []int64) {
+	for id := range m.removedversions {
+		ids = append(ids, id)
+	}
+	return
+}
+
+// VersionsIDs returns the "versions" edge IDs in the mutation.
+func (m *WikiPageMutation) VersionsIDs() (ids []int64) {
+	for id := range m.versions {
+		ids = append(ids, id)
+	}
+	return
+}
+
+// ResetVersions resets all changes to the "versions" edge.
+func (m *WikiPageMutation) ResetVersions() {
+	m.versions = nil
+	m.clearedversions = false
+	m.removedversions = nil
+}
+
+// AddBlockIDs adds the "blocks" edge to the WikiBlock entity by ids.
+func (m *WikiPageMutation) AddBlockIDs(ids ...int64) {
+	if m.blocks == nil {
+		m.blocks = make(map[int64]struct{})
+	}
+	for i := range ids {
+		m.blocks[ids[i]] = struct{}{}
+	}
+}
+
+// ClearBlocks clears the "blocks" edge to the WikiBlock entity.
+func (m *WikiPageMutation) ClearBlocks() {
+	m.clearedblocks = true
+}
+
+// BlocksCleared reports if the "blocks" edge to the WikiBlock entity was cleared.
+func (m *WikiPageMutation) BlocksCleared() bool {
+	return m.clearedblocks
+}
+
+// RemoveBlockIDs removes the "blocks" edge to the WikiBlock entity by IDs.
+func (m *WikiPageMutation) RemoveBlockIDs(ids ...int64) {
+	if m.removedblocks == nil {
+		m.removedblocks = make(map[int64]struct{})
+	}
+	for i := range ids {
+		delete(m.blocks, ids[i])
+		m.removedblocks[ids[i]] = struct{}{}
+	}
+}
+
+// RemovedBlocks returns the removed IDs of the "blocks" edge to the WikiBlock entity.
+func (m *WikiPageMutation) RemovedBlocksIDs() (ids []int64) {
+	for id := range m.removedblocks {
+		ids = append(ids, id)
+	}
+	return
+}
+
+// BlocksIDs returns the "blocks" edge IDs in the mutation.
+func (m *WikiPageMutation) BlocksIDs() (ids []int64) {
+	for id := range m.blocks {
+		ids = append(ids, id)
+	}
+	return
+}
+
+// ResetBlocks resets all changes to the "blocks" edge.
+func (m *WikiPageMutation) ResetBlocks() {
+	m.blocks = nil
+	m.clearedblocks = false
+	m.removedblocks = nil
+}
+
+// Where appends a list predicates to the WikiPageMutation builder.
+func (m *WikiPageMutation) Where(ps ...predicate.WikiPage) {
+	m.predicates = append(m.predicates, ps...)
+}
+
+// WhereP appends storage-level predicates to the WikiPageMutation builder. Using this method,
+// users can use type-assertion to append predicates that do not depend on any generated package.
+func (m *WikiPageMutation) WhereP(ps ...func(*sql.Selector)) {
+	p := make([]predicate.WikiPage, len(ps))
+	for i := range ps {
+		p[i] = ps[i]
+	}
+	m.Where(p...)
+}
+
+// Op returns the operation name.
+func (m *WikiPageMutation) Op() Op {
+	return m.op
+}
+
+// SetOp allows setting the mutation operation.
+func (m *WikiPageMutation) SetOp(op Op) {
+	m.op = op
+}
+
+// Type returns the node type of this mutation (WikiPage).
+func (m *WikiPageMutation) Type() string {
+	return m.typ
+}
+
+// Fields returns all fields that were changed during this mutation. Note that in
+// order to get all numeric fields that were incremented/decremented, call
+// AddedFields().
+func (m *WikiPageMutation) Fields() []string {
+	fields := make([]string, 0, 6)
+	if m.project != nil {
+		fields = append(fields, wikipage.FieldProjectID)
+	}
+	if m.title != nil {
+		fields = append(fields, wikipage.FieldTitle)
+	}
+	if m.slug != nil {
+		fields = append(fields, wikipage.FieldSlug)
+	}
+	if m.creator != nil {
+		fields = append(fields, wikipage.FieldCreatedBy)
+	}
+	if m.created_at != nil {
+		fields = append(fields, wikipage.FieldCreatedAt)
+	}
+	if m.updated_at != nil {
+		fields = append(fields, wikipage.FieldUpdatedAt)
+	}
+	return fields
+}
+
+// Field returns the value of a field with the given name. The second boolean
+// return value indicates that this field was not set, or was not defined in the
+// schema.
+func (m *WikiPageMutation) Field(name string) (ent.Value, bool) {
+	switch name {
+	case wikipage.FieldProjectID:
+		return m.ProjectID()
+	case wikipage.FieldTitle:
+		return m.Title()
+	case wikipage.FieldSlug:
+		return m.Slug()
+	case wikipage.FieldCreatedBy:
+		return m.CreatedBy()
+	case wikipage.FieldCreatedAt:
+		return m.CreatedAt()
+	case wikipage.FieldUpdatedAt:
+		return m.UpdatedAt()
+	}
+	return nil, false
+}
+
+// OldField returns the old value of the field from the database. An error is
+// returned if the mutation operation is not UpdateOne, or the query to the
+// database failed.
+func (m *WikiPageMutation) OldField(ctx context.Context, name string) (ent.Value, error) {
+	switch name {
+	case wikipage.FieldProjectID:
+		return m.OldProjectID(ctx)
+	case wikipage.FieldTitle:
+		return m.OldTitle(ctx)
+	case wikipage.FieldSlug:
+		return m.OldSlug(ctx)
+	case wikipage.FieldCreatedBy:
+		return m.OldCreatedBy(ctx)
+	case wikipage.FieldCreatedAt:
+		return m.OldCreatedAt(ctx)
+	case wikipage.FieldUpdatedAt:
+		return m.OldUpdatedAt(ctx)
+	}
+	return nil, fmt.Errorf("unknown WikiPage field %s", name)
+}
+
+// SetField sets the value of a field with the given name. It returns an error if
+// the field is not defined in the schema, or if the type mismatched the field
+// type.
+func (m *WikiPageMutation) SetField(name string, value ent.Value) error {
+	switch name {
+	case wikipage.FieldProjectID:
+		v, ok := value.(int64)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetProjectID(v)
+		return nil
+	case wikipage.FieldTitle:
+		v, ok := value.(string)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetTitle(v)
+		return nil
+	case wikipage.FieldSlug:
+		v, ok := value.(string)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetSlug(v)
+		return nil
+	case wikipage.FieldCreatedBy:
+		v, ok := value.(int64)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetCreatedBy(v)
+		return nil
+	case wikipage.FieldCreatedAt:
+		v, ok := value.(time.Time)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetCreatedAt(v)
+		return nil
+	case wikipage.FieldUpdatedAt:
+		v, ok := value.(time.Time)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetUpdatedAt(v)
+		return nil
+	}
+	return fmt.Errorf("unknown WikiPage field %s", name)
+}
+
+// AddedFields returns all numeric fields that were incremented/decremented during
+// this mutation.
+func (m *WikiPageMutation) AddedFields() []string {
+	var fields []string
+	return fields
+}
+
+// AddedField returns the numeric value that was incremented/decremented on a field
+// with the given name. The second boolean return value indicates that this field
+// was not set, or was not defined in the schema.
+func (m *WikiPageMutation) AddedField(name string) (ent.Value, bool) {
+	switch name {
+	}
+	return nil, false
+}
+
+// AddField adds the value to the field with the given name. It returns an error if
+// the field is not defined in the schema, or if the type mismatched the field
+// type.
+func (m *WikiPageMutation) AddField(name string, value ent.Value) error {
+	switch name {
+	}
+	return fmt.Errorf("unknown WikiPage numeric field %s", name)
+}
+
+// ClearedFields returns all nullable fields that were cleared during this
+// mutation.
+func (m *WikiPageMutation) ClearedFields() []string {
+	return nil
+}
+
+// FieldCleared returns a boolean indicating if a field with the given name was
+// cleared in this mutation.
+func (m *WikiPageMutation) FieldCleared(name string) bool {
+	_, ok := m.clearedFields[name]
+	return ok
+}
+
+// ClearField clears the value of the field with the given name. It returns an
+// error if the field is not defined in the schema.
+func (m *WikiPageMutation) ClearField(name string) error {
+	return fmt.Errorf("unknown WikiPage nullable field %s", name)
+}
+
+// ResetField resets all changes in the mutation for the field with the given name.
+// It returns an error if the field is not defined in the schema.
+func (m *WikiPageMutation) ResetField(name string) error {
+	switch name {
+	case wikipage.FieldProjectID:
+		m.ResetProjectID()
+		return nil
+	case wikipage.FieldTitle:
+		m.ResetTitle()
+		return nil
+	case wikipage.FieldSlug:
+		m.ResetSlug()
+		return nil
+	case wikipage.FieldCreatedBy:
+		m.ResetCreatedBy()
+		return nil
+	case wikipage.FieldCreatedAt:
+		m.ResetCreatedAt()
+		return nil
+	case wikipage.FieldUpdatedAt:
+		m.ResetUpdatedAt()
+		return nil
+	}
+	return fmt.Errorf("unknown WikiPage field %s", name)
+}
+
+// AddedEdges returns all edge names that were set/added in this mutation.
+func (m *WikiPageMutation) AddedEdges() []string {
+	edges := make([]string, 0, 5)
+	if m.project != nil {
+		edges = append(edges, wikipage.EdgeProject)
+	}
+	if m.creator != nil {
+		edges = append(edges, wikipage.EdgeCreator)
+	}
+	if m.yjs_updates != nil {
+		edges = append(edges, wikipage.EdgeYjsUpdates)
+	}
+	if m.versions != nil {
+		edges = append(edges, wikipage.EdgeVersions)
+	}
+	if m.blocks != nil {
+		edges = append(edges, wikipage.EdgeBlocks)
+	}
+	return edges
+}
+
+// AddedIDs returns all IDs (to other nodes) that were added for the given edge
+// name in this mutation.
+func (m *WikiPageMutation) AddedIDs(name string) []ent.Value {
+	switch name {
+	case wikipage.EdgeProject:
+		if id := m.project; id != nil {
+			return []ent.Value{*id}
+		}
+	case wikipage.EdgeCreator:
+		if id := m.creator; id != nil {
+			return []ent.Value{*id}
+		}
+	case wikipage.EdgeYjsUpdates:
+		ids := make([]ent.Value, 0, len(m.yjs_updates))
+		for id := range m.yjs_updates {
+			ids = append(ids, id)
+		}
+		return ids
+	case wikipage.EdgeVersions:
+		ids := make([]ent.Value, 0, len(m.versions))
+		for id := range m.versions {
+			ids = append(ids, id)
+		}
+		return ids
+	case wikipage.EdgeBlocks:
+		ids := make([]ent.Value, 0, len(m.blocks))
+		for id := range m.blocks {
+			ids = append(ids, id)
+		}
+		return ids
+	}
+	return nil
+}
+
+// RemovedEdges returns all edge names that were removed in this mutation.
+func (m *WikiPageMutation) RemovedEdges() []string {
+	edges := make([]string, 0, 5)
+	if m.removedyjs_updates != nil {
+		edges = append(edges, wikipage.EdgeYjsUpdates)
+	}
+	if m.removedversions != nil {
+		edges = append(edges, wikipage.EdgeVersions)
+	}
+	if m.removedblocks != nil {
+		edges = append(edges, wikipage.EdgeBlocks)
+	}
+	return edges
+}
+
+// RemovedIDs returns all IDs (to other nodes) that were removed for the edge with
+// the given name in this mutation.
+func (m *WikiPageMutation) RemovedIDs(name string) []ent.Value {
+	switch name {
+	case wikipage.EdgeYjsUpdates:
+		ids := make([]ent.Value, 0, len(m.removedyjs_updates))
+		for id := range m.removedyjs_updates {
+			ids = append(ids, id)
+		}
+		return ids
+	case wikipage.EdgeVersions:
+		ids := make([]ent.Value, 0, len(m.removedversions))
+		for id := range m.removedversions {
+			ids = append(ids, id)
+		}
+		return ids
+	case wikipage.EdgeBlocks:
+		ids := make([]ent.Value, 0, len(m.removedblocks))
+		for id := range m.removedblocks {
+			ids = append(ids, id)
+		}
+		return ids
+	}
+	return nil
+}
+
+// ClearedEdges returns all edge names that were cleared in this mutation.
+func (m *WikiPageMutation) ClearedEdges() []string {
+	edges := make([]string, 0, 5)
+	if m.clearedproject {
+		edges = append(edges, wikipage.EdgeProject)
+	}
+	if m.clearedcreator {
+		edges = append(edges, wikipage.EdgeCreator)
+	}
+	if m.clearedyjs_updates {
+		edges = append(edges, wikipage.EdgeYjsUpdates)
+	}
+	if m.clearedversions {
+		edges = append(edges, wikipage.EdgeVersions)
+	}
+	if m.clearedblocks {
+		edges = append(edges, wikipage.EdgeBlocks)
+	}
+	return edges
+}
+
+// EdgeCleared returns a boolean which indicates if the edge with the given name
+// was cleared in this mutation.
+func (m *WikiPageMutation) EdgeCleared(name string) bool {
+	switch name {
+	case wikipage.EdgeProject:
+		return m.clearedproject
+	case wikipage.EdgeCreator:
+		return m.clearedcreator
+	case wikipage.EdgeYjsUpdates:
+		return m.clearedyjs_updates
+	case wikipage.EdgeVersions:
+		return m.clearedversions
+	case wikipage.EdgeBlocks:
+		return m.clearedblocks
+	}
+	return false
+}
+
+// ClearEdge clears the value of the edge with the given name. It returns an error
+// if that edge is not defined in the schema.
+func (m *WikiPageMutation) ClearEdge(name string) error {
+	switch name {
+	case wikipage.EdgeProject:
+		m.ClearProject()
+		return nil
+	case wikipage.EdgeCreator:
+		m.ClearCreator()
+		return nil
+	}
+	return fmt.Errorf("unknown WikiPage unique edge %s", name)
+}
+
+// ResetEdge resets all changes to the edge with the given name in this mutation.
+// It returns an error if the edge is not defined in the schema.
+func (m *WikiPageMutation) ResetEdge(name string) error {
+	switch name {
+	case wikipage.EdgeProject:
+		m.ResetProject()
+		return nil
+	case wikipage.EdgeCreator:
+		m.ResetCreator()
+		return nil
+	case wikipage.EdgeYjsUpdates:
+		m.ResetYjsUpdates()
+		return nil
+	case wikipage.EdgeVersions:
+		m.ResetVersions()
+		return nil
+	case wikipage.EdgeBlocks:
+		m.ResetBlocks()
+		return nil
+	}
+	return fmt.Errorf("unknown WikiPage edge %s", name)
+}
+
+// YjsUpdateMutation represents an operation that mutates the YjsUpdate nodes in the graph.
+type YjsUpdateMutation struct {
+	config
+	op             Op
+	typ            string
+	id             *int64
+	update_data    *[]byte
+	created_at     *time.Time
+	clearedFields  map[string]struct{}
+	page           *int64
+	clearedpage    bool
+	creator        *int64
+	clearedcreator bool
+	done           bool
+	oldValue       func(context.Context) (*YjsUpdate, error)
+	predicates     []predicate.YjsUpdate
+}
+
+var _ ent.Mutation = (*YjsUpdateMutation)(nil)
+
+// yjsupdateOption allows management of the mutation configuration using functional options.
+type yjsupdateOption func(*YjsUpdateMutation)
+
+// newYjsUpdateMutation creates new mutation for the YjsUpdate entity.
+func newYjsUpdateMutation(c config, op Op, opts ...yjsupdateOption) *YjsUpdateMutation {
+	m := &YjsUpdateMutation{
+		config:        c,
+		op:            op,
+		typ:           TypeYjsUpdate,
+		clearedFields: make(map[string]struct{}),
+	}
+	for _, opt := range opts {
+		opt(m)
+	}
+	return m
+}
+
+// withYjsUpdateID sets the ID field of the mutation.
+func withYjsUpdateID(id int64) yjsupdateOption {
+	return func(m *YjsUpdateMutation) {
+		var (
+			err   error
+			once  sync.Once
+			value *YjsUpdate
+		)
+		m.oldValue = func(ctx context.Context) (*YjsUpdate, error) {
+			once.Do(func() {
+				if m.done {
+					err = errors.New("querying old values post mutation is not allowed")
+				} else {
+					value, err = m.Client().YjsUpdate.Get(ctx, id)
+				}
+			})
+			return value, err
+		}
+		m.id = &id
+	}
+}
+
+// withYjsUpdate sets the old YjsUpdate of the mutation.
+func withYjsUpdate(node *YjsUpdate) yjsupdateOption {
+	return func(m *YjsUpdateMutation) {
+		m.oldValue = func(context.Context) (*YjsUpdate, error) {
+			return node, nil
+		}
+		m.id = &node.ID
+	}
+}
+
+// Client returns a new `ent.Client` from the mutation. If the mutation was
+// executed in a transaction (ent.Tx), a transactional client is returned.
+func (m YjsUpdateMutation) Client() *Client {
+	client := &Client{config: m.config}
+	client.init()
+	return client
+}
+
+// Tx returns an `ent.Tx` for mutations that were executed in transactions;
+// it returns an error otherwise.
+func (m YjsUpdateMutation) Tx() (*Tx, error) {
+	if _, ok := m.driver.(*txDriver); !ok {
+		return nil, errors.New("ent: mutation is not running in a transaction")
+	}
+	tx := &Tx{config: m.config}
+	tx.init()
+	return tx, nil
+}
+
+// SetID sets the value of the id field. Note that this
+// operation is only accepted on creation of YjsUpdate entities.
+func (m *YjsUpdateMutation) SetID(id int64) {
+	m.id = &id
+}
+
+// ID returns the ID value in the mutation. Note that the ID is only available
+// if it was provided to the builder or after it was returned from the database.
+func (m *YjsUpdateMutation) ID() (id int64, exists bool) {
+	if m.id == nil {
+		return
+	}
+	return *m.id, true
+}
+
+// IDs queries the database and returns the entity ids that match the mutation's predicate.
+// That means, if the mutation is applied within a transaction with an isolation level such
+// as sql.LevelSerializable, the returned ids match the ids of the rows that will be updated
+// or updated by the mutation.
+func (m *YjsUpdateMutation) IDs(ctx context.Context) ([]int64, error) {
+	switch {
+	case m.op.Is(OpUpdateOne | OpDeleteOne):
+		id, exists := m.ID()
+		if exists {
+			return []int64{id}, nil
+		}
+		fallthrough
+	case m.op.Is(OpUpdate | OpDelete):
+		return m.Client().YjsUpdate.Query().Where(m.predicates...).IDs(ctx)
+	default:
+		return nil, fmt.Errorf("IDs is not allowed on %s operations", m.op)
+	}
+}
+
+// SetPageID sets the "page_id" field.
+func (m *YjsUpdateMutation) SetPageID(i int64) {
+	m.page = &i
+}
+
+// PageID returns the value of the "page_id" field in the mutation.
+func (m *YjsUpdateMutation) PageID() (r int64, exists bool) {
+	v := m.page
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldPageID returns the old "page_id" field's value of the YjsUpdate entity.
+// If the YjsUpdate object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *YjsUpdateMutation) OldPageID(ctx context.Context) (v int64, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldPageID is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldPageID requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldPageID: %w", err)
+	}
+	return oldValue.PageID, nil
+}
+
+// ResetPageID resets all changes to the "page_id" field.
+func (m *YjsUpdateMutation) ResetPageID() {
+	m.page = nil
+}
+
+// SetUpdateData sets the "update_data" field.
+func (m *YjsUpdateMutation) SetUpdateData(b []byte) {
+	m.update_data = &b
+}
+
+// UpdateData returns the value of the "update_data" field in the mutation.
+func (m *YjsUpdateMutation) UpdateData() (r []byte, exists bool) {
+	v := m.update_data
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldUpdateData returns the old "update_data" field's value of the YjsUpdate entity.
+// If the YjsUpdate object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *YjsUpdateMutation) OldUpdateData(ctx context.Context) (v []byte, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldUpdateData is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldUpdateData requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldUpdateData: %w", err)
+	}
+	return oldValue.UpdateData, nil
+}
+
+// ResetUpdateData resets all changes to the "update_data" field.
+func (m *YjsUpdateMutation) ResetUpdateData() {
+	m.update_data = nil
+}
+
+// SetCreatedAt sets the "created_at" field.
+func (m *YjsUpdateMutation) SetCreatedAt(t time.Time) {
+	m.created_at = &t
+}
+
+// CreatedAt returns the value of the "created_at" field in the mutation.
+func (m *YjsUpdateMutation) CreatedAt() (r time.Time, exists bool) {
+	v := m.created_at
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldCreatedAt returns the old "created_at" field's value of the YjsUpdate entity.
+// If the YjsUpdate object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *YjsUpdateMutation) OldCreatedAt(ctx context.Context) (v time.Time, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldCreatedAt is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldCreatedAt requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldCreatedAt: %w", err)
+	}
+	return oldValue.CreatedAt, nil
+}
+
+// ResetCreatedAt resets all changes to the "created_at" field.
+func (m *YjsUpdateMutation) ResetCreatedAt() {
+	m.created_at = nil
+}
+
+// SetCreatedBy sets the "created_by" field.
+func (m *YjsUpdateMutation) SetCreatedBy(i int64) {
+	m.creator = &i
+}
+
+// CreatedBy returns the value of the "created_by" field in the mutation.
+func (m *YjsUpdateMutation) CreatedBy() (r int64, exists bool) {
+	v := m.creator
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldCreatedBy returns the old "created_by" field's value of the YjsUpdate entity.
+// If the YjsUpdate object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *YjsUpdateMutation) OldCreatedBy(ctx context.Context) (v *int64, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldCreatedBy is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldCreatedBy requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldCreatedBy: %w", err)
+	}
+	return oldValue.CreatedBy, nil
+}
+
+// ClearCreatedBy clears the value of the "created_by" field.
+func (m *YjsUpdateMutation) ClearCreatedBy() {
+	m.creator = nil
+	m.clearedFields[yjsupdate.FieldCreatedBy] = struct{}{}
+}
+
+// CreatedByCleared returns if the "created_by" field was cleared in this mutation.
+func (m *YjsUpdateMutation) CreatedByCleared() bool {
+	_, ok := m.clearedFields[yjsupdate.FieldCreatedBy]
+	return ok
+}
+
+// ResetCreatedBy resets all changes to the "created_by" field.
+func (m *YjsUpdateMutation) ResetCreatedBy() {
+	m.creator = nil
+	delete(m.clearedFields, yjsupdate.FieldCreatedBy)
+}
+
+// ClearPage clears the "page" edge to the WikiPage entity.
+func (m *YjsUpdateMutation) ClearPage() {
+	m.clearedpage = true
+	m.clearedFields[yjsupdate.FieldPageID] = struct{}{}
+}
+
+// PageCleared reports if the "page" edge to the WikiPage entity was cleared.
+func (m *YjsUpdateMutation) PageCleared() bool {
+	return m.clearedpage
+}
+
+// PageIDs returns the "page" edge IDs in the mutation.
+// Note that IDs always returns len(IDs) <= 1 for unique edges, and you should use
+// PageID instead. It exists only for internal usage by the builders.
+func (m *YjsUpdateMutation) PageIDs() (ids []int64) {
+	if id := m.page; id != nil {
+		ids = append(ids, *id)
+	}
+	return
+}
+
+// ResetPage resets all changes to the "page" edge.
+func (m *YjsUpdateMutation) ResetPage() {
+	m.page = nil
+	m.clearedpage = false
+}
+
+// SetCreatorID sets the "creator" edge to the User entity by id.
+func (m *YjsUpdateMutation) SetCreatorID(id int64) {
+	m.creator = &id
+}
+
+// ClearCreator clears the "creator" edge to the User entity.
+func (m *YjsUpdateMutation) ClearCreator() {
+	m.clearedcreator = true
+	m.clearedFields[yjsupdate.FieldCreatedBy] = struct{}{}
+}
+
+// CreatorCleared reports if the "creator" edge to the User entity was cleared.
+func (m *YjsUpdateMutation) CreatorCleared() bool {
+	return m.CreatedByCleared() || m.clearedcreator
+}
+
+// CreatorID returns the "creator" edge ID in the mutation.
+func (m *YjsUpdateMutation) CreatorID() (id int64, exists bool) {
+	if m.creator != nil {
+		return *m.creator, true
+	}
+	return
+}
+
+// CreatorIDs returns the "creator" edge IDs in the mutation.
+// Note that IDs always returns len(IDs) <= 1 for unique edges, and you should use
+// CreatorID instead. It exists only for internal usage by the builders.
+func (m *YjsUpdateMutation) CreatorIDs() (ids []int64) {
+	if id := m.creator; id != nil {
+		ids = append(ids, *id)
+	}
+	return
+}
+
+// ResetCreator resets all changes to the "creator" edge.
+func (m *YjsUpdateMutation) ResetCreator() {
+	m.creator = nil
+	m.clearedcreator = false
+}
+
+// Where appends a list predicates to the YjsUpdateMutation builder.
+func (m *YjsUpdateMutation) Where(ps ...predicate.YjsUpdate) {
+	m.predicates = append(m.predicates, ps...)
+}
+
+// WhereP appends storage-level predicates to the YjsUpdateMutation builder. Using this method,
+// users can use type-assertion to append predicates that do not depend on any generated package.
+func (m *YjsUpdateMutation) WhereP(ps ...func(*sql.Selector)) {
+	p := make([]predicate.YjsUpdate, len(ps))
+	for i := range ps {
+		p[i] = ps[i]
+	}
+	m.Where(p...)
+}
+
+// Op returns the operation name.
+func (m *YjsUpdateMutation) Op() Op {
+	return m.op
+}
+
+// SetOp allows setting the mutation operation.
+func (m *YjsUpdateMutation) SetOp(op Op) {
+	m.op = op
+}
+
+// Type returns the node type of this mutation (YjsUpdate).
+func (m *YjsUpdateMutation) Type() string {
+	return m.typ
+}
+
+// Fields returns all fields that were changed during this mutation. Note that in
+// order to get all numeric fields that were incremented/decremented, call
+// AddedFields().
+func (m *YjsUpdateMutation) Fields() []string {
+	fields := make([]string, 0, 4)
+	if m.page != nil {
+		fields = append(fields, yjsupdate.FieldPageID)
+	}
+	if m.update_data != nil {
+		fields = append(fields, yjsupdate.FieldUpdateData)
+	}
+	if m.created_at != nil {
+		fields = append(fields, yjsupdate.FieldCreatedAt)
+	}
+	if m.creator != nil {
+		fields = append(fields, yjsupdate.FieldCreatedBy)
+	}
+	return fields
+}
+
+// Field returns the value of a field with the given name. The second boolean
+// return value indicates that this field was not set, or was not defined in the
+// schema.
+func (m *YjsUpdateMutation) Field(name string) (ent.Value, bool) {
+	switch name {
+	case yjsupdate.FieldPageID:
+		return m.PageID()
+	case yjsupdate.FieldUpdateData:
+		return m.UpdateData()
+	case yjsupdate.FieldCreatedAt:
+		return m.CreatedAt()
+	case yjsupdate.FieldCreatedBy:
+		return m.CreatedBy()
+	}
+	return nil, false
+}
+
+// OldField returns the old value of the field from the database. An error is
+// returned if the mutation operation is not UpdateOne, or the query to the
+// database failed.
+func (m *YjsUpdateMutation) OldField(ctx context.Context, name string) (ent.Value, error) {
+	switch name {
+	case yjsupdate.FieldPageID:
+		return m.OldPageID(ctx)
+	case yjsupdate.FieldUpdateData:
+		return m.OldUpdateData(ctx)
+	case yjsupdate.FieldCreatedAt:
+		return m.OldCreatedAt(ctx)
+	case yjsupdate.FieldCreatedBy:
+		return m.OldCreatedBy(ctx)
+	}
+	return nil, fmt.Errorf("unknown YjsUpdate field %s", name)
+}
+
+// SetField sets the value of a field with the given name. It returns an error if
+// the field is not defined in the schema, or if the type mismatched the field
+// type.
+func (m *YjsUpdateMutation) SetField(name string, value ent.Value) error {
+	switch name {
+	case yjsupdate.FieldPageID:
+		v, ok := value.(int64)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetPageID(v)
+		return nil
+	case yjsupdate.FieldUpdateData:
+		v, ok := value.([]byte)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetUpdateData(v)
+		return nil
+	case yjsupdate.FieldCreatedAt:
+		v, ok := value.(time.Time)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetCreatedAt(v)
+		return nil
+	case yjsupdate.FieldCreatedBy:
+		v, ok := value.(int64)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetCreatedBy(v)
+		return nil
+	}
+	return fmt.Errorf("unknown YjsUpdate field %s", name)
+}
+
+// AddedFields returns all numeric fields that were incremented/decremented during
+// this mutation.
+func (m *YjsUpdateMutation) AddedFields() []string {
+	var fields []string
+	return fields
+}
+
+// AddedField returns the numeric value that was incremented/decremented on a field
+// with the given name. The second boolean return value indicates that this field
+// was not set, or was not defined in the schema.
+func (m *YjsUpdateMutation) AddedField(name string) (ent.Value, bool) {
+	switch name {
+	}
+	return nil, false
+}
+
+// AddField adds the value to the field with the given name. It returns an error if
+// the field is not defined in the schema, or if the type mismatched the field
+// type.
+func (m *YjsUpdateMutation) AddField(name string, value ent.Value) error {
+	switch name {
+	}
+	return fmt.Errorf("unknown YjsUpdate numeric field %s", name)
+}
+
+// ClearedFields returns all nullable fields that were cleared during this
+// mutation.
+func (m *YjsUpdateMutation) ClearedFields() []string {
+	var fields []string
+	if m.FieldCleared(yjsupdate.FieldCreatedBy) {
+		fields = append(fields, yjsupdate.FieldCreatedBy)
+	}
+	return fields
+}
+
+// FieldCleared returns a boolean indicating if a field with the given name was
+// cleared in this mutation.
+func (m *YjsUpdateMutation) FieldCleared(name string) bool {
+	_, ok := m.clearedFields[name]
+	return ok
+}
+
+// ClearField clears the value of the field with the given name. It returns an
+// error if the field is not defined in the schema.
+func (m *YjsUpdateMutation) ClearField(name string) error {
+	switch name {
+	case yjsupdate.FieldCreatedBy:
+		m.ClearCreatedBy()
+		return nil
+	}
+	return fmt.Errorf("unknown YjsUpdate nullable field %s", name)
+}
+
+// ResetField resets all changes in the mutation for the field with the given name.
+// It returns an error if the field is not defined in the schema.
+func (m *YjsUpdateMutation) ResetField(name string) error {
+	switch name {
+	case yjsupdate.FieldPageID:
+		m.ResetPageID()
+		return nil
+	case yjsupdate.FieldUpdateData:
+		m.ResetUpdateData()
+		return nil
+	case yjsupdate.FieldCreatedAt:
+		m.ResetCreatedAt()
+		return nil
+	case yjsupdate.FieldCreatedBy:
+		m.ResetCreatedBy()
+		return nil
+	}
+	return fmt.Errorf("unknown YjsUpdate field %s", name)
+}
+
+// AddedEdges returns all edge names that were set/added in this mutation.
+func (m *YjsUpdateMutation) AddedEdges() []string {
+	edges := make([]string, 0, 2)
+	if m.page != nil {
+		edges = append(edges, yjsupdate.EdgePage)
+	}
+	if m.creator != nil {
+		edges = append(edges, yjsupdate.EdgeCreator)
+	}
+	return edges
+}
+
+// AddedIDs returns all IDs (to other nodes) that were added for the given edge
+// name in this mutation.
+func (m *YjsUpdateMutation) AddedIDs(name string) []ent.Value {
+	switch name {
+	case yjsupdate.EdgePage:
+		if id := m.page; id != nil {
+			return []ent.Value{*id}
+		}
+	case yjsupdate.EdgeCreator:
+		if id := m.creator; id != nil {
+			return []ent.Value{*id}
+		}
+	}
+	return nil
+}
+
+// RemovedEdges returns all edge names that were removed in this mutation.
+func (m *YjsUpdateMutation) RemovedEdges() []string {
+	edges := make([]string, 0, 2)
+	return edges
+}
+
+// RemovedIDs returns all IDs (to other nodes) that were removed for the edge with
+// the given name in this mutation.
+func (m *YjsUpdateMutation) RemovedIDs(name string) []ent.Value {
+	return nil
+}
+
+// ClearedEdges returns all edge names that were cleared in this mutation.
+func (m *YjsUpdateMutation) ClearedEdges() []string {
+	edges := make([]string, 0, 2)
+	if m.clearedpage {
+		edges = append(edges, yjsupdate.EdgePage)
+	}
+	if m.clearedcreator {
+		edges = append(edges, yjsupdate.EdgeCreator)
+	}
+	return edges
+}
+
+// EdgeCleared returns a boolean which indicates if the edge with the given name
+// was cleared in this mutation.
+func (m *YjsUpdateMutation) EdgeCleared(name string) bool {
+	switch name {
+	case yjsupdate.EdgePage:
+		return m.clearedpage
+	case yjsupdate.EdgeCreator:
+		return m.clearedcreator
+	}
+	return false
+}
+
+// ClearEdge clears the value of the edge with the given name. It returns an error
+// if that edge is not defined in the schema.
+func (m *YjsUpdateMutation) ClearEdge(name string) error {
+	switch name {
+	case yjsupdate.EdgePage:
+		m.ClearPage()
+		return nil
+	case yjsupdate.EdgeCreator:
+		m.ClearCreator()
+		return nil
+	}
+	return fmt.Errorf("unknown YjsUpdate unique edge %s", name)
+}
+
+// ResetEdge resets all changes to the edge with the given name in this mutation.
+// It returns an error if the edge is not defined in the schema.
+func (m *YjsUpdateMutation) ResetEdge(name string) error {
+	switch name {
+	case yjsupdate.EdgePage:
+		m.ResetPage()
+		return nil
+	case yjsupdate.EdgeCreator:
+		m.ResetCreator()
+		return nil
+	}
+	return fmt.Errorf("unknown YjsUpdate edge %s", name)
 }

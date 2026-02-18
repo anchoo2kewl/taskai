@@ -22,6 +22,8 @@ import (
 	"taskai/ent/teammember"
 	"taskai/ent/user"
 	"taskai/ent/useractivity"
+	"taskai/ent/wikipage"
+	"taskai/ent/yjsupdate"
 	"time"
 
 	"entgo.io/ent/dialect/sql"
@@ -460,6 +462,36 @@ func (_u *UserUpdate) AddTaskAttachments(v ...*TaskAttachment) *UserUpdate {
 	return _u.AddTaskAttachmentIDs(ids...)
 }
 
+// AddWikiPagesCreatedIDs adds the "wiki_pages_created" edge to the WikiPage entity by IDs.
+func (_u *UserUpdate) AddWikiPagesCreatedIDs(ids ...int64) *UserUpdate {
+	_u.mutation.AddWikiPagesCreatedIDs(ids...)
+	return _u
+}
+
+// AddWikiPagesCreated adds the "wiki_pages_created" edges to the WikiPage entity.
+func (_u *UserUpdate) AddWikiPagesCreated(v ...*WikiPage) *UserUpdate {
+	ids := make([]int64, len(v))
+	for i := range v {
+		ids[i] = v[i].ID
+	}
+	return _u.AddWikiPagesCreatedIDs(ids...)
+}
+
+// AddYjsUpdateIDs adds the "yjs_updates" edge to the YjsUpdate entity by IDs.
+func (_u *UserUpdate) AddYjsUpdateIDs(ids ...int64) *UserUpdate {
+	_u.mutation.AddYjsUpdateIDs(ids...)
+	return _u
+}
+
+// AddYjsUpdates adds the "yjs_updates" edges to the YjsUpdate entity.
+func (_u *UserUpdate) AddYjsUpdates(v ...*YjsUpdate) *UserUpdate {
+	ids := make([]int64, len(v))
+	for i := range v {
+		ids[i] = v[i].ID
+	}
+	return _u.AddYjsUpdateIDs(ids...)
+}
+
 // Mutation returns the UserMutation object of the builder.
 func (_u *UserUpdate) Mutation() *UserMutation {
 	return _u.mutation
@@ -820,6 +852,48 @@ func (_u *UserUpdate) RemoveTaskAttachments(v ...*TaskAttachment) *UserUpdate {
 		ids[i] = v[i].ID
 	}
 	return _u.RemoveTaskAttachmentIDs(ids...)
+}
+
+// ClearWikiPagesCreated clears all "wiki_pages_created" edges to the WikiPage entity.
+func (_u *UserUpdate) ClearWikiPagesCreated() *UserUpdate {
+	_u.mutation.ClearWikiPagesCreated()
+	return _u
+}
+
+// RemoveWikiPagesCreatedIDs removes the "wiki_pages_created" edge to WikiPage entities by IDs.
+func (_u *UserUpdate) RemoveWikiPagesCreatedIDs(ids ...int64) *UserUpdate {
+	_u.mutation.RemoveWikiPagesCreatedIDs(ids...)
+	return _u
+}
+
+// RemoveWikiPagesCreated removes "wiki_pages_created" edges to WikiPage entities.
+func (_u *UserUpdate) RemoveWikiPagesCreated(v ...*WikiPage) *UserUpdate {
+	ids := make([]int64, len(v))
+	for i := range v {
+		ids[i] = v[i].ID
+	}
+	return _u.RemoveWikiPagesCreatedIDs(ids...)
+}
+
+// ClearYjsUpdates clears all "yjs_updates" edges to the YjsUpdate entity.
+func (_u *UserUpdate) ClearYjsUpdates() *UserUpdate {
+	_u.mutation.ClearYjsUpdates()
+	return _u
+}
+
+// RemoveYjsUpdateIDs removes the "yjs_updates" edge to YjsUpdate entities by IDs.
+func (_u *UserUpdate) RemoveYjsUpdateIDs(ids ...int64) *UserUpdate {
+	_u.mutation.RemoveYjsUpdateIDs(ids...)
+	return _u
+}
+
+// RemoveYjsUpdates removes "yjs_updates" edges to YjsUpdate entities.
+func (_u *UserUpdate) RemoveYjsUpdates(v ...*YjsUpdate) *UserUpdate {
+	ids := make([]int64, len(v))
+	for i := range v {
+		ids[i] = v[i].ID
+	}
+	return _u.RemoveYjsUpdateIDs(ids...)
 }
 
 // Save executes the query and returns the number of nodes affected by the update operation.
@@ -1695,6 +1769,96 @@ func (_u *UserUpdate) sqlSave(ctx context.Context) (_node int, err error) {
 		}
 		_spec.Edges.Add = append(_spec.Edges.Add, edge)
 	}
+	if _u.mutation.WikiPagesCreatedCleared() {
+		edge := &sqlgraph.EdgeSpec{
+			Rel:     sqlgraph.O2M,
+			Inverse: false,
+			Table:   user.WikiPagesCreatedTable,
+			Columns: []string{user.WikiPagesCreatedColumn},
+			Bidi:    false,
+			Target: &sqlgraph.EdgeTarget{
+				IDSpec: sqlgraph.NewFieldSpec(wikipage.FieldID, field.TypeInt64),
+			},
+		}
+		_spec.Edges.Clear = append(_spec.Edges.Clear, edge)
+	}
+	if nodes := _u.mutation.RemovedWikiPagesCreatedIDs(); len(nodes) > 0 && !_u.mutation.WikiPagesCreatedCleared() {
+		edge := &sqlgraph.EdgeSpec{
+			Rel:     sqlgraph.O2M,
+			Inverse: false,
+			Table:   user.WikiPagesCreatedTable,
+			Columns: []string{user.WikiPagesCreatedColumn},
+			Bidi:    false,
+			Target: &sqlgraph.EdgeTarget{
+				IDSpec: sqlgraph.NewFieldSpec(wikipage.FieldID, field.TypeInt64),
+			},
+		}
+		for _, k := range nodes {
+			edge.Target.Nodes = append(edge.Target.Nodes, k)
+		}
+		_spec.Edges.Clear = append(_spec.Edges.Clear, edge)
+	}
+	if nodes := _u.mutation.WikiPagesCreatedIDs(); len(nodes) > 0 {
+		edge := &sqlgraph.EdgeSpec{
+			Rel:     sqlgraph.O2M,
+			Inverse: false,
+			Table:   user.WikiPagesCreatedTable,
+			Columns: []string{user.WikiPagesCreatedColumn},
+			Bidi:    false,
+			Target: &sqlgraph.EdgeTarget{
+				IDSpec: sqlgraph.NewFieldSpec(wikipage.FieldID, field.TypeInt64),
+			},
+		}
+		for _, k := range nodes {
+			edge.Target.Nodes = append(edge.Target.Nodes, k)
+		}
+		_spec.Edges.Add = append(_spec.Edges.Add, edge)
+	}
+	if _u.mutation.YjsUpdatesCleared() {
+		edge := &sqlgraph.EdgeSpec{
+			Rel:     sqlgraph.O2M,
+			Inverse: false,
+			Table:   user.YjsUpdatesTable,
+			Columns: []string{user.YjsUpdatesColumn},
+			Bidi:    false,
+			Target: &sqlgraph.EdgeTarget{
+				IDSpec: sqlgraph.NewFieldSpec(yjsupdate.FieldID, field.TypeInt64),
+			},
+		}
+		_spec.Edges.Clear = append(_spec.Edges.Clear, edge)
+	}
+	if nodes := _u.mutation.RemovedYjsUpdatesIDs(); len(nodes) > 0 && !_u.mutation.YjsUpdatesCleared() {
+		edge := &sqlgraph.EdgeSpec{
+			Rel:     sqlgraph.O2M,
+			Inverse: false,
+			Table:   user.YjsUpdatesTable,
+			Columns: []string{user.YjsUpdatesColumn},
+			Bidi:    false,
+			Target: &sqlgraph.EdgeTarget{
+				IDSpec: sqlgraph.NewFieldSpec(yjsupdate.FieldID, field.TypeInt64),
+			},
+		}
+		for _, k := range nodes {
+			edge.Target.Nodes = append(edge.Target.Nodes, k)
+		}
+		_spec.Edges.Clear = append(_spec.Edges.Clear, edge)
+	}
+	if nodes := _u.mutation.YjsUpdatesIDs(); len(nodes) > 0 {
+		edge := &sqlgraph.EdgeSpec{
+			Rel:     sqlgraph.O2M,
+			Inverse: false,
+			Table:   user.YjsUpdatesTable,
+			Columns: []string{user.YjsUpdatesColumn},
+			Bidi:    false,
+			Target: &sqlgraph.EdgeTarget{
+				IDSpec: sqlgraph.NewFieldSpec(yjsupdate.FieldID, field.TypeInt64),
+			},
+		}
+		for _, k := range nodes {
+			edge.Target.Nodes = append(edge.Target.Nodes, k)
+		}
+		_spec.Edges.Add = append(_spec.Edges.Add, edge)
+	}
 	if _node, err = sqlgraph.UpdateNodes(ctx, _u.driver, _spec); err != nil {
 		if _, ok := err.(*sqlgraph.NotFoundError); ok {
 			err = &NotFoundError{user.Label}
@@ -2133,6 +2297,36 @@ func (_u *UserUpdateOne) AddTaskAttachments(v ...*TaskAttachment) *UserUpdateOne
 	return _u.AddTaskAttachmentIDs(ids...)
 }
 
+// AddWikiPagesCreatedIDs adds the "wiki_pages_created" edge to the WikiPage entity by IDs.
+func (_u *UserUpdateOne) AddWikiPagesCreatedIDs(ids ...int64) *UserUpdateOne {
+	_u.mutation.AddWikiPagesCreatedIDs(ids...)
+	return _u
+}
+
+// AddWikiPagesCreated adds the "wiki_pages_created" edges to the WikiPage entity.
+func (_u *UserUpdateOne) AddWikiPagesCreated(v ...*WikiPage) *UserUpdateOne {
+	ids := make([]int64, len(v))
+	for i := range v {
+		ids[i] = v[i].ID
+	}
+	return _u.AddWikiPagesCreatedIDs(ids...)
+}
+
+// AddYjsUpdateIDs adds the "yjs_updates" edge to the YjsUpdate entity by IDs.
+func (_u *UserUpdateOne) AddYjsUpdateIDs(ids ...int64) *UserUpdateOne {
+	_u.mutation.AddYjsUpdateIDs(ids...)
+	return _u
+}
+
+// AddYjsUpdates adds the "yjs_updates" edges to the YjsUpdate entity.
+func (_u *UserUpdateOne) AddYjsUpdates(v ...*YjsUpdate) *UserUpdateOne {
+	ids := make([]int64, len(v))
+	for i := range v {
+		ids[i] = v[i].ID
+	}
+	return _u.AddYjsUpdateIDs(ids...)
+}
+
 // Mutation returns the UserMutation object of the builder.
 func (_u *UserUpdateOne) Mutation() *UserMutation {
 	return _u.mutation
@@ -2493,6 +2687,48 @@ func (_u *UserUpdateOne) RemoveTaskAttachments(v ...*TaskAttachment) *UserUpdate
 		ids[i] = v[i].ID
 	}
 	return _u.RemoveTaskAttachmentIDs(ids...)
+}
+
+// ClearWikiPagesCreated clears all "wiki_pages_created" edges to the WikiPage entity.
+func (_u *UserUpdateOne) ClearWikiPagesCreated() *UserUpdateOne {
+	_u.mutation.ClearWikiPagesCreated()
+	return _u
+}
+
+// RemoveWikiPagesCreatedIDs removes the "wiki_pages_created" edge to WikiPage entities by IDs.
+func (_u *UserUpdateOne) RemoveWikiPagesCreatedIDs(ids ...int64) *UserUpdateOne {
+	_u.mutation.RemoveWikiPagesCreatedIDs(ids...)
+	return _u
+}
+
+// RemoveWikiPagesCreated removes "wiki_pages_created" edges to WikiPage entities.
+func (_u *UserUpdateOne) RemoveWikiPagesCreated(v ...*WikiPage) *UserUpdateOne {
+	ids := make([]int64, len(v))
+	for i := range v {
+		ids[i] = v[i].ID
+	}
+	return _u.RemoveWikiPagesCreatedIDs(ids...)
+}
+
+// ClearYjsUpdates clears all "yjs_updates" edges to the YjsUpdate entity.
+func (_u *UserUpdateOne) ClearYjsUpdates() *UserUpdateOne {
+	_u.mutation.ClearYjsUpdates()
+	return _u
+}
+
+// RemoveYjsUpdateIDs removes the "yjs_updates" edge to YjsUpdate entities by IDs.
+func (_u *UserUpdateOne) RemoveYjsUpdateIDs(ids ...int64) *UserUpdateOne {
+	_u.mutation.RemoveYjsUpdateIDs(ids...)
+	return _u
+}
+
+// RemoveYjsUpdates removes "yjs_updates" edges to YjsUpdate entities.
+func (_u *UserUpdateOne) RemoveYjsUpdates(v ...*YjsUpdate) *UserUpdateOne {
+	ids := make([]int64, len(v))
+	for i := range v {
+		ids[i] = v[i].ID
+	}
+	return _u.RemoveYjsUpdateIDs(ids...)
 }
 
 // Where appends a list predicates to the UserUpdate builder.
@@ -3391,6 +3627,96 @@ func (_u *UserUpdateOne) sqlSave(ctx context.Context) (_node *User, err error) {
 			Bidi:    false,
 			Target: &sqlgraph.EdgeTarget{
 				IDSpec: sqlgraph.NewFieldSpec(taskattachment.FieldID, field.TypeInt64),
+			},
+		}
+		for _, k := range nodes {
+			edge.Target.Nodes = append(edge.Target.Nodes, k)
+		}
+		_spec.Edges.Add = append(_spec.Edges.Add, edge)
+	}
+	if _u.mutation.WikiPagesCreatedCleared() {
+		edge := &sqlgraph.EdgeSpec{
+			Rel:     sqlgraph.O2M,
+			Inverse: false,
+			Table:   user.WikiPagesCreatedTable,
+			Columns: []string{user.WikiPagesCreatedColumn},
+			Bidi:    false,
+			Target: &sqlgraph.EdgeTarget{
+				IDSpec: sqlgraph.NewFieldSpec(wikipage.FieldID, field.TypeInt64),
+			},
+		}
+		_spec.Edges.Clear = append(_spec.Edges.Clear, edge)
+	}
+	if nodes := _u.mutation.RemovedWikiPagesCreatedIDs(); len(nodes) > 0 && !_u.mutation.WikiPagesCreatedCleared() {
+		edge := &sqlgraph.EdgeSpec{
+			Rel:     sqlgraph.O2M,
+			Inverse: false,
+			Table:   user.WikiPagesCreatedTable,
+			Columns: []string{user.WikiPagesCreatedColumn},
+			Bidi:    false,
+			Target: &sqlgraph.EdgeTarget{
+				IDSpec: sqlgraph.NewFieldSpec(wikipage.FieldID, field.TypeInt64),
+			},
+		}
+		for _, k := range nodes {
+			edge.Target.Nodes = append(edge.Target.Nodes, k)
+		}
+		_spec.Edges.Clear = append(_spec.Edges.Clear, edge)
+	}
+	if nodes := _u.mutation.WikiPagesCreatedIDs(); len(nodes) > 0 {
+		edge := &sqlgraph.EdgeSpec{
+			Rel:     sqlgraph.O2M,
+			Inverse: false,
+			Table:   user.WikiPagesCreatedTable,
+			Columns: []string{user.WikiPagesCreatedColumn},
+			Bidi:    false,
+			Target: &sqlgraph.EdgeTarget{
+				IDSpec: sqlgraph.NewFieldSpec(wikipage.FieldID, field.TypeInt64),
+			},
+		}
+		for _, k := range nodes {
+			edge.Target.Nodes = append(edge.Target.Nodes, k)
+		}
+		_spec.Edges.Add = append(_spec.Edges.Add, edge)
+	}
+	if _u.mutation.YjsUpdatesCleared() {
+		edge := &sqlgraph.EdgeSpec{
+			Rel:     sqlgraph.O2M,
+			Inverse: false,
+			Table:   user.YjsUpdatesTable,
+			Columns: []string{user.YjsUpdatesColumn},
+			Bidi:    false,
+			Target: &sqlgraph.EdgeTarget{
+				IDSpec: sqlgraph.NewFieldSpec(yjsupdate.FieldID, field.TypeInt64),
+			},
+		}
+		_spec.Edges.Clear = append(_spec.Edges.Clear, edge)
+	}
+	if nodes := _u.mutation.RemovedYjsUpdatesIDs(); len(nodes) > 0 && !_u.mutation.YjsUpdatesCleared() {
+		edge := &sqlgraph.EdgeSpec{
+			Rel:     sqlgraph.O2M,
+			Inverse: false,
+			Table:   user.YjsUpdatesTable,
+			Columns: []string{user.YjsUpdatesColumn},
+			Bidi:    false,
+			Target: &sqlgraph.EdgeTarget{
+				IDSpec: sqlgraph.NewFieldSpec(yjsupdate.FieldID, field.TypeInt64),
+			},
+		}
+		for _, k := range nodes {
+			edge.Target.Nodes = append(edge.Target.Nodes, k)
+		}
+		_spec.Edges.Clear = append(_spec.Edges.Clear, edge)
+	}
+	if nodes := _u.mutation.YjsUpdatesIDs(); len(nodes) > 0 {
+		edge := &sqlgraph.EdgeSpec{
+			Rel:     sqlgraph.O2M,
+			Inverse: false,
+			Table:   user.YjsUpdatesTable,
+			Columns: []string{user.YjsUpdatesColumn},
+			Bidi:    false,
+			Target: &sqlgraph.EdgeTarget{
+				IDSpec: sqlgraph.NewFieldSpec(yjsupdate.FieldID, field.TypeInt64),
 			},
 		}
 		for _, k := range nodes {

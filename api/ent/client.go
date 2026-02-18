@@ -15,6 +15,7 @@ import (
 	"taskai/ent/cloudinarycredential"
 	"taskai/ent/emailprovider"
 	"taskai/ent/invite"
+	"taskai/ent/pageversion"
 	"taskai/ent/project"
 	"taskai/ent/projectmember"
 	"taskai/ent/sprint"
@@ -29,6 +30,9 @@ import (
 	"taskai/ent/teammember"
 	"taskai/ent/user"
 	"taskai/ent/useractivity"
+	"taskai/ent/wikiblock"
+	"taskai/ent/wikipage"
+	"taskai/ent/yjsupdate"
 
 	"entgo.io/ent"
 	"entgo.io/ent/dialect"
@@ -49,6 +53,8 @@ type Client struct {
 	EmailProvider *EmailProviderClient
 	// Invite is the client for interacting with the Invite builders.
 	Invite *InviteClient
+	// PageVersion is the client for interacting with the PageVersion builders.
+	PageVersion *PageVersionClient
 	// Project is the client for interacting with the Project builders.
 	Project *ProjectClient
 	// ProjectMember is the client for interacting with the ProjectMember builders.
@@ -77,6 +83,12 @@ type Client struct {
 	User *UserClient
 	// UserActivity is the client for interacting with the UserActivity builders.
 	UserActivity *UserActivityClient
+	// WikiBlock is the client for interacting with the WikiBlock builders.
+	WikiBlock *WikiBlockClient
+	// WikiPage is the client for interacting with the WikiPage builders.
+	WikiPage *WikiPageClient
+	// YjsUpdate is the client for interacting with the YjsUpdate builders.
+	YjsUpdate *YjsUpdateClient
 }
 
 // NewClient creates a new client configured with the given options.
@@ -92,6 +104,7 @@ func (c *Client) init() {
 	c.CloudinaryCredential = NewCloudinaryCredentialClient(c.config)
 	c.EmailProvider = NewEmailProviderClient(c.config)
 	c.Invite = NewInviteClient(c.config)
+	c.PageVersion = NewPageVersionClient(c.config)
 	c.Project = NewProjectClient(c.config)
 	c.ProjectMember = NewProjectMemberClient(c.config)
 	c.Sprint = NewSprintClient(c.config)
@@ -106,6 +119,9 @@ func (c *Client) init() {
 	c.TeamMember = NewTeamMemberClient(c.config)
 	c.User = NewUserClient(c.config)
 	c.UserActivity = NewUserActivityClient(c.config)
+	c.WikiBlock = NewWikiBlockClient(c.config)
+	c.WikiPage = NewWikiPageClient(c.config)
+	c.YjsUpdate = NewYjsUpdateClient(c.config)
 }
 
 type (
@@ -202,6 +218,7 @@ func (c *Client) Tx(ctx context.Context) (*Tx, error) {
 		CloudinaryCredential: NewCloudinaryCredentialClient(cfg),
 		EmailProvider:        NewEmailProviderClient(cfg),
 		Invite:               NewInviteClient(cfg),
+		PageVersion:          NewPageVersionClient(cfg),
 		Project:              NewProjectClient(cfg),
 		ProjectMember:        NewProjectMemberClient(cfg),
 		Sprint:               NewSprintClient(cfg),
@@ -216,6 +233,9 @@ func (c *Client) Tx(ctx context.Context) (*Tx, error) {
 		TeamMember:           NewTeamMemberClient(cfg),
 		User:                 NewUserClient(cfg),
 		UserActivity:         NewUserActivityClient(cfg),
+		WikiBlock:            NewWikiBlockClient(cfg),
+		WikiPage:             NewWikiPageClient(cfg),
+		YjsUpdate:            NewYjsUpdateClient(cfg),
 	}, nil
 }
 
@@ -239,6 +259,7 @@ func (c *Client) BeginTx(ctx context.Context, opts *sql.TxOptions) (*Tx, error) 
 		CloudinaryCredential: NewCloudinaryCredentialClient(cfg),
 		EmailProvider:        NewEmailProviderClient(cfg),
 		Invite:               NewInviteClient(cfg),
+		PageVersion:          NewPageVersionClient(cfg),
 		Project:              NewProjectClient(cfg),
 		ProjectMember:        NewProjectMemberClient(cfg),
 		Sprint:               NewSprintClient(cfg),
@@ -253,6 +274,9 @@ func (c *Client) BeginTx(ctx context.Context, opts *sql.TxOptions) (*Tx, error) 
 		TeamMember:           NewTeamMemberClient(cfg),
 		User:                 NewUserClient(cfg),
 		UserActivity:         NewUserActivityClient(cfg),
+		WikiBlock:            NewWikiBlockClient(cfg),
+		WikiPage:             NewWikiPageClient(cfg),
+		YjsUpdate:            NewYjsUpdateClient(cfg),
 	}, nil
 }
 
@@ -282,10 +306,10 @@ func (c *Client) Close() error {
 // In order to add hooks to a specific client, call: `client.Node.Use(...)`.
 func (c *Client) Use(hooks ...Hook) {
 	for _, n := range []interface{ Use(...Hook) }{
-		c.APIKey, c.CloudinaryCredential, c.EmailProvider, c.Invite, c.Project,
-		c.ProjectMember, c.Sprint, c.SwimLane, c.Tag, c.Task, c.TaskAttachment,
-		c.TaskComment, c.TaskTag, c.Team, c.TeamInvitation, c.TeamMember, c.User,
-		c.UserActivity,
+		c.APIKey, c.CloudinaryCredential, c.EmailProvider, c.Invite, c.PageVersion,
+		c.Project, c.ProjectMember, c.Sprint, c.SwimLane, c.Tag, c.Task,
+		c.TaskAttachment, c.TaskComment, c.TaskTag, c.Team, c.TeamInvitation,
+		c.TeamMember, c.User, c.UserActivity, c.WikiBlock, c.WikiPage, c.YjsUpdate,
 	} {
 		n.Use(hooks...)
 	}
@@ -295,10 +319,10 @@ func (c *Client) Use(hooks ...Hook) {
 // In order to add interceptors to a specific client, call: `client.Node.Intercept(...)`.
 func (c *Client) Intercept(interceptors ...Interceptor) {
 	for _, n := range []interface{ Intercept(...Interceptor) }{
-		c.APIKey, c.CloudinaryCredential, c.EmailProvider, c.Invite, c.Project,
-		c.ProjectMember, c.Sprint, c.SwimLane, c.Tag, c.Task, c.TaskAttachment,
-		c.TaskComment, c.TaskTag, c.Team, c.TeamInvitation, c.TeamMember, c.User,
-		c.UserActivity,
+		c.APIKey, c.CloudinaryCredential, c.EmailProvider, c.Invite, c.PageVersion,
+		c.Project, c.ProjectMember, c.Sprint, c.SwimLane, c.Tag, c.Task,
+		c.TaskAttachment, c.TaskComment, c.TaskTag, c.Team, c.TeamInvitation,
+		c.TeamMember, c.User, c.UserActivity, c.WikiBlock, c.WikiPage, c.YjsUpdate,
 	} {
 		n.Intercept(interceptors...)
 	}
@@ -315,6 +339,8 @@ func (c *Client) Mutate(ctx context.Context, m Mutation) (Value, error) {
 		return c.EmailProvider.mutate(ctx, m)
 	case *InviteMutation:
 		return c.Invite.mutate(ctx, m)
+	case *PageVersionMutation:
+		return c.PageVersion.mutate(ctx, m)
 	case *ProjectMutation:
 		return c.Project.mutate(ctx, m)
 	case *ProjectMemberMutation:
@@ -343,6 +369,12 @@ func (c *Client) Mutate(ctx context.Context, m Mutation) (Value, error) {
 		return c.User.mutate(ctx, m)
 	case *UserActivityMutation:
 		return c.UserActivity.mutate(ctx, m)
+	case *WikiBlockMutation:
+		return c.WikiBlock.mutate(ctx, m)
+	case *WikiPageMutation:
+		return c.WikiPage.mutate(ctx, m)
+	case *YjsUpdateMutation:
+		return c.YjsUpdate.mutate(ctx, m)
 	default:
 		return nil, fmt.Errorf("ent: unknown mutation type %T", m)
 	}
@@ -944,6 +976,155 @@ func (c *InviteClient) mutate(ctx context.Context, m *InviteMutation) (Value, er
 	}
 }
 
+// PageVersionClient is a client for the PageVersion schema.
+type PageVersionClient struct {
+	config
+}
+
+// NewPageVersionClient returns a client for the PageVersion from the given config.
+func NewPageVersionClient(c config) *PageVersionClient {
+	return &PageVersionClient{config: c}
+}
+
+// Use adds a list of mutation hooks to the hooks stack.
+// A call to `Use(f, g, h)` equals to `pageversion.Hooks(f(g(h())))`.
+func (c *PageVersionClient) Use(hooks ...Hook) {
+	c.hooks.PageVersion = append(c.hooks.PageVersion, hooks...)
+}
+
+// Intercept adds a list of query interceptors to the interceptors stack.
+// A call to `Intercept(f, g, h)` equals to `pageversion.Intercept(f(g(h())))`.
+func (c *PageVersionClient) Intercept(interceptors ...Interceptor) {
+	c.inters.PageVersion = append(c.inters.PageVersion, interceptors...)
+}
+
+// Create returns a builder for creating a PageVersion entity.
+func (c *PageVersionClient) Create() *PageVersionCreate {
+	mutation := newPageVersionMutation(c.config, OpCreate)
+	return &PageVersionCreate{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// CreateBulk returns a builder for creating a bulk of PageVersion entities.
+func (c *PageVersionClient) CreateBulk(builders ...*PageVersionCreate) *PageVersionCreateBulk {
+	return &PageVersionCreateBulk{config: c.config, builders: builders}
+}
+
+// MapCreateBulk creates a bulk creation builder from the given slice. For each item in the slice, the function creates
+// a builder and applies setFunc on it.
+func (c *PageVersionClient) MapCreateBulk(slice any, setFunc func(*PageVersionCreate, int)) *PageVersionCreateBulk {
+	rv := reflect.ValueOf(slice)
+	if rv.Kind() != reflect.Slice {
+		return &PageVersionCreateBulk{err: fmt.Errorf("calling to PageVersionClient.MapCreateBulk with wrong type %T, need slice", slice)}
+	}
+	builders := make([]*PageVersionCreate, rv.Len())
+	for i := 0; i < rv.Len(); i++ {
+		builders[i] = c.Create()
+		setFunc(builders[i], i)
+	}
+	return &PageVersionCreateBulk{config: c.config, builders: builders}
+}
+
+// Update returns an update builder for PageVersion.
+func (c *PageVersionClient) Update() *PageVersionUpdate {
+	mutation := newPageVersionMutation(c.config, OpUpdate)
+	return &PageVersionUpdate{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// UpdateOne returns an update builder for the given entity.
+func (c *PageVersionClient) UpdateOne(_m *PageVersion) *PageVersionUpdateOne {
+	mutation := newPageVersionMutation(c.config, OpUpdateOne, withPageVersion(_m))
+	return &PageVersionUpdateOne{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// UpdateOneID returns an update builder for the given id.
+func (c *PageVersionClient) UpdateOneID(id int64) *PageVersionUpdateOne {
+	mutation := newPageVersionMutation(c.config, OpUpdateOne, withPageVersionID(id))
+	return &PageVersionUpdateOne{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// Delete returns a delete builder for PageVersion.
+func (c *PageVersionClient) Delete() *PageVersionDelete {
+	mutation := newPageVersionMutation(c.config, OpDelete)
+	return &PageVersionDelete{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// DeleteOne returns a builder for deleting the given entity.
+func (c *PageVersionClient) DeleteOne(_m *PageVersion) *PageVersionDeleteOne {
+	return c.DeleteOneID(_m.ID)
+}
+
+// DeleteOneID returns a builder for deleting the given entity by its id.
+func (c *PageVersionClient) DeleteOneID(id int64) *PageVersionDeleteOne {
+	builder := c.Delete().Where(pageversion.ID(id))
+	builder.mutation.id = &id
+	builder.mutation.op = OpDeleteOne
+	return &PageVersionDeleteOne{builder}
+}
+
+// Query returns a query builder for PageVersion.
+func (c *PageVersionClient) Query() *PageVersionQuery {
+	return &PageVersionQuery{
+		config: c.config,
+		ctx:    &QueryContext{Type: TypePageVersion},
+		inters: c.Interceptors(),
+	}
+}
+
+// Get returns a PageVersion entity by its id.
+func (c *PageVersionClient) Get(ctx context.Context, id int64) (*PageVersion, error) {
+	return c.Query().Where(pageversion.ID(id)).Only(ctx)
+}
+
+// GetX is like Get, but panics if an error occurs.
+func (c *PageVersionClient) GetX(ctx context.Context, id int64) *PageVersion {
+	obj, err := c.Get(ctx, id)
+	if err != nil {
+		panic(err)
+	}
+	return obj
+}
+
+// QueryPage queries the page edge of a PageVersion.
+func (c *PageVersionClient) QueryPage(_m *PageVersion) *WikiPageQuery {
+	query := (&WikiPageClient{config: c.config}).Query()
+	query.path = func(context.Context) (fromV *sql.Selector, _ error) {
+		id := _m.ID
+		step := sqlgraph.NewStep(
+			sqlgraph.From(pageversion.Table, pageversion.FieldID, id),
+			sqlgraph.To(wikipage.Table, wikipage.FieldID),
+			sqlgraph.Edge(sqlgraph.M2O, true, pageversion.PageTable, pageversion.PageColumn),
+		)
+		fromV = sqlgraph.Neighbors(_m.driver.Dialect(), step)
+		return fromV, nil
+	}
+	return query
+}
+
+// Hooks returns the client hooks.
+func (c *PageVersionClient) Hooks() []Hook {
+	return c.hooks.PageVersion
+}
+
+// Interceptors returns the client interceptors.
+func (c *PageVersionClient) Interceptors() []Interceptor {
+	return c.inters.PageVersion
+}
+
+func (c *PageVersionClient) mutate(ctx context.Context, m *PageVersionMutation) (Value, error) {
+	switch m.Op() {
+	case OpCreate:
+		return (&PageVersionCreate{config: c.config, hooks: c.Hooks(), mutation: m}).Save(ctx)
+	case OpUpdate:
+		return (&PageVersionUpdate{config: c.config, hooks: c.Hooks(), mutation: m}).Save(ctx)
+	case OpUpdateOne:
+		return (&PageVersionUpdateOne{config: c.config, hooks: c.Hooks(), mutation: m}).Save(ctx)
+	case OpDelete, OpDeleteOne:
+		return (&PageVersionDelete{config: c.config, hooks: c.Hooks(), mutation: m}).Exec(ctx)
+	default:
+		return nil, fmt.Errorf("ent: unknown PageVersion mutation op: %q", m.Op())
+	}
+}
+
 // ProjectClient is a client for the Project schema.
 type ProjectClient struct {
 	config
@@ -1141,6 +1322,22 @@ func (c *ProjectClient) QueryAttachments(_m *Project) *TaskAttachmentQuery {
 			sqlgraph.From(project.Table, project.FieldID, id),
 			sqlgraph.To(taskattachment.Table, taskattachment.FieldID),
 			sqlgraph.Edge(sqlgraph.O2M, false, project.AttachmentsTable, project.AttachmentsColumn),
+		)
+		fromV = sqlgraph.Neighbors(_m.driver.Dialect(), step)
+		return fromV, nil
+	}
+	return query
+}
+
+// QueryWikiPages queries the wiki_pages edge of a Project.
+func (c *ProjectClient) QueryWikiPages(_m *Project) *WikiPageQuery {
+	query := (&WikiPageClient{config: c.config}).Query()
+	query.path = func(context.Context) (fromV *sql.Selector, _ error) {
+		id := _m.ID
+		step := sqlgraph.NewStep(
+			sqlgraph.From(project.Table, project.FieldID, id),
+			sqlgraph.To(wikipage.Table, wikipage.FieldID),
+			sqlgraph.Edge(sqlgraph.O2M, false, project.WikiPagesTable, project.WikiPagesColumn),
 		)
 		fromV = sqlgraph.Neighbors(_m.driver.Dialect(), step)
 		return fromV, nil
@@ -3592,6 +3789,38 @@ func (c *UserClient) QueryTaskAttachments(_m *User) *TaskAttachmentQuery {
 	return query
 }
 
+// QueryWikiPagesCreated queries the wiki_pages_created edge of a User.
+func (c *UserClient) QueryWikiPagesCreated(_m *User) *WikiPageQuery {
+	query := (&WikiPageClient{config: c.config}).Query()
+	query.path = func(context.Context) (fromV *sql.Selector, _ error) {
+		id := _m.ID
+		step := sqlgraph.NewStep(
+			sqlgraph.From(user.Table, user.FieldID, id),
+			sqlgraph.To(wikipage.Table, wikipage.FieldID),
+			sqlgraph.Edge(sqlgraph.O2M, false, user.WikiPagesCreatedTable, user.WikiPagesCreatedColumn),
+		)
+		fromV = sqlgraph.Neighbors(_m.driver.Dialect(), step)
+		return fromV, nil
+	}
+	return query
+}
+
+// QueryYjsUpdates queries the yjs_updates edge of a User.
+func (c *UserClient) QueryYjsUpdates(_m *User) *YjsUpdateQuery {
+	query := (&YjsUpdateClient{config: c.config}).Query()
+	query.path = func(context.Context) (fromV *sql.Selector, _ error) {
+		id := _m.ID
+		step := sqlgraph.NewStep(
+			sqlgraph.From(user.Table, user.FieldID, id),
+			sqlgraph.To(yjsupdate.Table, yjsupdate.FieldID),
+			sqlgraph.Edge(sqlgraph.O2M, false, user.YjsUpdatesTable, user.YjsUpdatesColumn),
+		)
+		fromV = sqlgraph.Neighbors(_m.driver.Dialect(), step)
+		return fromV, nil
+	}
+	return query
+}
+
 // Hooks returns the client hooks.
 func (c *UserClient) Hooks() []Hook {
 	return c.hooks.User
@@ -3766,16 +3995,545 @@ func (c *UserActivityClient) mutate(ctx context.Context, m *UserActivityMutation
 	}
 }
 
+// WikiBlockClient is a client for the WikiBlock schema.
+type WikiBlockClient struct {
+	config
+}
+
+// NewWikiBlockClient returns a client for the WikiBlock from the given config.
+func NewWikiBlockClient(c config) *WikiBlockClient {
+	return &WikiBlockClient{config: c}
+}
+
+// Use adds a list of mutation hooks to the hooks stack.
+// A call to `Use(f, g, h)` equals to `wikiblock.Hooks(f(g(h())))`.
+func (c *WikiBlockClient) Use(hooks ...Hook) {
+	c.hooks.WikiBlock = append(c.hooks.WikiBlock, hooks...)
+}
+
+// Intercept adds a list of query interceptors to the interceptors stack.
+// A call to `Intercept(f, g, h)` equals to `wikiblock.Intercept(f(g(h())))`.
+func (c *WikiBlockClient) Intercept(interceptors ...Interceptor) {
+	c.inters.WikiBlock = append(c.inters.WikiBlock, interceptors...)
+}
+
+// Create returns a builder for creating a WikiBlock entity.
+func (c *WikiBlockClient) Create() *WikiBlockCreate {
+	mutation := newWikiBlockMutation(c.config, OpCreate)
+	return &WikiBlockCreate{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// CreateBulk returns a builder for creating a bulk of WikiBlock entities.
+func (c *WikiBlockClient) CreateBulk(builders ...*WikiBlockCreate) *WikiBlockCreateBulk {
+	return &WikiBlockCreateBulk{config: c.config, builders: builders}
+}
+
+// MapCreateBulk creates a bulk creation builder from the given slice. For each item in the slice, the function creates
+// a builder and applies setFunc on it.
+func (c *WikiBlockClient) MapCreateBulk(slice any, setFunc func(*WikiBlockCreate, int)) *WikiBlockCreateBulk {
+	rv := reflect.ValueOf(slice)
+	if rv.Kind() != reflect.Slice {
+		return &WikiBlockCreateBulk{err: fmt.Errorf("calling to WikiBlockClient.MapCreateBulk with wrong type %T, need slice", slice)}
+	}
+	builders := make([]*WikiBlockCreate, rv.Len())
+	for i := 0; i < rv.Len(); i++ {
+		builders[i] = c.Create()
+		setFunc(builders[i], i)
+	}
+	return &WikiBlockCreateBulk{config: c.config, builders: builders}
+}
+
+// Update returns an update builder for WikiBlock.
+func (c *WikiBlockClient) Update() *WikiBlockUpdate {
+	mutation := newWikiBlockMutation(c.config, OpUpdate)
+	return &WikiBlockUpdate{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// UpdateOne returns an update builder for the given entity.
+func (c *WikiBlockClient) UpdateOne(_m *WikiBlock) *WikiBlockUpdateOne {
+	mutation := newWikiBlockMutation(c.config, OpUpdateOne, withWikiBlock(_m))
+	return &WikiBlockUpdateOne{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// UpdateOneID returns an update builder for the given id.
+func (c *WikiBlockClient) UpdateOneID(id int64) *WikiBlockUpdateOne {
+	mutation := newWikiBlockMutation(c.config, OpUpdateOne, withWikiBlockID(id))
+	return &WikiBlockUpdateOne{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// Delete returns a delete builder for WikiBlock.
+func (c *WikiBlockClient) Delete() *WikiBlockDelete {
+	mutation := newWikiBlockMutation(c.config, OpDelete)
+	return &WikiBlockDelete{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// DeleteOne returns a builder for deleting the given entity.
+func (c *WikiBlockClient) DeleteOne(_m *WikiBlock) *WikiBlockDeleteOne {
+	return c.DeleteOneID(_m.ID)
+}
+
+// DeleteOneID returns a builder for deleting the given entity by its id.
+func (c *WikiBlockClient) DeleteOneID(id int64) *WikiBlockDeleteOne {
+	builder := c.Delete().Where(wikiblock.ID(id))
+	builder.mutation.id = &id
+	builder.mutation.op = OpDeleteOne
+	return &WikiBlockDeleteOne{builder}
+}
+
+// Query returns a query builder for WikiBlock.
+func (c *WikiBlockClient) Query() *WikiBlockQuery {
+	return &WikiBlockQuery{
+		config: c.config,
+		ctx:    &QueryContext{Type: TypeWikiBlock},
+		inters: c.Interceptors(),
+	}
+}
+
+// Get returns a WikiBlock entity by its id.
+func (c *WikiBlockClient) Get(ctx context.Context, id int64) (*WikiBlock, error) {
+	return c.Query().Where(wikiblock.ID(id)).Only(ctx)
+}
+
+// GetX is like Get, but panics if an error occurs.
+func (c *WikiBlockClient) GetX(ctx context.Context, id int64) *WikiBlock {
+	obj, err := c.Get(ctx, id)
+	if err != nil {
+		panic(err)
+	}
+	return obj
+}
+
+// QueryPage queries the page edge of a WikiBlock.
+func (c *WikiBlockClient) QueryPage(_m *WikiBlock) *WikiPageQuery {
+	query := (&WikiPageClient{config: c.config}).Query()
+	query.path = func(context.Context) (fromV *sql.Selector, _ error) {
+		id := _m.ID
+		step := sqlgraph.NewStep(
+			sqlgraph.From(wikiblock.Table, wikiblock.FieldID, id),
+			sqlgraph.To(wikipage.Table, wikipage.FieldID),
+			sqlgraph.Edge(sqlgraph.M2O, true, wikiblock.PageTable, wikiblock.PageColumn),
+		)
+		fromV = sqlgraph.Neighbors(_m.driver.Dialect(), step)
+		return fromV, nil
+	}
+	return query
+}
+
+// Hooks returns the client hooks.
+func (c *WikiBlockClient) Hooks() []Hook {
+	return c.hooks.WikiBlock
+}
+
+// Interceptors returns the client interceptors.
+func (c *WikiBlockClient) Interceptors() []Interceptor {
+	return c.inters.WikiBlock
+}
+
+func (c *WikiBlockClient) mutate(ctx context.Context, m *WikiBlockMutation) (Value, error) {
+	switch m.Op() {
+	case OpCreate:
+		return (&WikiBlockCreate{config: c.config, hooks: c.Hooks(), mutation: m}).Save(ctx)
+	case OpUpdate:
+		return (&WikiBlockUpdate{config: c.config, hooks: c.Hooks(), mutation: m}).Save(ctx)
+	case OpUpdateOne:
+		return (&WikiBlockUpdateOne{config: c.config, hooks: c.Hooks(), mutation: m}).Save(ctx)
+	case OpDelete, OpDeleteOne:
+		return (&WikiBlockDelete{config: c.config, hooks: c.Hooks(), mutation: m}).Exec(ctx)
+	default:
+		return nil, fmt.Errorf("ent: unknown WikiBlock mutation op: %q", m.Op())
+	}
+}
+
+// WikiPageClient is a client for the WikiPage schema.
+type WikiPageClient struct {
+	config
+}
+
+// NewWikiPageClient returns a client for the WikiPage from the given config.
+func NewWikiPageClient(c config) *WikiPageClient {
+	return &WikiPageClient{config: c}
+}
+
+// Use adds a list of mutation hooks to the hooks stack.
+// A call to `Use(f, g, h)` equals to `wikipage.Hooks(f(g(h())))`.
+func (c *WikiPageClient) Use(hooks ...Hook) {
+	c.hooks.WikiPage = append(c.hooks.WikiPage, hooks...)
+}
+
+// Intercept adds a list of query interceptors to the interceptors stack.
+// A call to `Intercept(f, g, h)` equals to `wikipage.Intercept(f(g(h())))`.
+func (c *WikiPageClient) Intercept(interceptors ...Interceptor) {
+	c.inters.WikiPage = append(c.inters.WikiPage, interceptors...)
+}
+
+// Create returns a builder for creating a WikiPage entity.
+func (c *WikiPageClient) Create() *WikiPageCreate {
+	mutation := newWikiPageMutation(c.config, OpCreate)
+	return &WikiPageCreate{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// CreateBulk returns a builder for creating a bulk of WikiPage entities.
+func (c *WikiPageClient) CreateBulk(builders ...*WikiPageCreate) *WikiPageCreateBulk {
+	return &WikiPageCreateBulk{config: c.config, builders: builders}
+}
+
+// MapCreateBulk creates a bulk creation builder from the given slice. For each item in the slice, the function creates
+// a builder and applies setFunc on it.
+func (c *WikiPageClient) MapCreateBulk(slice any, setFunc func(*WikiPageCreate, int)) *WikiPageCreateBulk {
+	rv := reflect.ValueOf(slice)
+	if rv.Kind() != reflect.Slice {
+		return &WikiPageCreateBulk{err: fmt.Errorf("calling to WikiPageClient.MapCreateBulk with wrong type %T, need slice", slice)}
+	}
+	builders := make([]*WikiPageCreate, rv.Len())
+	for i := 0; i < rv.Len(); i++ {
+		builders[i] = c.Create()
+		setFunc(builders[i], i)
+	}
+	return &WikiPageCreateBulk{config: c.config, builders: builders}
+}
+
+// Update returns an update builder for WikiPage.
+func (c *WikiPageClient) Update() *WikiPageUpdate {
+	mutation := newWikiPageMutation(c.config, OpUpdate)
+	return &WikiPageUpdate{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// UpdateOne returns an update builder for the given entity.
+func (c *WikiPageClient) UpdateOne(_m *WikiPage) *WikiPageUpdateOne {
+	mutation := newWikiPageMutation(c.config, OpUpdateOne, withWikiPage(_m))
+	return &WikiPageUpdateOne{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// UpdateOneID returns an update builder for the given id.
+func (c *WikiPageClient) UpdateOneID(id int64) *WikiPageUpdateOne {
+	mutation := newWikiPageMutation(c.config, OpUpdateOne, withWikiPageID(id))
+	return &WikiPageUpdateOne{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// Delete returns a delete builder for WikiPage.
+func (c *WikiPageClient) Delete() *WikiPageDelete {
+	mutation := newWikiPageMutation(c.config, OpDelete)
+	return &WikiPageDelete{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// DeleteOne returns a builder for deleting the given entity.
+func (c *WikiPageClient) DeleteOne(_m *WikiPage) *WikiPageDeleteOne {
+	return c.DeleteOneID(_m.ID)
+}
+
+// DeleteOneID returns a builder for deleting the given entity by its id.
+func (c *WikiPageClient) DeleteOneID(id int64) *WikiPageDeleteOne {
+	builder := c.Delete().Where(wikipage.ID(id))
+	builder.mutation.id = &id
+	builder.mutation.op = OpDeleteOne
+	return &WikiPageDeleteOne{builder}
+}
+
+// Query returns a query builder for WikiPage.
+func (c *WikiPageClient) Query() *WikiPageQuery {
+	return &WikiPageQuery{
+		config: c.config,
+		ctx:    &QueryContext{Type: TypeWikiPage},
+		inters: c.Interceptors(),
+	}
+}
+
+// Get returns a WikiPage entity by its id.
+func (c *WikiPageClient) Get(ctx context.Context, id int64) (*WikiPage, error) {
+	return c.Query().Where(wikipage.ID(id)).Only(ctx)
+}
+
+// GetX is like Get, but panics if an error occurs.
+func (c *WikiPageClient) GetX(ctx context.Context, id int64) *WikiPage {
+	obj, err := c.Get(ctx, id)
+	if err != nil {
+		panic(err)
+	}
+	return obj
+}
+
+// QueryProject queries the project edge of a WikiPage.
+func (c *WikiPageClient) QueryProject(_m *WikiPage) *ProjectQuery {
+	query := (&ProjectClient{config: c.config}).Query()
+	query.path = func(context.Context) (fromV *sql.Selector, _ error) {
+		id := _m.ID
+		step := sqlgraph.NewStep(
+			sqlgraph.From(wikipage.Table, wikipage.FieldID, id),
+			sqlgraph.To(project.Table, project.FieldID),
+			sqlgraph.Edge(sqlgraph.M2O, true, wikipage.ProjectTable, wikipage.ProjectColumn),
+		)
+		fromV = sqlgraph.Neighbors(_m.driver.Dialect(), step)
+		return fromV, nil
+	}
+	return query
+}
+
+// QueryCreator queries the creator edge of a WikiPage.
+func (c *WikiPageClient) QueryCreator(_m *WikiPage) *UserQuery {
+	query := (&UserClient{config: c.config}).Query()
+	query.path = func(context.Context) (fromV *sql.Selector, _ error) {
+		id := _m.ID
+		step := sqlgraph.NewStep(
+			sqlgraph.From(wikipage.Table, wikipage.FieldID, id),
+			sqlgraph.To(user.Table, user.FieldID),
+			sqlgraph.Edge(sqlgraph.M2O, true, wikipage.CreatorTable, wikipage.CreatorColumn),
+		)
+		fromV = sqlgraph.Neighbors(_m.driver.Dialect(), step)
+		return fromV, nil
+	}
+	return query
+}
+
+// QueryYjsUpdates queries the yjs_updates edge of a WikiPage.
+func (c *WikiPageClient) QueryYjsUpdates(_m *WikiPage) *YjsUpdateQuery {
+	query := (&YjsUpdateClient{config: c.config}).Query()
+	query.path = func(context.Context) (fromV *sql.Selector, _ error) {
+		id := _m.ID
+		step := sqlgraph.NewStep(
+			sqlgraph.From(wikipage.Table, wikipage.FieldID, id),
+			sqlgraph.To(yjsupdate.Table, yjsupdate.FieldID),
+			sqlgraph.Edge(sqlgraph.O2M, false, wikipage.YjsUpdatesTable, wikipage.YjsUpdatesColumn),
+		)
+		fromV = sqlgraph.Neighbors(_m.driver.Dialect(), step)
+		return fromV, nil
+	}
+	return query
+}
+
+// QueryVersions queries the versions edge of a WikiPage.
+func (c *WikiPageClient) QueryVersions(_m *WikiPage) *PageVersionQuery {
+	query := (&PageVersionClient{config: c.config}).Query()
+	query.path = func(context.Context) (fromV *sql.Selector, _ error) {
+		id := _m.ID
+		step := sqlgraph.NewStep(
+			sqlgraph.From(wikipage.Table, wikipage.FieldID, id),
+			sqlgraph.To(pageversion.Table, pageversion.FieldID),
+			sqlgraph.Edge(sqlgraph.O2M, false, wikipage.VersionsTable, wikipage.VersionsColumn),
+		)
+		fromV = sqlgraph.Neighbors(_m.driver.Dialect(), step)
+		return fromV, nil
+	}
+	return query
+}
+
+// QueryBlocks queries the blocks edge of a WikiPage.
+func (c *WikiPageClient) QueryBlocks(_m *WikiPage) *WikiBlockQuery {
+	query := (&WikiBlockClient{config: c.config}).Query()
+	query.path = func(context.Context) (fromV *sql.Selector, _ error) {
+		id := _m.ID
+		step := sqlgraph.NewStep(
+			sqlgraph.From(wikipage.Table, wikipage.FieldID, id),
+			sqlgraph.To(wikiblock.Table, wikiblock.FieldID),
+			sqlgraph.Edge(sqlgraph.O2M, false, wikipage.BlocksTable, wikipage.BlocksColumn),
+		)
+		fromV = sqlgraph.Neighbors(_m.driver.Dialect(), step)
+		return fromV, nil
+	}
+	return query
+}
+
+// Hooks returns the client hooks.
+func (c *WikiPageClient) Hooks() []Hook {
+	return c.hooks.WikiPage
+}
+
+// Interceptors returns the client interceptors.
+func (c *WikiPageClient) Interceptors() []Interceptor {
+	return c.inters.WikiPage
+}
+
+func (c *WikiPageClient) mutate(ctx context.Context, m *WikiPageMutation) (Value, error) {
+	switch m.Op() {
+	case OpCreate:
+		return (&WikiPageCreate{config: c.config, hooks: c.Hooks(), mutation: m}).Save(ctx)
+	case OpUpdate:
+		return (&WikiPageUpdate{config: c.config, hooks: c.Hooks(), mutation: m}).Save(ctx)
+	case OpUpdateOne:
+		return (&WikiPageUpdateOne{config: c.config, hooks: c.Hooks(), mutation: m}).Save(ctx)
+	case OpDelete, OpDeleteOne:
+		return (&WikiPageDelete{config: c.config, hooks: c.Hooks(), mutation: m}).Exec(ctx)
+	default:
+		return nil, fmt.Errorf("ent: unknown WikiPage mutation op: %q", m.Op())
+	}
+}
+
+// YjsUpdateClient is a client for the YjsUpdate schema.
+type YjsUpdateClient struct {
+	config
+}
+
+// NewYjsUpdateClient returns a client for the YjsUpdate from the given config.
+func NewYjsUpdateClient(c config) *YjsUpdateClient {
+	return &YjsUpdateClient{config: c}
+}
+
+// Use adds a list of mutation hooks to the hooks stack.
+// A call to `Use(f, g, h)` equals to `yjsupdate.Hooks(f(g(h())))`.
+func (c *YjsUpdateClient) Use(hooks ...Hook) {
+	c.hooks.YjsUpdate = append(c.hooks.YjsUpdate, hooks...)
+}
+
+// Intercept adds a list of query interceptors to the interceptors stack.
+// A call to `Intercept(f, g, h)` equals to `yjsupdate.Intercept(f(g(h())))`.
+func (c *YjsUpdateClient) Intercept(interceptors ...Interceptor) {
+	c.inters.YjsUpdate = append(c.inters.YjsUpdate, interceptors...)
+}
+
+// Create returns a builder for creating a YjsUpdate entity.
+func (c *YjsUpdateClient) Create() *YjsUpdateCreate {
+	mutation := newYjsUpdateMutation(c.config, OpCreate)
+	return &YjsUpdateCreate{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// CreateBulk returns a builder for creating a bulk of YjsUpdate entities.
+func (c *YjsUpdateClient) CreateBulk(builders ...*YjsUpdateCreate) *YjsUpdateCreateBulk {
+	return &YjsUpdateCreateBulk{config: c.config, builders: builders}
+}
+
+// MapCreateBulk creates a bulk creation builder from the given slice. For each item in the slice, the function creates
+// a builder and applies setFunc on it.
+func (c *YjsUpdateClient) MapCreateBulk(slice any, setFunc func(*YjsUpdateCreate, int)) *YjsUpdateCreateBulk {
+	rv := reflect.ValueOf(slice)
+	if rv.Kind() != reflect.Slice {
+		return &YjsUpdateCreateBulk{err: fmt.Errorf("calling to YjsUpdateClient.MapCreateBulk with wrong type %T, need slice", slice)}
+	}
+	builders := make([]*YjsUpdateCreate, rv.Len())
+	for i := 0; i < rv.Len(); i++ {
+		builders[i] = c.Create()
+		setFunc(builders[i], i)
+	}
+	return &YjsUpdateCreateBulk{config: c.config, builders: builders}
+}
+
+// Update returns an update builder for YjsUpdate.
+func (c *YjsUpdateClient) Update() *YjsUpdateUpdate {
+	mutation := newYjsUpdateMutation(c.config, OpUpdate)
+	return &YjsUpdateUpdate{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// UpdateOne returns an update builder for the given entity.
+func (c *YjsUpdateClient) UpdateOne(_m *YjsUpdate) *YjsUpdateUpdateOne {
+	mutation := newYjsUpdateMutation(c.config, OpUpdateOne, withYjsUpdate(_m))
+	return &YjsUpdateUpdateOne{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// UpdateOneID returns an update builder for the given id.
+func (c *YjsUpdateClient) UpdateOneID(id int64) *YjsUpdateUpdateOne {
+	mutation := newYjsUpdateMutation(c.config, OpUpdateOne, withYjsUpdateID(id))
+	return &YjsUpdateUpdateOne{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// Delete returns a delete builder for YjsUpdate.
+func (c *YjsUpdateClient) Delete() *YjsUpdateDelete {
+	mutation := newYjsUpdateMutation(c.config, OpDelete)
+	return &YjsUpdateDelete{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// DeleteOne returns a builder for deleting the given entity.
+func (c *YjsUpdateClient) DeleteOne(_m *YjsUpdate) *YjsUpdateDeleteOne {
+	return c.DeleteOneID(_m.ID)
+}
+
+// DeleteOneID returns a builder for deleting the given entity by its id.
+func (c *YjsUpdateClient) DeleteOneID(id int64) *YjsUpdateDeleteOne {
+	builder := c.Delete().Where(yjsupdate.ID(id))
+	builder.mutation.id = &id
+	builder.mutation.op = OpDeleteOne
+	return &YjsUpdateDeleteOne{builder}
+}
+
+// Query returns a query builder for YjsUpdate.
+func (c *YjsUpdateClient) Query() *YjsUpdateQuery {
+	return &YjsUpdateQuery{
+		config: c.config,
+		ctx:    &QueryContext{Type: TypeYjsUpdate},
+		inters: c.Interceptors(),
+	}
+}
+
+// Get returns a YjsUpdate entity by its id.
+func (c *YjsUpdateClient) Get(ctx context.Context, id int64) (*YjsUpdate, error) {
+	return c.Query().Where(yjsupdate.ID(id)).Only(ctx)
+}
+
+// GetX is like Get, but panics if an error occurs.
+func (c *YjsUpdateClient) GetX(ctx context.Context, id int64) *YjsUpdate {
+	obj, err := c.Get(ctx, id)
+	if err != nil {
+		panic(err)
+	}
+	return obj
+}
+
+// QueryPage queries the page edge of a YjsUpdate.
+func (c *YjsUpdateClient) QueryPage(_m *YjsUpdate) *WikiPageQuery {
+	query := (&WikiPageClient{config: c.config}).Query()
+	query.path = func(context.Context) (fromV *sql.Selector, _ error) {
+		id := _m.ID
+		step := sqlgraph.NewStep(
+			sqlgraph.From(yjsupdate.Table, yjsupdate.FieldID, id),
+			sqlgraph.To(wikipage.Table, wikipage.FieldID),
+			sqlgraph.Edge(sqlgraph.M2O, true, yjsupdate.PageTable, yjsupdate.PageColumn),
+		)
+		fromV = sqlgraph.Neighbors(_m.driver.Dialect(), step)
+		return fromV, nil
+	}
+	return query
+}
+
+// QueryCreator queries the creator edge of a YjsUpdate.
+func (c *YjsUpdateClient) QueryCreator(_m *YjsUpdate) *UserQuery {
+	query := (&UserClient{config: c.config}).Query()
+	query.path = func(context.Context) (fromV *sql.Selector, _ error) {
+		id := _m.ID
+		step := sqlgraph.NewStep(
+			sqlgraph.From(yjsupdate.Table, yjsupdate.FieldID, id),
+			sqlgraph.To(user.Table, user.FieldID),
+			sqlgraph.Edge(sqlgraph.M2O, true, yjsupdate.CreatorTable, yjsupdate.CreatorColumn),
+		)
+		fromV = sqlgraph.Neighbors(_m.driver.Dialect(), step)
+		return fromV, nil
+	}
+	return query
+}
+
+// Hooks returns the client hooks.
+func (c *YjsUpdateClient) Hooks() []Hook {
+	return c.hooks.YjsUpdate
+}
+
+// Interceptors returns the client interceptors.
+func (c *YjsUpdateClient) Interceptors() []Interceptor {
+	return c.inters.YjsUpdate
+}
+
+func (c *YjsUpdateClient) mutate(ctx context.Context, m *YjsUpdateMutation) (Value, error) {
+	switch m.Op() {
+	case OpCreate:
+		return (&YjsUpdateCreate{config: c.config, hooks: c.Hooks(), mutation: m}).Save(ctx)
+	case OpUpdate:
+		return (&YjsUpdateUpdate{config: c.config, hooks: c.Hooks(), mutation: m}).Save(ctx)
+	case OpUpdateOne:
+		return (&YjsUpdateUpdateOne{config: c.config, hooks: c.Hooks(), mutation: m}).Save(ctx)
+	case OpDelete, OpDeleteOne:
+		return (&YjsUpdateDelete{config: c.config, hooks: c.Hooks(), mutation: m}).Exec(ctx)
+	default:
+		return nil, fmt.Errorf("ent: unknown YjsUpdate mutation op: %q", m.Op())
+	}
+}
+
 // hooks and interceptors per client, for fast access.
 type (
 	hooks struct {
-		APIKey, CloudinaryCredential, EmailProvider, Invite, Project, ProjectMember,
-		Sprint, SwimLane, Tag, Task, TaskAttachment, TaskComment, TaskTag, Team,
-		TeamInvitation, TeamMember, User, UserActivity []ent.Hook
+		APIKey, CloudinaryCredential, EmailProvider, Invite, PageVersion, Project,
+		ProjectMember, Sprint, SwimLane, Tag, Task, TaskAttachment, TaskComment,
+		TaskTag, Team, TeamInvitation, TeamMember, User, UserActivity, WikiBlock,
+		WikiPage, YjsUpdate []ent.Hook
 	}
 	inters struct {
-		APIKey, CloudinaryCredential, EmailProvider, Invite, Project, ProjectMember,
-		Sprint, SwimLane, Tag, Task, TaskAttachment, TaskComment, TaskTag, Team,
-		TeamInvitation, TeamMember, User, UserActivity []ent.Interceptor
+		APIKey, CloudinaryCredential, EmailProvider, Invite, PageVersion, Project,
+		ProjectMember, Sprint, SwimLane, Tag, Task, TaskAttachment, TaskComment,
+		TaskTag, Team, TeamInvitation, TeamMember, User, UserActivity, WikiBlock,
+		WikiPage, YjsUpdate []ent.Interceptor
 	}
 )

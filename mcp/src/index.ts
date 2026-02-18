@@ -2,10 +2,64 @@ import express from "express";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import { z } from "zod";
-import { TaskAIClient } from "./api.js";
+import { TaskAIClient, Task, Project, SwimLane, Comment } from "./api.js";
 
 const TASKAI_API_URL = process.env.TASKAI_API_URL || "https://taskai.cc";
 const PORT = parseInt(process.env.PORT || "3000", 10);
+
+/**
+ * Helper to format response with minimal tokens by default.
+ * Use verbose=true to get full details with pretty formatting.
+ */
+function formatResponse(data: unknown, verbose = false): string {
+  return verbose ? JSON.stringify(data, null, 2) : JSON.stringify(data);
+}
+
+/**
+ * Extract minimal fields from a task for list operations.
+ */
+function minimizeTask(task: Task) {
+  return {
+    id: task.id,
+    task_number: task.task_number,
+    title: task.title,
+    status: task.status,
+    priority: task.priority,
+  };
+}
+
+/**
+ * Extract minimal fields from a project for list operations.
+ */
+function minimizeProject(project: Project) {
+  return {
+    id: project.id,
+    name: project.name,
+  };
+}
+
+/**
+ * Extract minimal fields from a swim lane.
+ */
+function minimizeSwimLane(lane: SwimLane) {
+  return {
+    id: lane.id,
+    name: lane.name,
+    status_category: lane.status_category,
+  };
+}
+
+/**
+ * Extract minimal fields from a comment.
+ */
+function minimizeComment(comment: Comment) {
+  return {
+    id: comment.id,
+    content: comment.content,
+    author_id: comment.author_id,
+    created_at: comment.created_at,
+  };
+}
 
 /**
  * Create and configure the MCP server with all TaskAI tools.
@@ -17,19 +71,31 @@ function createServer(client: TaskAIClient): McpServer {
   });
 
   // --- get_me ---
-  server.tool("get_me", "Get current authenticated user info", {}, async () => {
-    const user = await client.getMe();
-    return { content: [{ type: "text", text: JSON.stringify(user, null, 2) }] };
-  });
+  server.tool(
+    "get_me",
+    "Get current authenticated user info",
+    { verbose: z.boolean().optional().describe("Return full details (default: false)") },
+    async ({ verbose }) => {
+      const user = await client.getMe();
+      return { content: [{ type: "text", text: formatResponse(user, verbose) }] };
+    }
+  );
 
   // --- list_projects ---
   server.tool(
     "list_projects",
-    "List all projects",
-    { page: z.number().optional(), limit: z.number().optional() },
-    async ({ page, limit }) => {
+    "List all projects (minimal fields by default, use verbose=true for full details)",
+    {
+      page: z.number().optional(),
+      limit: z.number().optional(),
+      verbose: z.boolean().optional().describe("Return full details (default: false)"),
+    },
+    async ({ page, limit, verbose }) => {
       const result = await client.listProjects(page, limit);
-      return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
+      const data = verbose
+        ? result
+        : { projects: result.projects.map(minimizeProject), total: result.total };
+      return { content: [{ type: "text", text: formatResponse(data, verbose) }] };
     }
   );
 
@@ -37,38 +103,49 @@ function createServer(client: TaskAIClient): McpServer {
   server.tool(
     "get_project",
     "Get project details by ID",
-    { project_id: z.string().describe("Project ID") },
-    async ({ project_id }) => {
+    {
+      project_id: z.string().describe("Project ID"),
+      verbose: z.boolean().optional().describe("Pretty print JSON (default: false)"),
+    },
+    async ({ project_id, verbose }) => {
       const project = await client.getProject(project_id);
-      return { content: [{ type: "text", text: JSON.stringify(project, null, 2) }] };
+      return { content: [{ type: "text", text: formatResponse(project, verbose) }] };
     }
   );
 
   // --- list_swim_lanes ---
   server.tool(
     "list_swim_lanes",
-    "List swim lanes (columns) for a project. Each lane has a status_category (todo, in_progress, done) that determines task status.",
-    { project_id: z.string().describe("Project ID") },
-    async ({ project_id }) => {
+    "List swim lanes (columns) for a project. Each lane has a status_category (todo, in_progress, done) that determines task status. Returns minimal fields by default.",
+    {
+      project_id: z.string().describe("Project ID"),
+      verbose: z.boolean().optional().describe("Return full details (default: false)"),
+    },
+    async ({ project_id, verbose }) => {
       const lanes = await client.listSwimLanes(project_id);
-      return { content: [{ type: "text", text: JSON.stringify(lanes, null, 2) }] };
+      const data = verbose ? lanes : lanes.map(minimizeSwimLane);
+      return { content: [{ type: "text", text: formatResponse(data, verbose) }] };
     }
   );
 
   // --- list_tasks ---
   server.tool(
     "list_tasks",
-    "List tasks in a project (optional status/search filter). Each task includes a task_number which is the project-scoped identifier.",
+    "List tasks in a project (optional status/search filter). Returns minimal fields by default (id, task_number, title, status, priority). Use verbose=true for full task details.",
     {
       project_id: z.string().describe("Project ID"),
       query: z.string().optional().describe("Search query"),
       status: z.string().optional().describe("Filter by status (e.g. todo, in_progress, done)"),
       page: z.number().optional(),
       limit: z.number().optional(),
+      verbose: z.boolean().optional().describe("Return full task details (default: false)"),
     },
-    async ({ project_id, query, status, page, limit }) => {
+    async ({ project_id, query, status, page, limit, verbose }) => {
       const result = await client.listTasks(project_id, { query, status, page, limit });
-      return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
+      const data = verbose
+        ? result
+        : { tasks: result.tasks.map(minimizeTask), total: result.total };
+      return { content: [{ type: "text", text: formatResponse(data, verbose) }] };
     }
   );
 
@@ -79,10 +156,11 @@ function createServer(client: TaskAIClient): McpServer {
     {
       project_id: z.string().describe("Project ID"),
       task_number: z.number().describe("Task number within the project (e.g. 1, 2, 3)"),
+      verbose: z.boolean().optional().describe("Pretty print JSON (default: false)"),
     },
-    async ({ project_id, task_number }) => {
+    async ({ project_id, task_number, verbose }) => {
       const task = await client.getTaskByNumber(project_id, task_number);
-      return { content: [{ type: "text", text: JSON.stringify(task, null, 2) }] };
+      return { content: [{ type: "text", text: formatResponse(task, verbose) }] };
     }
   );
 
@@ -98,10 +176,11 @@ function createServer(client: TaskAIClient): McpServer {
       priority: z.string().optional().describe("Priority: low, medium, high, critical"),
       assigned_to: z.string().optional().describe("User ID to assign"),
       swim_lane_id: z.number().optional().describe("Swim lane ID (use list_swim_lanes to get valid IDs)"),
+      verbose: z.boolean().optional().describe("Pretty print JSON (default: false)"),
     },
-    async ({ project_id, title, description, status, priority, assigned_to, swim_lane_id }) => {
+    async ({ project_id, title, description, status, priority, assigned_to, swim_lane_id, verbose }) => {
       const task = await client.createTask(project_id, { title, description, status, priority, assigned_to, swim_lane_id });
-      return { content: [{ type: "text", text: JSON.stringify(task, null, 2) }] };
+      return { content: [{ type: "text", text: formatResponse(task, verbose) }] };
     }
   );
 
@@ -117,21 +196,28 @@ function createServer(client: TaskAIClient): McpServer {
       priority: z.string().optional().describe("New priority"),
       assigned_to: z.string().optional().describe("New assignee user ID"),
       swim_lane_id: z.number().optional().describe("Swim lane ID (use list_swim_lanes to get valid IDs)"),
+      verbose: z.boolean().optional().describe("Pretty print JSON (default: false)"),
     },
-    async ({ task_id, title, description, status, priority, assigned_to, swim_lane_id }) => {
+    async ({ task_id, title, description, status, priority, assigned_to, swim_lane_id, verbose }) => {
       const task = await client.updateTask(task_id, { title, description, status, priority, assigned_to, swim_lane_id });
-      return { content: [{ type: "text", text: JSON.stringify(task, null, 2) }] };
+      return { content: [{ type: "text", text: formatResponse(task, verbose) }] };
     }
   );
 
   // --- list_comments ---
   server.tool(
     "list_comments",
-    "List comments on a task",
-    { task_id: z.string().describe("Task ID") },
-    async ({ task_id }) => {
+    "List comments on a task. Returns minimal fields by default.",
+    {
+      task_id: z.string().describe("Task ID"),
+      verbose: z.boolean().optional().describe("Return full details (default: false)"),
+    },
+    async ({ task_id, verbose }) => {
       const result = await client.listComments(task_id);
-      return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
+      const data = verbose
+        ? result
+        : { comments: result.comments.map(minimizeComment) };
+      return { content: [{ type: "text", text: formatResponse(data, verbose) }] };
     }
   );
 
@@ -142,10 +228,11 @@ function createServer(client: TaskAIClient): McpServer {
     {
       task_id: z.string().describe("Task ID"),
       content: z.string().describe("Comment text"),
+      verbose: z.boolean().optional().describe("Pretty print JSON (default: false)"),
     },
-    async ({ task_id, content }) => {
+    async ({ task_id, content, verbose }) => {
       const comment = await client.addComment(task_id, content);
-      return { content: [{ type: "text", text: JSON.stringify(comment, null, 2) }] };
+      return { content: [{ type: "text", text: formatResponse(comment, verbose) }] };
     }
   );
 

@@ -151,6 +151,7 @@ jobs:
     runs-on: ubuntu-latest
     needs: [api-test, web-test]
     if: github.ref == 'refs/heads/main'
+    continue-on-error: true  # Don't fail workflow if SonarQube is unreachable
 
     steps:
       - name: Checkout code

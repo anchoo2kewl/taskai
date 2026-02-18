@@ -97,7 +97,6 @@ func (s *Server) HandleListTasks(w http.ResponseWriter, r *http.Request) {
 		Where(task.ProjectID(projectID)).
 		WithAssignee().
 		WithSprint().
-		WithSwimLane().
 		Order(ent.Desc(task.FieldCreatedAt)).
 		All(ctx)
 	if err != nil {
@@ -107,6 +106,38 @@ func (s *Server) HandleListTasks(w http.ResponseWriter, r *http.Request) {
 		)
 		respondError(w, http.StatusInternalServerError, "failed to fetch tasks", "internal_error")
 		return
+	}
+
+	// Manually load swim lanes to handle orphaned foreign keys
+	if len(entTasks) > 0 {
+		swimLaneIDs := make([]int64, 0, len(entTasks))
+		for _, t := range entTasks {
+			if t.SwimLaneID != nil {
+				swimLaneIDs = append(swimLaneIDs, *t.SwimLaneID)
+			}
+		}
+
+		if len(swimLaneIDs) > 0 {
+			swimLanes, err := s.db.Client.SwimLane.Query().
+				Where(swimlane.IDIn(swimLaneIDs...)).
+				All(ctx)
+			if err == nil {
+				// Map swim lanes by ID
+				swimLaneMap := make(map[int64]*ent.SwimLane)
+				for _, sl := range swimLanes {
+					swimLaneMap[sl.ID] = sl
+				}
+
+				// Assign to task edges
+				for i := range entTasks {
+					if entTasks[i].SwimLaneID != nil {
+						if sl, ok := swimLaneMap[*entTasks[i].SwimLaneID]; ok {
+							entTasks[i].Edges.SwimLane = sl
+						}
+					}
+				}
+			}
+		}
 	}
 
 	// Load tags separately for all tasks

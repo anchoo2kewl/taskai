@@ -183,7 +183,7 @@ describe('ProjectDetail', () => {
       expect(screen.getByText('Test Project')).toBeInTheDocument()
     })
 
-    const settingsButton = screen.getByTitle('Project Settings')
+    const settingsButton = screen.getByText('Settings')
     await user.click(settingsButton)
     expect(mockNavigate).toHaveBeenCalledWith('/app/projects/7/settings')
   })

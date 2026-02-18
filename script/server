@@ -701,7 +701,7 @@ db_migrate() {
     dst_dir_name=$(basename "$dst_path")
     local dst_volume_name
     if [ "$dst_env" = "staging" ]; then
-        dst_volume_name="${dst_dir_name}_taskai-staging-data"
+        dst_volume_name="${dst_dir_name}_taskai-data"
     else
         dst_volume_name="${dst_dir_name}_prod-data"
     fi

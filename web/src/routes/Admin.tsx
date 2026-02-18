@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useNavigate, useSearchParams } from 'react-router-dom'
 import { useAuth } from '../state/AuthContext'
 import { api, type EmailProviderResponse } from '../lib/api'
 import { version as frontendVersion } from '../lib/version'
@@ -42,7 +42,11 @@ interface VersionInfo {
 export default function Admin() {
   const { user } = useAuth()
   const navigate = useNavigate()
-  const [activeTab, setActiveTab] = useState<AdminTab>('users')
+  const [searchParams, setSearchParams] = useSearchParams()
+
+  // Read tab from URL or default to 'users'
+  const tabFromUrl = (searchParams.get('tab') as AdminTab) || 'users'
+  const [activeTab, setActiveTab] = useState<AdminTab>(tabFromUrl)
 
   // User management state
   const [users, setUsers] = useState<UserWithStats[]>([])
@@ -68,6 +72,20 @@ export default function Admin() {
   // System/version state
   const [versionInfo, setVersionInfo] = useState<VersionInfo | null>(null)
   const [versionLoading, setVersionLoading] = useState(false)
+
+  // Sync activeTab with URL
+  useEffect(() => {
+    const urlTab = searchParams.get('tab') as AdminTab
+    if (urlTab && urlTab !== activeTab) {
+      setActiveTab(urlTab)
+    }
+  }, [searchParams])
+
+  // Update URL when tab changes
+  const handleTabChange = (tab: AdminTab) => {
+    setActiveTab(tab)
+    setSearchParams({ tab })
+  }
 
   useEffect(() => {
     if (!user?.is_admin) {
@@ -313,7 +331,7 @@ export default function Admin() {
           <h1 className="text-2xl font-bold text-dark-text-primary">Admin Dashboard</h1>
           <div className="mt-4 flex gap-1">
             <button
-              onClick={() => setActiveTab('users')}
+              onClick={() => handleTabChange('users')}
               className={`px-4 py-2 text-sm font-medium rounded-lg transition-colors ${
                 activeTab === 'users'
                   ? 'bg-primary-500/10 text-primary-400 border border-primary-500/30'
@@ -323,7 +341,7 @@ export default function Admin() {
               Users ({users.length})
             </button>
             <button
-              onClick={() => setActiveTab('email')}
+              onClick={() => handleTabChange('email')}
               className={`px-4 py-2 text-sm font-medium rounded-lg transition-colors flex items-center gap-2 ${
                 activeTab === 'email'
                   ? 'bg-primary-500/10 text-primary-400 border border-primary-500/30'
@@ -340,7 +358,7 @@ export default function Admin() {
               )}
             </button>
             <button
-              onClick={() => setActiveTab('system')}
+              onClick={() => handleTabChange('system')}
               className={`px-4 py-2 text-sm font-medium rounded-lg transition-colors ${
                 activeTab === 'system'
                   ? 'bg-primary-500/10 text-primary-400 border border-primary-500/30'

@@ -12,15 +12,16 @@ import (
 
 // Client represents a WebSocket client connection
 type Client struct {
-	ID       string
-	UserID   int64
-	PageID   int64
-	Conn     *websocket.Conn
-	Send     chan []byte
-	manager  *Manager
-	roomID   string
-	closedMu sync.Mutex
-	closed   bool
+	ID            string
+	UserID        int64
+	PageID        int64
+	Conn          *websocket.Conn
+	Send          chan []byte
+	manager       *Manager
+	roomID        string
+	closedMu      sync.Mutex
+	closed        bool
+	HandleMessage func([]byte) // Custom message handler
 }
 
 // Message represents a WebSocket message
@@ -116,8 +117,10 @@ func (m *Manager) run() {
 	}
 }
 
-// RegisterClient registers a new client
-func (m *Manager) RegisterClient(client *Client) {
+// RegisterClient registers a new client to a room
+func (m *Manager) RegisterClient(client *Client, roomID string) {
+	client.manager = m
+	client.roomID = roomID
 	m.register <- client
 }
 
@@ -335,9 +338,12 @@ func (c *Client) writePump() {
 }
 
 // handleMessage processes incoming WebSocket messages
-// This is a placeholder - actual implementation in wiki_ws_handlers.go
 func (c *Client) handleMessage(message []byte) {
-	// Will be implemented when we add the WebSocket handler
-	// For now, just echo back to the room for testing
-	c.manager.Broadcast(c.roomID, message, c)
+	// Use custom handler if set, otherwise echo back
+	if c.HandleMessage != nil {
+		c.HandleMessage(message)
+	} else {
+		// Default: echo back to the room for testing
+		c.manager.Broadcast(c.roomID, message, c)
+	}
 }

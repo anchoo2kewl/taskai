@@ -15,6 +15,8 @@ import (
 	"go.uber.org/zap"
 
 	"taskai/internal/api"
+	"taskai/internal/auth"
+	"taskai/internal/collab"
 	"taskai/internal/config"
 	"taskai/internal/db"
 )
@@ -46,8 +48,20 @@ func main() {
 	}
 	defer database.Close()
 
+	// Create background context with cancel for graceful shutdown
+	bgCtx, bgCancel := context.WithCancel(context.Background())
+	defer bgCancel()
+
+	// Initialize auth service
+	authService := auth.NewService(cfg.JWTSecret, time.Duration(cfg.JWTExpiryHours)*time.Hour)
+
+	// Initialize collaboration manager for WebSocket connections
+	collabManager := collab.NewManager(bgCtx, logger)
+
 	// Create server with logger
 	server := api.NewServer(database, cfg, logger)
+	server.SetAuthService(authService)
+	server.SetCollabManager(collabManager)
 
 	// Setup router
 	r := chi.NewRouter()
@@ -167,6 +181,9 @@ func main() {
 			r.Patch("/wiki/pages/{pageId}", server.HandleUpdateWikiPage)
 			r.Delete("/wiki/pages/{pageId}", server.HandleDeleteWikiPage)
 
+			// Wiki WebSocket route for real-time collaboration
+			r.Get("/wiki/collab", server.HandleWikiWebSocket)
+
 			// Task comment routes
 			r.Get("/tasks/{taskId}/comments", server.HandleListTaskComments)
 			r.Post("/tasks/{taskId}/comments", server.HandleCreateTaskComment)
@@ -262,8 +279,6 @@ func main() {
 	})
 
 	// Start background health checks
-	bgCtx, bgCancel := context.WithCancel(context.Background())
-	defer bgCancel()
 	server.StartBrevoHealthCheck(bgCtx)
 
 	// Create HTTP server

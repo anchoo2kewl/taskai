@@ -7,6 +7,8 @@ import (
 
 	"go.uber.org/zap"
 
+	"taskai/internal/auth"
+	"taskai/internal/collab"
 	"taskai/internal/config"
 	"taskai/internal/db"
 	"taskai/internal/email"
@@ -14,11 +16,13 @@ import (
 
 // Server holds the application dependencies
 type Server struct {
-	db           *db.DB
-	config       *config.Config
-	logger       *zap.Logger
-	emailService *email.BrevoService
-	emailMu      sync.RWMutex
+	db            *db.DB
+	config        *config.Config
+	logger        *zap.Logger
+	emailService  *email.BrevoService
+	emailMu       sync.RWMutex
+	auth          *auth.Service
+	collabManager *collab.Manager
 }
 
 // NewServer creates a new API server
@@ -28,6 +32,16 @@ func NewServer(database *db.DB, cfg *config.Config, logger *zap.Logger) *Server 
 		config: cfg,
 		logger: logger,
 	}
+}
+
+// SetAuthService sets the auth service
+func (s *Server) SetAuthService(authService *auth.Service) {
+	s.auth = authService
+}
+
+// SetCollabManager sets the collaboration manager
+func (s *Server) SetCollabManager(manager *collab.Manager) {
+	s.collabManager = manager
 }
 
 // getAppURL returns the application URL for use in email links

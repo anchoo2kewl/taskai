@@ -13,11 +13,16 @@ import (
 	"go.uber.org/zap"
 	_ "github.com/jackc/pgx/v5/stdlib"
 	_ "modernc.org/sqlite"
+
+	"taskai/ent"
+	"entgo.io/ent/dialect"
+	entsql "entgo.io/ent/dialect/sql"
 )
 
-// DB wraps the database connection
+// DB wraps the database connection and Ent client
 type DB struct {
-	*sql.DB
+	*sql.DB        // Raw SQL connection for migrations
+	Client *ent.Client  // Ent ORM client for queries
 	logger *zap.Logger
 }
 
@@ -103,18 +108,40 @@ func New(cfg Config, logger *zap.Logger) (*DB, error) {
 		return nil, fmt.Errorf("failed to ping database: %w", err)
 	}
 
-	db := &DB{DB: sqlDB, logger: logger}
+	// Create Ent client
+	var entDialect string
+	if driver == "postgres" || driver == "pgx" {
+		entDialect = dialect.Postgres
+	} else {
+		entDialect = dialect.SQLite
+	}
 
-	// Run migrations
+	entDriver := entsql.OpenDB(entDialect, sqlDB)
+	entClient := ent.NewClient(ent.Driver(entDriver))
+
+	// Set Ent client logger
+	if logger != nil {
+		entClient = entClient.Debug() // Enable Ent query logging in dev
+	}
+
+	db := &DB{
+		DB:     sqlDB,
+		Client: entClient,
+		logger: logger,
+	}
+
+	// Run migrations (still use SQL migrations, not Ent auto-migration)
 	if cfg.MigrationsPath != "" {
 		if err := db.runMigrations(ctx, cfg.MigrationsPath, driver); err != nil {
 			sqlDB.Close()
+			entClient.Close()
 			return nil, fmt.Errorf("failed to run migrations: %w", err)
 		}
 	}
 
 	logger.Info("Database initialized",
 		zap.String("driver", driver),
+		zap.String("dialect", entDialect),
 		zap.String("path", cfg.DBPath),
 		zap.String("dsn_host", maskDSN(cfg.DSN)))
 	return db, nil
@@ -239,8 +266,11 @@ func (db *DB) runMigrations(ctx context.Context, migrationsPath string, driver s
 	return nil
 }
 
-// Close closes the database connection
+// Close closes the database connection and Ent client
 func (db *DB) Close() error {
+	if db.Client != nil {
+		db.Client.Close()
+	}
 	return db.DB.Close()
 }
 

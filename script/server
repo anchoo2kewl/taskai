@@ -14,12 +14,12 @@ PURPLE='\033[0;35m'
 CYAN='\033[0;36m'
 NC='\033[0m' # No Color
 
-# Server connection
-REMOTE_HOST="31.97.102.48"
+# Server connections
+PROD_HOST="31.97.102.48"
+STAGING_HOST="129.213.82.37"
 REMOTE_USER="ubuntu"
-REMOTE_SERVER="${REMOTE_USER}@${REMOTE_HOST}"
 
-# Staging environment
+# Staging environment (129.213.82.37)
 STAGING_DEPLOY_PATH="/home/ubuntu/taskai-staging"
 STAGING_DOMAIN="staging.taskai.cc"
 STAGING_API_PORT=8082
@@ -27,7 +27,7 @@ STAGING_WEB_PORT=8086
 STAGING_MCP_PORT=8084
 STAGING_MCP_DOMAIN="mcp.staging.taskai.cc"
 
-# Production environment
+# Production environment (31.97.102.48)
 PROD_DEPLOY_PATH="/home/ubuntu/taskai"
 PROD_DOMAIN="taskai.cc"
 PROD_API_PORT=8081
@@ -39,11 +39,12 @@ PROD_MCP_DOMAIN="mcp.taskai.cc"
 LOCAL_WEB_PORT=8084
 LOCAL_API_PORT=8083
 
-# Resolve environment — sets REMOTE_DEPLOY_PATH, REMOTE_DOMAIN, REMOTE_API_PORT, REMOTE_WEB_PORT
+# Resolve environment — sets REMOTE_HOST, REMOTE_SERVER, REMOTE_DEPLOY_PATH, etc.
 resolve_env() {
     local env="${1:-staging}"
     case "$env" in
         prod|production)
+            REMOTE_HOST="$PROD_HOST"
             REMOTE_DEPLOY_PATH="$PROD_DEPLOY_PATH"
             REMOTE_DOMAIN="$PROD_DOMAIN"
             REMOTE_API_PORT="$PROD_API_PORT"
@@ -53,6 +54,7 @@ resolve_env() {
             ENV_LABEL="PRODUCTION"
             ;;
         staging|*)
+            REMOTE_HOST="$STAGING_HOST"
             REMOTE_DEPLOY_PATH="$STAGING_DEPLOY_PATH"
             REMOTE_DOMAIN="$STAGING_DOMAIN"
             REMOTE_API_PORT="$STAGING_API_PORT"
@@ -62,6 +64,7 @@ resolve_env() {
             ENV_LABEL="STAGING"
             ;;
     esac
+    REMOTE_SERVER="${REMOTE_USER}@${REMOTE_HOST}"
 }
 
 # Function to print colored output

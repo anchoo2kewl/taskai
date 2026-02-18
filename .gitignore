@@ -9,6 +9,7 @@
 go.work
 /vendor/
 /api/tmp/
+/api/api
 /api/data/*.db
 /api/data/*.db-shm
 /api/data/*.db-wal

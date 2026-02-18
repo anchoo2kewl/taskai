@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/go-chi/chi/v5"
+	"go.uber.org/zap"
 
 	"taskai/ent"
 	"taskai/ent/projectmember"
@@ -100,6 +101,10 @@ func (s *Server) HandleListTasks(w http.ResponseWriter, r *http.Request) {
 		Order(ent.Desc(task.FieldCreatedAt)).
 		All(ctx)
 	if err != nil {
+		s.logger.Error("Failed to fetch tasks",
+			zap.Int64("project_id", projectID),
+			zap.Error(err),
+		)
 		respondError(w, http.StatusInternalServerError, "failed to fetch tasks", "internal_error")
 		return
 	}

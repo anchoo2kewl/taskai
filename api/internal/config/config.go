@@ -13,7 +13,9 @@ type Config struct {
 	Env  string
 
 	// Database
-	DBPath         string
+	DBDriver       string // "sqlite" or "postgres"
+	DBPath         string // For SQLite
+	DBDSN          string // For Postgres
 	MigrationsPath string
 
 	// JWT
@@ -37,10 +39,14 @@ type Config struct {
 
 // Load reads configuration from environment variables
 func Load() *Config {
+	dbDriver := getEnv("DB_DRIVER", "sqlite")
+
 	cfg := &Config{
 		Port:                    getEnv("PORT", "8080"),
 		Env:                     getEnv("ENV", "development"),
+		DBDriver:                dbDriver,
 		DBPath:                  getEnv("DB_PATH", "./data/taskai.db"),
+		DBDSN:                   getEnv("DB_DSN", ""),
 		MigrationsPath:          getEnv("MIGRATIONS_PATH", "./internal/db/migrations"),
 		JWTSecret:               getEnv("JWT_SECRET", "change-this-to-a-secure-random-string-in-production"),
 		JWTExpiryHours:          getEnvAsInt("JWT_EXPIRY_HOURS", 24),

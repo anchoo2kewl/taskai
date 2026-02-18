@@ -34,7 +34,9 @@ func main() {
 
 	// Initialize database with auto-migrations
 	dbCfg := db.Config{
+		Driver:         cfg.DBDriver,
 		DBPath:         cfg.DBPath,
+		DSN:            cfg.DBDSN,
 		MigrationsPath: cfg.MigrationsPath,
 	}
 

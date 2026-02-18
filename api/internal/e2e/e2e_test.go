@@ -55,7 +55,9 @@ func NewTestServer(t *testing.T) *TestServer {
 
 	// Initialize database
 	dbCfg := db.Config{
+		Driver:         "sqlite",
 		DBPath:         tmpDB,
+		DSN:            "",
 		MigrationsPath: "../db/migrations",
 	}
 

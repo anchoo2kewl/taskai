@@ -14,7 +14,9 @@ func TestNew_InMemory(t *testing.T) {
 	logger := zaptest.NewLogger(t)
 
 	cfg := Config{
+		Driver:         "sqlite",
 		DBPath:         ":memory:",
+		DSN:            "",
 		MigrationsPath: "",
 	}
 
@@ -37,7 +39,9 @@ func TestNew_WithMigrations(t *testing.T) {
 	logger := zaptest.NewLogger(t)
 
 	cfg := Config{
+		Driver:         "sqlite",
 		DBPath:         ":memory:",
+		DSN:            "",
 		MigrationsPath: "./migrations",
 	}
 
@@ -86,7 +90,9 @@ func TestNew_WithFileDB(t *testing.T) {
 	dbPath := filepath.Join(tmpDir, "data", "test.db")
 
 	cfg := Config{
+		Driver:         "sqlite",
 		DBPath:         dbPath,
+		DSN:            "",
 		MigrationsPath: "",
 	}
 
@@ -106,7 +112,9 @@ func TestNew_MigrationsIdempotent(t *testing.T) {
 	logger := zaptest.NewLogger(t)
 
 	cfg := Config{
+		Driver:         "sqlite",
 		DBPath:         ":memory:",
+		DSN:            "",
 		MigrationsPath: "./migrations",
 	}
 
@@ -124,7 +132,7 @@ func TestNew_MigrationsIdempotent(t *testing.T) {
 	}
 
 	// Run migrations again on same DB
-	err = database.runMigrations(ctx, cfg.MigrationsPath)
+	err = database.runMigrations(ctx, cfg.MigrationsPath, "sqlite")
 	if err != nil {
 		t.Fatalf("Second migration run failed: %v", err)
 	}

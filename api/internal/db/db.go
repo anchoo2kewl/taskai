@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"go.uber.org/zap"
+	_ "github.com/jackc/pgx/v5/stdlib"
 	_ "modernc.org/sqlite"
 )
 
@@ -22,48 +23,81 @@ type DB struct {
 
 // Config holds database configuration
 type Config struct {
-	DBPath         string
+	Driver         string // "sqlite" or "pgx" (postgres)
+	DBPath         string // For SQLite
+	DSN            string // For Postgres
 	MigrationsPath string
 }
 
 // New creates a new database connection and runs migrations
 func New(cfg Config, logger *zap.Logger) (*DB, error) {
-	// Ensure data directory exists
-	dataDir := filepath.Dir(cfg.DBPath)
-	if err := os.MkdirAll(dataDir, 0755); err != nil {
-		return nil, fmt.Errorf("failed to create data directory: %w", err)
+	var sqlDB *sql.DB
+	var err error
+
+	// Determine driver and connection string
+	driver := cfg.Driver
+	if driver == "" {
+		driver = "sqlite" // Default to SQLite for backward compatibility
 	}
 
-	// Open database connection
-	sqlDB, err := sql.Open("sqlite", cfg.DBPath)
-	if err != nil {
-		return nil, fmt.Errorf("failed to open database: %w", err)
-	}
-
-	// Configure connection pool
-	sqlDB.SetMaxOpenConns(1) // SQLite supports only one writer
-	sqlDB.SetMaxIdleConns(1)
-	sqlDB.SetConnMaxLifetime(time.Hour)
-
-	// Enable foreign keys and WAL mode for better concurrency
-	pragmas := []string{
-		"PRAGMA foreign_keys = ON",
-		"PRAGMA journal_mode = WAL",
-		"PRAGMA synchronous = NORMAL",
-		"PRAGMA busy_timeout = 5000",
-	}
-
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-
-	for _, pragma := range pragmas {
-		if _, err := sqlDB.ExecContext(ctx, pragma); err != nil {
-			sqlDB.Close()
-			return nil, fmt.Errorf("failed to execute %s: %w", pragma, err)
+	switch driver {
+	case "sqlite":
+		// Ensure data directory exists for SQLite
+		dataDir := filepath.Dir(cfg.DBPath)
+		if err := os.MkdirAll(dataDir, 0755); err != nil {
+			return nil, fmt.Errorf("failed to create data directory: %w", err)
 		}
+
+		// Open SQLite connection
+		sqlDB, err = sql.Open("sqlite", cfg.DBPath)
+		if err != nil {
+			return nil, fmt.Errorf("failed to open SQLite database: %w", err)
+		}
+
+		// Configure connection pool for SQLite
+		sqlDB.SetMaxOpenConns(1) // SQLite supports only one writer
+		sqlDB.SetMaxIdleConns(1)
+		sqlDB.SetConnMaxLifetime(time.Hour)
+
+		// Enable foreign keys and WAL mode for better concurrency
+		pragmas := []string{
+			"PRAGMA foreign_keys = ON",
+			"PRAGMA journal_mode = WAL",
+			"PRAGMA synchronous = NORMAL",
+			"PRAGMA busy_timeout = 5000",
+		}
+
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+
+		for _, pragma := range pragmas {
+			if _, err := sqlDB.ExecContext(ctx, pragma); err != nil {
+				sqlDB.Close()
+				return nil, fmt.Errorf("failed to execute %s: %w", pragma, err)
+			}
+		}
+
+	case "postgres", "pgx":
+		// Open Postgres connection
+		sqlDB, err = sql.Open("pgx", cfg.DSN)
+		if err != nil {
+			return nil, fmt.Errorf("failed to open Postgres database: %w", err)
+		}
+
+		// Configure connection pool for Postgres
+		sqlDB.SetMaxOpenConns(25)
+		sqlDB.SetMaxIdleConns(5)
+		sqlDB.SetConnMaxLifetime(5 * time.Minute)
+		sqlDB.SetConnMaxIdleTime(time.Minute)
+
+	default:
+		return nil, fmt.Errorf("unsupported database driver: %s (expected 'sqlite' or 'postgres')", driver)
 	}
 
 	// Verify connection
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
 	if err := sqlDB.PingContext(ctx); err != nil {
 		sqlDB.Close()
 		return nil, fmt.Errorf("failed to ping database: %w", err)
@@ -73,18 +107,36 @@ func New(cfg Config, logger *zap.Logger) (*DB, error) {
 
 	// Run migrations
 	if cfg.MigrationsPath != "" {
-		if err := db.runMigrations(ctx, cfg.MigrationsPath); err != nil {
+		if err := db.runMigrations(ctx, cfg.MigrationsPath, driver); err != nil {
 			sqlDB.Close()
 			return nil, fmt.Errorf("failed to run migrations: %w", err)
 		}
 	}
 
-	logger.Info("Database initialized", zap.String("path", cfg.DBPath))
+	logger.Info("Database initialized",
+		zap.String("driver", driver),
+		zap.String("path", cfg.DBPath),
+		zap.String("dsn_host", maskDSN(cfg.DSN)))
 	return db, nil
 }
 
+// maskDSN returns a masked version of the DSN for logging (hides password)
+func maskDSN(dsn string) string {
+	if dsn == "" {
+		return ""
+	}
+	// Simple masking: show only the host part
+	if strings.Contains(dsn, "@") {
+		parts := strings.Split(dsn, "@")
+		if len(parts) > 1 {
+			return "***@" + parts[1]
+		}
+	}
+	return "***"
+}
+
 // runMigrations executes all pending SQL migration files
-func (db *DB) runMigrations(ctx context.Context, migrationsPath string) error {
+func (db *DB) runMigrations(ctx context.Context, migrationsPath string, driver string) error {
 	// Create migrations table if it doesn't exist
 	createTableSQL := `
 		CREATE TABLE IF NOT EXISTS schema_migrations (

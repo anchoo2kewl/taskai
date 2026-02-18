@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useAuth } from '../state/AuthContext'
 import { api, type EmailProviderResponse } from '../lib/api'
+import { version as frontendVersion } from '../lib/version'
 
 // Types from backend
 interface UserWithStats {
@@ -612,14 +613,14 @@ export default function Admin() {
                 </div>
 
                 {versionInfo ? (
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
                     {/* Backend Version */}
                     <div className="space-y-3">
-                      <h3 className="text-sm font-medium text-dark-text-secondary uppercase tracking-wide">Backend</h3>
+                      <h3 className="text-sm font-medium text-dark-text-secondary uppercase tracking-wide">Backend API</h3>
                       <div className="space-y-2 text-sm">
                         <div className="flex justify-between">
                           <span className="text-dark-text-tertiary">Version</span>
-                          <span className="text-dark-text-primary font-mono">{versionInfo.version}</span>
+                          <span className="text-dark-text-primary font-mono font-semibold">{versionInfo.version}</span>
                         </div>
                         <div className="flex justify-between">
                           <span className="text-dark-text-tertiary">Git Commit</span>
@@ -638,6 +639,27 @@ export default function Admin() {
                         <div className="flex justify-between">
                           <span className="text-dark-text-tertiary">Platform</span>
                           <span className="text-dark-text-primary font-mono text-xs">{versionInfo.platform}</span>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Frontend Version */}
+                    <div className="space-y-3">
+                      <h3 className="text-sm font-medium text-dark-text-secondary uppercase tracking-wide">Frontend Web</h3>
+                      <div className="space-y-2 text-sm">
+                        <div className="flex justify-between">
+                          <span className="text-dark-text-tertiary">Version</span>
+                          <span className="text-dark-text-primary font-mono font-semibold">{frontendVersion.version}</span>
+                        </div>
+                        <div className="flex justify-between">
+                          <span className="text-dark-text-tertiary">Git Commit</span>
+                          <span className="text-dark-text-primary font-mono text-xs">
+                            {frontendVersion.gitCommit.substring(0, 8)}
+                          </span>
+                        </div>
+                        <div className="flex justify-between">
+                          <span className="text-dark-text-tertiary">Build Time</span>
+                          <span className="text-dark-text-primary text-xs">{frontendVersion.buildTime}</span>
                         </div>
                       </div>
                     </div>

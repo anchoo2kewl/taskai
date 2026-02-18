@@ -1,6 +1,11 @@
 # Build stage
 FROM node:20-alpine AS builder
 
+# Build arguments for version info
+ARG VERSION=dev
+ARG GIT_COMMIT=unknown
+ARG BUILD_TIME=unknown
+
 WORKDIR /build
 
 # Copy API spec for type generation
@@ -19,7 +24,10 @@ COPY web/ .
 # Remove .env to use production config (empty API URL for nginx proxy)
 RUN rm -f .env
 
-# Generate types and build production bundle
+# Generate types and build production bundle with version info
+ENV VITE_VERSION=$VERSION
+ENV VITE_GIT_COMMIT=$GIT_COMMIT
+ENV VITE_BUILD_TIME=$BUILD_TIME
 RUN npm run build
 
 # Production stage

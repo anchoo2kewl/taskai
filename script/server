@@ -521,23 +521,30 @@ db_migrate() {
         return 1
     fi
 
-    # Resolve paths for both environments
-    local src_path src_domain dst_path dst_domain
+    # Resolve paths and hosts for both environments
+    local src_path src_domain src_host dst_path dst_domain dst_host
     if [ "$src_env" = "staging" ]; then
         src_path="$STAGING_DEPLOY_PATH"
         src_domain="$STAGING_DOMAIN"
+        src_host="$STAGING_HOST"
     else
         src_path="$PROD_DEPLOY_PATH"
         src_domain="$PROD_DOMAIN"
+        src_host="$PROD_HOST"
     fi
 
     if [ "$dst_env" = "staging" ]; then
         dst_path="$STAGING_DEPLOY_PATH"
         dst_domain="$STAGING_DOMAIN"
+        dst_host="$STAGING_HOST"
     else
         dst_path="$PROD_DEPLOY_PATH"
         dst_domain="$PROD_DOMAIN"
+        dst_host="$PROD_HOST"
     fi
+
+    local src_server="${REMOTE_USER}@${src_host}"
+    local dst_server="${REMOTE_USER}@${dst_host}"
 
     print_header "Database Migration"
     echo ""
@@ -545,10 +552,11 @@ db_migrate() {
     echo -e "${CYAN}Destination:${NC} $dst_env ($dst_domain)"
     echo ""
 
-    # Helper: get DB stats for an environment path
+    # Helper: get DB stats for an environment
     _db_stats() {
-        local env_path="$1"
-        ssh "$REMOTE_SERVER" "cd '$env_path' && docker compose exec -T -u root api sh -c '
+        local server="$1"
+        local env_path="$2"
+        ssh "$server" "cd '$env_path' && docker compose exec -T -u root api sh -c '
             apk add --no-cache sqlite >/dev/null 2>&1
             for t in \$(sqlite3 /data/taskai.db \".tables\"); do
                 c=\$(sqlite3 /data/taskai.db \"SELECT COUNT(*) FROM \$t;\")
@@ -561,14 +569,14 @@ db_migrate() {
     # Show source DB stats
     print_status "Fetching source database info..."
     echo ""
-    echo -e "${CYAN}Source database ($src_env):${NC}"
-    _db_stats "$src_path"
+    echo -e "${CYAN}Source database ($src_env @ $src_host):${NC}"
+    _db_stats "$src_server" "$src_path"
     echo ""
 
     # Show destination DB stats
     print_status "Fetching destination database info..."
-    echo -e "${CYAN}Destination database ($dst_env) — WILL BE DESTROYED:${NC}"
-    _db_stats "$dst_path"
+    echo -e "${CYAN}Destination database ($dst_env @ $dst_host) — WILL BE DESTROYED:${NC}"
+    _db_stats "$dst_server" "$dst_path"
     echo ""
 
     # Warning
@@ -610,64 +618,62 @@ db_migrate() {
     # Step 1: Create backup of destination database
     print_status "Step 1/5: Backing up destination database..."
     local backup_ts=$(date +%Y%m%d_%H%M%S)
-    ssh "$REMOTE_SERVER" "cd '$dst_path' && docker compose exec -T api sh -c 'cp /data/taskai.db /data/taskai.db.backup_${backup_ts}'" || {
+    ssh "$dst_server" "cd '$dst_path' && docker compose exec -T api sh -c 'cp /data/taskai.db /data/taskai.db.backup_${backup_ts}'" || {
         print_error "Failed to backup destination database"
         return 1
     }
     print_success "Backup saved as taskai.db.backup_${backup_ts}"
 
-    # Step 2: Export source database to host (checkpoint WAL first for clean copy)
+    # Step 2: Export source database (checkpoint WAL first for clean copy)
     print_status "Step 2/5: Exporting source database..."
-    local src_app_name
-    if [ "$src_env" = "staging" ]; then
-        src_app_name="taskai-staging"
-    else
-        src_app_name="taskai"
-    fi
-    local src_dir_name
-    src_dir_name=$(basename "$src_path")
-    local src_volume="${src_dir_name}_${src_app_name}-data"
-
-    # Checkpoint WAL to ensure all data is in the main DB file, then copy
-    ssh "$REMOTE_SERVER" "
+    ssh "$src_server" "
         cd '$src_path' && docker compose exec -T api sh -c '
             if command -v sqlite3 >/dev/null 2>&1 || apk add --no-cache sqlite >/dev/null 2>&1; then
                 sqlite3 /data/taskai.db \"PRAGMA wal_checkpoint(TRUNCATE);\" >/dev/null 2>&1
             fi
         '
-        docker run --rm \
-            -v '${src_volume}:/data' \
-            -v /tmp:/tmp \
-            alpine sh -c 'cp /data/taskai.db /tmp/taskai_migrate_${backup_ts}.db'
+        cd '$src_path' && docker compose exec -T api sh -c 'cat /data/taskai.db' > /tmp/taskai_migrate_${backup_ts}.db
     " || {
         print_error "Failed to export source database"
         return 1
     }
 
-    # Step 3: Stop destination API to prevent writes
-    print_status "Step 3/5: Stopping destination API..."
-    ssh "$REMOTE_SERVER" "cd '$dst_path' && docker compose stop api" || {
+    # Step 3: Transfer database between servers (via local machine)
+    print_status "Step 3/5: Transferring database..."
+    local local_tmp="/tmp/taskai_migrate_${backup_ts}.db"
+    scp "$src_server:/tmp/taskai_migrate_${backup_ts}.db" "$local_tmp" || {
+        print_error "Failed to download source database"
+        return 1
+    }
+    scp "$local_tmp" "$dst_server:/tmp/taskai_migrate_${backup_ts}.db" || {
+        print_error "Failed to upload database to destination"
+        rm -f "$local_tmp"
+        return 1
+    }
+    rm -f "$local_tmp"
+    # Clean up source temp file
+    ssh "$src_server" "rm -f /tmp/taskai_migrate_${backup_ts}.db" 2>/dev/null || true
+
+    # Step 4: Stop destination API and import
+    print_status "Step 4/5: Stopping destination API and importing..."
+    ssh "$dst_server" "cd '$dst_path' && docker compose stop api" || {
         print_error "Failed to stop destination API"
         return 1
     }
 
-    # Step 4: Import into destination via the Docker volume
-    print_status "Step 4/5: Importing database into destination..."
+    # Copy into the Docker volume via a temp container
     local dst_dir_name
     dst_dir_name=$(basename "$dst_path")
-    # Docker Compose volume name = <project>_<volume> where project = directory name
-    # and volume name = <app_name>-data from docker-compose.yml
-    local dst_app_name
+    local dst_volume_name
     if [ "$dst_env" = "staging" ]; then
-        dst_app_name="taskai-staging"
+        dst_volume_name="${dst_dir_name}_taskai-staging-data"
     else
-        dst_app_name="taskai"
+        dst_volume_name="${dst_dir_name}_prod-data"
     fi
-    local dst_volume="${dst_dir_name}_${dst_app_name}-data"
 
-    ssh "$REMOTE_SERVER" "
+    ssh "$dst_server" "
         docker run --rm \
-            -v '${dst_volume}:/data' \
+            -v '${dst_volume_name}:/data' \
             -v /tmp:/tmp \
             alpine sh -c '
                 cp /tmp/taskai_migrate_${backup_ts}.db /data/taskai.db
@@ -676,19 +682,19 @@ db_migrate() {
             '
     " || {
         print_error "Failed to import database. Restarting destination..."
-        ssh "$REMOTE_SERVER" "cd '$dst_path' && docker compose start api"
+        ssh "$dst_server" "cd '$dst_path' && docker compose start api"
         return 1
     }
 
     # Step 5: Restart destination services
     print_status "Step 5/5: Restarting destination services..."
-    ssh "$REMOTE_SERVER" "cd '$dst_path' && docker compose up -d" || {
+    ssh "$dst_server" "cd '$dst_path' && docker compose up -d" || {
         print_error "Failed to restart destination services"
         return 1
     }
 
-    # Clean up temp file
-    ssh "$REMOTE_SERVER" "rm -f /tmp/taskai_migrate_${backup_ts}.db" 2>/dev/null || true
+    # Clean up temp files
+    ssh "$dst_server" "rm -f /tmp/taskai_migrate_${backup_ts}.db" 2>/dev/null || true
 
     # Wait and verify health
     print_status "Waiting for services to be healthy..."
@@ -713,7 +719,7 @@ db_migrate() {
         echo -e "${CYAN}Backup:${NC}     taskai.db.backup_${backup_ts} (inside destination container)"
         echo ""
         print_status "To restore the backup if needed:"
-        echo "  ssh $REMOTE_SERVER"
+        echo "  ssh $dst_server"
         echo "  cd $dst_path"
         echo "  docker compose exec api sh -c 'cp /data/taskai.db.backup_${backup_ts} /data/taskai.db'"
         echo "  docker compose restart api"

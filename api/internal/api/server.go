@@ -12,6 +12,7 @@ import (
 	"taskai/internal/config"
 	"taskai/internal/db"
 	"taskai/internal/email"
+	"taskai/internal/yjs"
 )
 
 // Server holds the application dependencies
@@ -23,6 +24,7 @@ type Server struct {
 	emailMu       sync.RWMutex
 	auth          *auth.Service
 	collabManager *collab.Manager
+	yjsClient     *yjs.Client
 }
 
 // NewServer creates a new API server
@@ -42,6 +44,11 @@ func (s *Server) SetAuthService(authService *auth.Service) {
 // SetCollabManager sets the collaboration manager
 func (s *Server) SetCollabManager(manager *collab.Manager) {
 	s.collabManager = manager
+}
+
+// SetYjsClient sets the Yjs processor client
+func (s *Server) SetYjsClient(client *yjs.Client) {
+	s.yjsClient = client
 }
 
 // getAppURL returns the application URL for use in email links

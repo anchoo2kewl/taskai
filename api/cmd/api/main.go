@@ -19,6 +19,7 @@ import (
 	"taskai/internal/collab"
 	"taskai/internal/config"
 	"taskai/internal/db"
+	"taskai/internal/yjs"
 )
 
 func main() {
@@ -58,10 +59,14 @@ func main() {
 	// Initialize collaboration manager for WebSocket connections
 	collabManager := collab.NewManager(bgCtx, logger)
 
+	// Initialize Yjs processor client
+	yjsClient := yjs.NewClient(cfg.YJSProcessorURL, logger)
+
 	// Create server with logger
 	server := api.NewServer(database, cfg, logger)
 	server.SetAuthService(authService)
 	server.SetCollabManager(collabManager)
+	server.SetYjsClient(yjsClient)
 
 	// Setup router
 	r := chi.NewRouter()

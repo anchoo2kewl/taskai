@@ -35,6 +35,9 @@ type Config struct {
 
 	// Database
 	DBQueryTimeout time.Duration
+
+	// Yjs Processor
+	YJSProcessorURL string
 }
 
 // Load reads configuration from environment variables
@@ -56,6 +59,7 @@ func Load() *Config {
 		LogLevel:                getEnv("LOG_LEVEL", "info"),
 		EnableSQLLog:            getEnv("ENV", "development") == "development" || getEnv("ENABLE_SQL_LOG", "false") == "true",
 		DBQueryTimeout:          time.Duration(getEnvAsInt("DB_QUERY_TIMEOUT_SECONDS", 5)) * time.Second,
+		YJSProcessorURL:         getEnv("YJS_PROCESSOR_URL", "http://localhost:3001"),
 	}
 
 	// Validate critical configuration

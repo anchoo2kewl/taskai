@@ -283,8 +283,10 @@ func main() {
 		})
 	})
 
-	// Start background health checks
+	// Start background workers
 	server.StartBrevoHealthCheck(bgCtx)
+	go server.StartSnapshotWorker(bgCtx)
+	go server.StartIndexingWorker(bgCtx)
 
 	// Create HTTP server
 	addr := fmt.Sprintf(":%s", cfg.Port)

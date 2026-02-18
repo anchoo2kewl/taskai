@@ -189,6 +189,10 @@ func main() {
 			// Wiki WebSocket route for real-time collaboration
 			r.Get("/wiki/collab", server.HandleWikiWebSocket)
 
+			// Wiki search routes
+			r.Post("/wiki/search", server.HandleSearchWiki)
+			r.Get("/wiki/autocomplete", server.HandleAutocompletePages)
+
 			// Task comment routes
 			r.Get("/tasks/{taskId}/comments", server.HandleListTaskComments)
 			r.Post("/tasks/{taskId}/comments", server.HandleCreateTaskComment)

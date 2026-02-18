@@ -5,8 +5,11 @@ import Admin from './Admin'
 
 // Mock react-router-dom
 const mockNavigate = vi.fn()
+const mockSearchParams = new URLSearchParams()
+const mockSetSearchParams = vi.fn()
 vi.mock('react-router-dom', () => ({
   useNavigate: () => mockNavigate,
+  useSearchParams: () => [mockSearchParams, mockSetSearchParams],
 }))
 
 // Mock API with vi.hoisted

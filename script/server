@@ -106,6 +106,7 @@ show_help() {
     echo -e "${YELLOW}Deployment Commands:${NC}"
     echo "  deploy [\"message\"]   Commit, push to main, auto-deploy to STAGING"
     echo "  promote [ref]        Promote to PRODUCTION (triggers GitHub Action)"
+    echo "  watch [staging|prod] Watch GitHub Actions build status and logs"
     echo ""
     echo -e "${YELLOW}Staging Commands (staging.taskai.cc):${NC}"
     echo "  staging status       Show staging service status"
@@ -256,6 +257,102 @@ promote_to_production() {
     echo -e "${CYAN}Monitor:${NC} https://github.com/anchoo2kewl/taskai/actions"
     echo ""
     print_status "After deployment completes, verify: $0 prod health"
+}
+
+# Watch GitHub Actions deployment status and logs
+watch_deployment() {
+    local env="${1:-staging}"
+
+    # Check if gh CLI is available
+    if ! command -v gh &> /dev/null; then
+        print_error "GitHub CLI (gh) is not installed"
+        print_status "Install: brew install gh"
+        return 1
+    fi
+
+    # Determine which workflow to watch
+    local workflow_name
+    case "$env" in
+        staging)
+            workflow_name="CI"
+            print_header "Watching Staging Deployment (CI Workflow)"
+            ;;
+        prod|production)
+            workflow_name="Deploy to Production"
+            print_header "Watching Production Deployment"
+            ;;
+        *)
+            print_error "Invalid environment: $env"
+            print_status "Usage: $0 watch [staging|prod]"
+            return 1
+            ;;
+    esac
+
+    echo ""
+
+    # Get latest run
+    print_status "Fetching latest $workflow_name run..."
+    local run_info=$(gh run list --workflow="$workflow_name" --limit=1 --json databaseId,status,conclusion,displayTitle,createdAt,updatedAt,url 2>/dev/null)
+
+    if [ -z "$run_info" ] || [ "$run_info" = "[]" ]; then
+        print_error "No $workflow_name runs found"
+        return 1
+    fi
+
+    # Parse run info
+    local run_id=$(echo "$run_info" | jq -r '.[0].databaseId')
+    local status=$(echo "$run_info" | jq -r '.[0].status')
+    local conclusion=$(echo "$run_info" | jq -r '.[0].conclusion')
+    local title=$(echo "$run_info" | jq -r '.[0].displayTitle')
+    local created_at=$(echo "$run_info" | jq -r '.[0].createdAt')
+    local url=$(echo "$run_info" | jq -r '.[0].url')
+
+    # Display run summary
+    echo -e "${CYAN}Run ID:${NC} $run_id"
+    echo -e "${CYAN}Title:${NC} $title"
+    echo -e "${CYAN}Created:${NC} $created_at"
+    echo -e "${CYAN}Status:${NC} $status"
+
+    if [ "$conclusion" != "null" ]; then
+        if [ "$conclusion" = "success" ]; then
+            echo -e "${CYAN}Result:${NC} ${GREEN}✓ $conclusion${NC}"
+        else
+            echo -e "${CYAN}Result:${NC} ${RED}✗ $conclusion${NC}"
+        fi
+    fi
+
+    echo -e "${CYAN}URL:${NC} $url"
+    echo ""
+
+    # Show detailed status
+    print_status "Run details:"
+    gh run view "$run_id" 2>/dev/null
+    echo ""
+
+    # If run is in progress, offer to watch live
+    if [ "$status" = "in_progress" ] || [ "$status" = "queued" ]; then
+        print_status "Run is currently $status"
+        echo ""
+        read -p "$(echo -e ${YELLOW}Watch live logs? [y/N]:${NC} )" -n 1 -r
+        echo ""
+        if [[ $REPLY =~ ^[Yy]$ ]]; then
+            print_status "Watching live logs (Ctrl+C to stop)..."
+            gh run watch "$run_id"
+        fi
+    elif [ "$conclusion" = "failure" ]; then
+        # Show failed logs
+        print_error "Run failed! Showing error logs..."
+        echo ""
+        gh run view "$run_id" --log-failed
+    else
+        # Show option to view full logs
+        echo ""
+        read -p "$(echo -e ${YELLOW}View full logs? [y/N]:${NC} )" -n 1 -r
+        echo ""
+        if [[ $REPLY =~ ^[Yy]$ ]]; then
+            gh run view "$run_id" --log
+        fi
+    fi
 }
 
 # Environment-specific operations
@@ -1349,6 +1446,9 @@ case ${1:-help} in
         ;;
     promote)
         promote_to_production "$2"
+        ;;
+    watch)
+        watch_deployment "$2"
         ;;
     staging)
         case "$2" in

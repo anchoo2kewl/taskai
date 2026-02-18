@@ -246,8 +246,7 @@ promote_to_production() {
     # Trigger the production deployment workflow
     print_status "Triggering production deployment..."
     gh workflow run deploy-production.yml \
-        -f ref="$ref" \
-        -f confirm="deploy" || {
+        -f ref="$ref" || {
         print_error "Failed to trigger production deployment"
         return 1
     }

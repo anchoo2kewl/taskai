@@ -76,27 +76,45 @@ export default function Wiki() {
 
   return (
     <div className="flex flex-col h-full">
-      {/* Navigation tabs */}
-      <div className="bg-dark-bg-secondary border-b border-dark-border-subtle px-6 flex items-center gap-1">
-        <button
-          onClick={() => navigate(`/app/projects/${projectId}`)}
-          className="px-4 py-3 text-sm font-medium text-dark-text-secondary hover:text-dark-text-primary transition-colors"
-        >
-          Board
-        </button>
-        <button
-          onClick={() => navigate(`/app/projects/${projectId}/wiki`)}
-          className="relative px-4 py-3 text-sm font-medium text-primary-400 transition-colors"
-        >
-          Wiki
-          <div className="absolute bottom-0 left-0 right-0 h-0.5 bg-primary-500"></div>
-        </button>
-        <button
-          onClick={() => navigate(`/app/projects/${projectId}/settings`)}
-          className="px-4 py-3 text-sm font-medium text-dark-text-secondary hover:text-dark-text-primary transition-colors"
-        >
-          Settings
-        </button>
+      {/* Project Header */}
+      <div className="bg-dark-bg-secondary border-b border-dark-border-subtle">
+        {/* Top bar - placeholder for consistent height */}
+        <div className="px-6 py-4 flex items-start justify-between gap-4">
+          <div className="flex-1 min-w-0">
+            <h1 className="text-xl font-semibold text-dark-text-primary">
+              Wiki
+            </h1>
+            <p className="mt-1 text-sm text-dark-text-tertiary">
+              Project documentation and notes
+            </p>
+          </div>
+        </div>
+
+        {/* Navigation tabs */}
+        <div className="px-6 flex items-end justify-between border-t border-dark-border-subtle/50">
+          <div className="flex items-center gap-1">
+            <button
+              onClick={() => navigate(`/app/projects/${projectId}`)}
+              className="px-4 py-3 text-sm font-medium text-dark-text-secondary hover:text-dark-text-primary transition-colors"
+            >
+              Board
+            </button>
+            <button
+              onClick={() => navigate(`/app/projects/${projectId}/wiki`)}
+              className="relative px-4 py-3 text-sm font-medium text-primary-400 transition-colors"
+            >
+              Wiki
+              <div className="absolute bottom-0 left-0 right-0 h-0.5 bg-primary-500"></div>
+            </button>
+            <button
+              onClick={() => navigate(`/app/projects/${projectId}/settings`)}
+              className="px-4 py-3 text-sm font-medium text-dark-text-secondary hover:text-dark-text-primary transition-colors"
+            >
+              Settings
+            </button>
+          </div>
+          <div className="py-3"></div>
+        </div>
       </div>
 
       <div className="flex flex-1 overflow-hidden">

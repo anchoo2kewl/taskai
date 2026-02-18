@@ -319,25 +319,30 @@ export default function ProjectSettings() {
   }
 
   return (
-    <div className="min-h-screen bg-dark-bg-primary py-8">
-      <div className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8">
-        {/* Header */}
-        <div className="mb-8">
-          <div className="flex items-center justify-between">
-            <div>
-              <h1 className="text-3xl font-bold text-dark-text-primary">Project Settings</h1>
-              <p className="text-dark-text-secondary mt-1">Manage project access and GitHub integration</p>
-            </div>
-            <Button onClick={() => navigate(`/app/projects/${projectId}`)} variant="secondary">
-              <svg className="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 19l-7-7m0 0l7-7m-7 7h18" />
-              </svg>
-              Back to Project
-            </Button>
+    <div className="h-full flex flex-col bg-dark-bg-base">
+      {/* Project Header */}
+      <div className="bg-dark-bg-secondary border-b border-dark-border-subtle">
+        {/* Top bar with project info and actions */}
+        <div className="px-6 py-4 flex items-start justify-between gap-4">
+          <div className="flex-1 min-w-0">
+            <h1 className="text-xl font-semibold text-dark-text-primary">
+              Project Settings
+            </h1>
+            <p className="mt-1 text-sm text-dark-text-tertiary">
+              Manage project access and GitHub integration
+            </p>
           </div>
+          <Button onClick={() => navigate(`/app/projects/${projectId}`)} variant="secondary" className="flex-shrink-0">
+            <svg className="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 19l-7-7m0 0l7-7m-7 7h18" />
+            </svg>
+            Back to Project
+          </Button>
+        </div>
 
-          {/* Tabs */}
-          <div className="flex items-center gap-1 mt-6 border-t border-dark-border-subtle">
+        {/* Navigation tabs */}
+        <div className="px-6 flex items-end justify-between border-t border-dark-border-subtle/50">
+          <div className="flex items-center gap-1">
             <button
               onClick={() => navigate(`/app/projects/${projectId}`)}
               className="px-4 py-3 text-sm font-medium text-dark-text-secondary hover:text-dark-text-primary transition-colors"
@@ -358,7 +363,12 @@ export default function ProjectSettings() {
               <div className="absolute bottom-0 left-0 right-0 h-0.5 bg-primary-500"></div>
             </button>
           </div>
+          <div className="py-3"></div>
         </div>
+      </div>
+
+      <div className="flex-1 overflow-y-auto bg-dark-bg-primary py-8">
+        <div className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8">
 
         <div className="space-y-6">
           {/* Team Members Section */}
@@ -872,6 +882,7 @@ export default function ProjectSettings() {
               </form>
             </div>
           </Card>
+        </div>
         </div>
       </div>
     </div>

@@ -343,7 +343,7 @@ export default function Admin() {
                       <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
                       </svg>
-                      {u.invite_count}
+                      {u.is_admin ? '∞' : u.invite_count}
                     </div>
 
                     <div
@@ -386,22 +386,28 @@ export default function Admin() {
 
                       <div className="flex items-center gap-3 bg-dark-bg-secondary rounded-lg p-3 border border-dark-border-subtle">
                         <label className="text-sm text-dark-text-secondary flex-shrink-0">Invite count:</label>
-                        <input
-                          type="number"
-                          min={0}
-                          value={editingInvites[u.id] !== undefined ? editingInvites[u.id] : u.invite_count}
-                          onChange={(e) => setEditingInvites(prev => ({ ...prev, [u.id]: parseInt(e.target.value) || 0 }))}
-                          onClick={(e) => e.stopPropagation()}
-                          className="w-20 px-2 py-1 text-sm bg-dark-bg-primary border border-dark-border-subtle rounded text-dark-text-primary focus:outline-none focus:border-primary-500"
-                        />
-                        {editingInvites[u.id] !== undefined && editingInvites[u.id] !== u.invite_count && (
-                          <button
-                            onClick={(e) => handleSaveInvites(e, u.id)}
-                            disabled={savingInvites === u.id}
-                            className="px-3 py-1 text-xs font-medium bg-primary-500 text-white rounded hover:bg-primary-600 transition-colors disabled:opacity-50"
-                          >
-                            {savingInvites === u.id ? 'Saving...' : 'Save'}
-                          </button>
+                        {u.is_admin ? (
+                          <span className="text-sm text-purple-400 font-medium">Unlimited (admin)</span>
+                        ) : (
+                          <>
+                            <input
+                              type="number"
+                              min={0}
+                              value={editingInvites[u.id] !== undefined ? editingInvites[u.id] : u.invite_count}
+                              onChange={(e) => setEditingInvites(prev => ({ ...prev, [u.id]: parseInt(e.target.value) || 0 }))}
+                              onClick={(e) => e.stopPropagation()}
+                              className="w-20 px-2 py-1 text-sm bg-dark-bg-primary border border-dark-border-subtle rounded text-dark-text-primary focus:outline-none focus:border-primary-500"
+                            />
+                            {editingInvites[u.id] !== undefined && editingInvites[u.id] !== u.invite_count && (
+                              <button
+                                onClick={(e) => handleSaveInvites(e, u.id)}
+                                disabled={savingInvites === u.id}
+                                className="px-3 py-1 text-xs font-medium bg-primary-500 text-white rounded hover:bg-primary-600 transition-colors disabled:opacity-50"
+                              >
+                                {savingInvites === u.id ? 'Saving...' : 'Save'}
+                              </button>
+                            )}
+                          </>
                         )}
                       </div>
 

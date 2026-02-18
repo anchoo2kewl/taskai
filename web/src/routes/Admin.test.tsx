@@ -121,7 +121,9 @@ describe('Admin', () => {
     render(<Admin />)
 
     await waitFor(() => {
-      expect(screen.getByText('5')).toBeInTheDocument()
+      // Admin user shows infinity symbol instead of numeric count
+      expect(screen.getByText('∞')).toBeInTheDocument()
+      // Non-admin user shows numeric count
       expect(screen.getByText('3')).toBeInTheDocument()
     })
   })
@@ -236,7 +238,7 @@ describe('Admin', () => {
     })
   })
 
-  it('shows invite count editor in expanded panel', async () => {
+  it('shows unlimited invites for admin in expanded panel', async () => {
     apiMocks.getUserActivity.mockResolvedValue([])
 
     const user = userEvent.setup()
@@ -246,11 +248,12 @@ describe('Admin', () => {
       expect(screen.getByText('admin@test.com')).toBeInTheDocument()
     })
 
-    // Expand first user
+    // Expand admin user
     await user.click(screen.getByText('admin@test.com'))
 
     await waitFor(() => {
       expect(screen.getByText('Invite count:')).toBeInTheDocument()
+      expect(screen.getByText('Unlimited (admin)')).toBeInTheDocument()
     })
   })
 

@@ -76,28 +76,27 @@ export default function Wiki() {
 
   return (
     <div className="flex flex-col h-full">
-      {/* Tabs */}
-      <div className="bg-dark-bg-secondary border-b border-dark-border-subtle px-4 md:px-6">
-        <div className="flex items-center gap-1">
-          <button
-            onClick={() => navigate(`/app/projects/${projectId}`)}
-            className="px-4 py-2 text-sm font-medium text-dark-text-secondary hover:text-dark-text-primary border-b-2 border-transparent hover:border-dark-border-medium transition-colors"
-          >
-            Board
-          </button>
-          <button
-            onClick={() => navigate(`/app/projects/${projectId}/wiki`)}
-            className="px-4 py-2 text-sm font-medium text-primary-400 border-b-2 border-primary-400 transition-colors"
-          >
-            Wiki
-          </button>
-          <button
-            onClick={() => navigate(`/app/projects/${projectId}/settings`)}
-            className="px-4 py-2 text-sm font-medium text-dark-text-secondary hover:text-dark-text-primary border-b-2 border-transparent hover:border-dark-border-medium transition-colors"
-          >
-            Settings
-          </button>
-        </div>
+      {/* Navigation tabs */}
+      <div className="bg-dark-bg-secondary border-b border-dark-border-subtle px-6 flex items-center gap-1">
+        <button
+          onClick={() => navigate(`/app/projects/${projectId}`)}
+          className="px-4 py-3 text-sm font-medium text-dark-text-secondary hover:text-dark-text-primary transition-colors"
+        >
+          Board
+        </button>
+        <button
+          onClick={() => navigate(`/app/projects/${projectId}/wiki`)}
+          className="relative px-4 py-3 text-sm font-medium text-primary-400 transition-colors"
+        >
+          Wiki
+          <div className="absolute bottom-0 left-0 right-0 h-0.5 bg-primary-500"></div>
+        </button>
+        <button
+          onClick={() => navigate(`/app/projects/${projectId}/settings`)}
+          className="px-4 py-3 text-sm font-medium text-dark-text-secondary hover:text-dark-text-primary transition-colors"
+        >
+          Settings
+        </button>
       </div>
 
       <div className="flex flex-1 overflow-hidden">

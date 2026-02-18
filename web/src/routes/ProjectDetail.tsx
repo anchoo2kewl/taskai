@@ -171,64 +171,66 @@ export default function ProjectDetail() {
     <DndContext sensors={sensors} onDragStart={handleDragStart} onDragEnd={handleDragEnd}>
       <div className="h-full flex flex-col bg-dark-bg-base">
         {/* Project Header */}
-        <div className="bg-dark-bg-secondary border-b border-dark-border-subtle px-4 md:px-6 py-4">
-          <div className="flex flex-col sm:flex-row items-start justify-between gap-3 sm:gap-0">
-            <div>
-              <h1 className="text-lg font-semibold text-dark-text-primary">
+        <div className="bg-dark-bg-secondary border-b border-dark-border-subtle">
+          {/* Top bar with project info and actions */}
+          <div className="px-6 py-4 flex items-start justify-between gap-4">
+            <div className="flex-1 min-w-0">
+              <h1 className="text-xl font-semibold text-dark-text-primary truncate">
                 {project?.name}
               </h1>
               {project?.description && (
-                <p className="mt-1 text-xs text-dark-text-secondary">{project.description}</p>
+                <p className="mt-1 text-sm text-dark-text-tertiary line-clamp-1">{project.description}</p>
               )}
             </div>
-            <div className="flex items-center gap-2">
+            <button
+              onClick={() => setShowNewTaskModal(true)}
+              className="flex-shrink-0 inline-flex items-center gap-2 px-4 py-2 bg-primary-500 hover:bg-primary-600 text-white text-sm font-medium rounded-lg transition-colors shadow-sm"
+            >
+              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
+              </svg>
+              New Task
+            </button>
+          </div>
+
+          {/* Navigation tabs and stats */}
+          <div className="px-6 flex items-end justify-between border-t border-dark-border-subtle/50">
+            <div className="flex items-center gap-1">
               <button
-                onClick={() => setShowNewTaskModal(true)}
-                className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-primary-500 hover:bg-primary-600 text-white text-xs font-medium rounded-md transition-colors duration-150"
+                onClick={() => navigate(`/app/projects/${projectId}`)}
+                className="relative px-4 py-3 text-sm font-medium text-primary-400 transition-colors"
               >
-                <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
-                </svg>
-                New Task
+                Board
+                <div className="absolute bottom-0 left-0 right-0 h-0.5 bg-primary-500"></div>
+              </button>
+              <button
+                onClick={() => navigate(`/app/projects/${projectId}/wiki`)}
+                className="px-4 py-3 text-sm font-medium text-dark-text-secondary hover:text-dark-text-primary transition-colors"
+              >
+                Wiki
+              </button>
+              <button
+                onClick={() => navigate(`/app/projects/${projectId}/settings`)}
+                className="px-4 py-3 text-sm font-medium text-dark-text-secondary hover:text-dark-text-primary transition-colors"
+              >
+                Settings
               </button>
             </div>
-          </div>
 
-          {/* Tabs */}
-          <div className="flex items-center gap-1 mt-4 border-b border-dark-border-subtle -mb-4">
-            <button
-              onClick={() => navigate(`/app/projects/${projectId}`)}
-              className="px-4 py-2 text-sm font-medium text-primary-400 border-b-2 border-primary-400 transition-colors"
-            >
-              Board
-            </button>
-            <button
-              onClick={() => navigate(`/app/projects/${projectId}/wiki`)}
-              className="px-4 py-2 text-sm font-medium text-dark-text-secondary hover:text-dark-text-primary border-b-2 border-transparent hover:border-dark-border-medium transition-colors"
-            >
-              Wiki
-            </button>
-            <button
-              onClick={() => navigate(`/app/projects/${projectId}/settings`)}
-              className="px-4 py-2 text-sm font-medium text-dark-text-secondary hover:text-dark-text-primary border-b-2 border-transparent hover:border-dark-border-medium transition-colors"
-            >
-              Settings
-            </button>
-          </div>
-
-          {/* Task Stats */}
-          <div className="flex gap-4 mt-3 flex-wrap">
-            {swimLanes.map((lane) => (
-              <div key={lane.id} className="flex items-center gap-1.5">
-                <div
-                  className="w-2 h-2 rounded-full"
-                  style={{ backgroundColor: lane.color }}
-                ></div>
-                <span className="text-xs text-dark-text-secondary">
-                  {tasksBySwimLane[lane.id]?.length || 0} {lane.name}
-                </span>
-              </div>
-            ))}
+            {/* Task Stats */}
+            <div className="flex items-center gap-4 py-3">
+              {swimLanes.map((lane) => (
+                <div key={lane.id} className="flex items-center gap-2">
+                  <div
+                    className="w-2.5 h-2.5 rounded-full"
+                    style={{ backgroundColor: lane.color }}
+                  ></div>
+                  <span className="text-xs font-medium text-dark-text-secondary">
+                    <span className="text-dark-text-primary">{tasksBySwimLane[lane.id]?.length || 0}</span> {lane.name}
+                  </span>
+                </div>
+              ))}
+            </div>
           </div>
         </div>
 

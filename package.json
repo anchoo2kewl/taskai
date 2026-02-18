@@ -1,5 +1,11 @@
 {
-  "dependencies": {
-    "@headlessui/react": "^2.2.9"
+  "name": "taskai-monorepo",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "prepare": "husky"
+  },
+  "devDependencies": {
+    "husky": "^9.1.7"
   }
 }

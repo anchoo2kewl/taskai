@@ -14,6 +14,7 @@ vi.mock('../components/ui/FormError', () => ({
 }))
 
 const mocks = vi.hoisted(() => ({
+  getProject: vi.fn(),
   getProjectMembers: vi.fn(),
   getTeamMembers: vi.fn(),
   addProjectMember: vi.fn(),
@@ -57,6 +58,15 @@ const swimLanes = [
 describe('ProjectSettings', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    mocks.getProject.mockResolvedValue({
+      id: 42,
+      name: 'Test Project',
+      description: 'Test project description',
+      team_id: 1,
+      created_by: 1,
+      created_at: '2024-01-01T00:00:00Z',
+      updated_at: '2024-01-01T00:00:00Z',
+    })
     mocks.getProjectMembers.mockResolvedValue(members)
     mocks.getTeamMembers.mockResolvedValue(teamMembers)
     mocks.getProjectGitHub.mockResolvedValue({
@@ -74,7 +84,7 @@ describe('ProjectSettings', () => {
   it('renders page heading', async () => {
     render(<ProjectSettings />)
     await waitFor(() => {
-      expect(screen.getByText('Project Settings')).toBeInTheDocument()
+      expect(screen.getByText('Test Project')).toBeInTheDocument()
     })
   })
 
@@ -82,9 +92,11 @@ describe('ProjectSettings', () => {
     const user = userEvent.setup()
     render(<ProjectSettings />)
     await waitFor(() => {
-      expect(screen.getByText('Settings')).toBeInTheDocument()
+      expect(screen.getByText('Test Project')).toBeInTheDocument()
     })
-    await user.click(screen.getByText('Settings'))
+    // Click the back button (first button with "Settings" text, which has the arrow icon)
+    const buttons = screen.getAllByText('Settings')
+    await user.click(buttons[0])
     expect(mockNavigate).toHaveBeenCalledWith('/app/projects/42')
   })
 

@@ -1,0 +1,22 @@
+#!/usr/bin/env sh
+. "$(dirname -- "$0")/_/husky.sh"
+
+echo "🔍 Running pre-commit checks..."
+
+# Run web tests
+echo "→ Running frontend tests..."
+cd web && npm test -- --run --passWithNoTests || {
+  echo "❌ Frontend tests failed"
+  exit 1
+}
+cd ..
+
+# Run API tests  
+echo "→ Running backend tests..."
+cd api && go test ./... -short || {
+  echo "❌ Backend tests failed"
+  exit 1
+}
+cd ..
+
+echo "✅ All tests passed"

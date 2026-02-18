@@ -335,6 +335,28 @@ export default function ProjectSettings() {
               Back to Project
             </Button>
           </div>
+
+          {/* Tabs */}
+          <div className="flex items-center gap-1 mt-6 border-b border-dark-border-subtle">
+            <button
+              onClick={() => navigate(`/app/projects/${projectId}`)}
+              className="px-4 py-2 text-sm font-medium text-dark-text-secondary hover:text-dark-text-primary border-b-2 border-transparent hover:border-dark-border-medium transition-colors"
+            >
+              Board
+            </button>
+            <button
+              onClick={() => navigate(`/app/projects/${projectId}/wiki`)}
+              className="px-4 py-2 text-sm font-medium text-dark-text-secondary hover:text-dark-text-primary border-b-2 border-transparent hover:border-dark-border-medium transition-colors"
+            >
+              Wiki
+            </button>
+            <button
+              onClick={() => navigate(`/app/projects/${projectId}/settings`)}
+              className="px-4 py-2 text-sm font-medium text-primary-400 border-b-2 border-primary-400 transition-colors"
+            >
+              Settings
+            </button>
+          </div>
         </div>
 
         <div className="space-y-6">

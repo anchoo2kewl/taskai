@@ -16,6 +16,7 @@ import Admin from './routes/Admin'
 import Settings from './routes/Settings'
 import Assets from './routes/Assets'
 import AcceptTeamInvite from './routes/AcceptTeamInvite'
+import Wiki from './routes/Wiki'
 
 function AppRoutes() {
   const location = useLocation()
@@ -41,6 +42,7 @@ function AppRoutes() {
         >
           <Route index element={<Projects />} />
           <Route path="projects/:projectId" element={<ProjectDetail />} />
+          <Route path="projects/:projectId/wiki" element={<Wiki />} />
           <Route path="projects/:projectId/settings" element={<ProjectSettings />} />
           <Route path="projects/:projectId/tasks/:taskNumber" element={<TaskDetail />} />
           <Route path="sprints" element={<Sprints />} />

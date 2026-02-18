@@ -75,6 +75,27 @@ export interface ProjectMember {
   granted_at: string
 }
 
+export interface WikiPage {
+  id: number
+  project_id: number
+  title: string
+  slug: string
+  created_by: number
+  created_at: string
+  updated_at: string
+}
+
+export interface WikiSearchResult {
+  page_id: number
+  page_title: string
+  page_slug: string
+  block_id: number
+  block_type: string
+  headings_path: string
+  snippet: string
+  rank?: number
+}
+
 export interface MessageResponse {
   message: string
 }
@@ -821,6 +842,42 @@ class ApiClient {
   async deleteSwimLane(swimLaneId: number): Promise<void> {
     return this.request<void>(`/api/swim-lanes/${swimLaneId}`, {
       method: 'DELETE',
+    })
+  }
+
+  // Wiki endpoints
+  async getWikiPages(projectId: number): Promise<WikiPage[]> {
+    return this.request<WikiPage[]>(`/api/projects/${projectId}/wiki/pages`)
+  }
+
+  async createWikiPage(projectId: number, title: string): Promise<WikiPage> {
+    return this.request<WikiPage>(`/api/projects/${projectId}/wiki/pages`, {
+      method: 'POST',
+      body: JSON.stringify({ title }),
+    })
+  }
+
+  async getWikiPage(pageId: number): Promise<WikiPage> {
+    return this.request<WikiPage>(`/api/wiki/pages/${pageId}`)
+  }
+
+  async updateWikiPage(pageId: number, data: { title?: string }): Promise<WikiPage> {
+    return this.request<WikiPage>(`/api/wiki/pages/${pageId}`, {
+      method: 'PATCH',
+      body: JSON.stringify(data),
+    })
+  }
+
+  async deleteWikiPage(pageId: number): Promise<void> {
+    return this.request<void>(`/api/wiki/pages/${pageId}`, {
+      method: 'DELETE',
+    })
+  }
+
+  async searchWiki(query: string, projectId?: number, limit?: number): Promise<{ results: WikiSearchResult[]; total: number }> {
+    return this.request('/api/wiki/search', {
+      method: 'POST',
+      body: JSON.stringify({ query, project_id: projectId, limit }),
     })
   }
 }

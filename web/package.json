@@ -29,7 +29,9 @@
     "react-router-dom": "^6.21.0",
     "remark-gfm": "^4.0.0",
     "rxdb": "^16.21.1",
-    "rxjs": "^7.8.2"
+    "rxjs": "^7.8.2",
+    "yjs": "^13.6.10",
+    "y-websocket": "^2.0.4"
   },
   "devDependencies": {
     "@playwright/test": "^1.40.1",

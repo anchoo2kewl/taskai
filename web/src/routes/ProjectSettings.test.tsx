@@ -82,9 +82,9 @@ describe('ProjectSettings', () => {
     const user = userEvent.setup()
     render(<ProjectSettings />)
     await waitFor(() => {
-      expect(screen.getByText('Back to Project')).toBeInTheDocument()
+      expect(screen.getByText('Settings')).toBeInTheDocument()
     })
-    await user.click(screen.getByText('Back to Project'))
+    await user.click(screen.getByText('Settings'))
     expect(mockNavigate).toHaveBeenCalledWith('/app/projects/42')
   })
 

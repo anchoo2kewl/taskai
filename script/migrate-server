@@ -1,0 +1,618 @@
+#!/bin/bash
+
+# TaskAI Server Migration Script
+# Migrates from SprintSpark naming to TaskAI naming on the server
+#
+# This script handles:
+# 1. DNS records (Cloudflare) - staging.taskai.cc, mcp.staging.taskai.cc
+# 2. Server directory renames
+# 3. DB file renames
+# 4. Webhook config update
+# 5. Nginx config for new domains
+# 6. SSL certificates
+# 7. GitHub secrets
+
+set -e
+
+# Colors
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+BLUE='\033[0;34m'
+NC='\033[0m'
+
+# Server
+REMOTE_HOST="31.97.102.48"
+REMOTE_USER="ubuntu"
+SSH="ssh -o ConnectTimeout=10 ${REMOTE_USER}@${REMOTE_HOST}"
+
+# Cloudflare
+CF_ZONE_TASKAI="7850b043136ac339940ce64ff03ca878"
+SERVER_IP="31.97.102.48"
+
+# Domains
+STAGING_DOMAIN="staging.taskai.cc"
+STAGING_MCP_DOMAIN="mcp.staging.taskai.cc"
+
+info()  { echo -e "${BLUE}[INFO]${NC} $1"; }
+ok()    { echo -e "${GREEN}[OK]${NC} $1"; }
+warn()  { echo -e "${YELLOW}[WARN]${NC} $1"; }
+fail()  { echo -e "${RED}[FAIL]${NC} $1"; }
+step()  { echo -e "\n${BLUE}━━━ Step $1: $2 ━━━${NC}"; }
+
+# Check prerequisites
+check_prereqs() {
+    info "Checking prerequisites..."
+
+    if [ -z "$CLOUDFLARE_EMAIL" ] || [ -z "$CLOUDFLARE_API_KEY" ]; then
+        fail "Set CLOUDFLARE_EMAIL and CLOUDFLARE_API_KEY environment variables"
+        echo "  export CLOUDFLARE_EMAIL='your-email@example.com'"
+        echo "  export CLOUDFLARE_API_KEY='your-global-api-key'"
+        exit 1
+    fi
+
+    if ! command -v gh &>/dev/null; then
+        fail "GitHub CLI (gh) not found"
+        exit 1
+    fi
+
+    if ! $SSH "echo ok" &>/dev/null; then
+        fail "Cannot SSH to ${REMOTE_USER}@${REMOTE_HOST}"
+        exit 1
+    fi
+
+    ok "All prerequisites met"
+}
+
+# Step 1: Create DNS records
+create_dns() {
+    step 1 "Creating DNS records"
+
+    for RECORD_NAME in "$STAGING_DOMAIN" "$STAGING_MCP_DOMAIN"; do
+        info "Checking DNS for ${RECORD_NAME}..."
+
+        EXISTING=$(curl -s -X GET \
+            "https://api.cloudflare.com/client/v4/zones/${CF_ZONE_TASKAI}/dns_records?name=${RECORD_NAME}&type=A" \
+            -H "X-Auth-Email: ${CLOUDFLARE_EMAIL}" \
+            -H "X-Auth-Key: ${CLOUDFLARE_API_KEY}" \
+            -H "Content-Type: application/json")
+
+        COUNT=$(echo "$EXISTING" | python3 -c "import sys,json; print(len(json.load(sys.stdin)['result']))" 2>/dev/null || echo "0")
+
+        if [ "$COUNT" -gt "0" ]; then
+            RECORD_ID=$(echo "$EXISTING" | python3 -c "import sys,json; print(json.load(sys.stdin)['result'][0]['id'])")
+            info "Updating existing record for ${RECORD_NAME}..."
+            RESULT=$(curl -s -X PUT \
+                "https://api.cloudflare.com/client/v4/zones/${CF_ZONE_TASKAI}/dns_records/${RECORD_ID}" \
+                -H "X-Auth-Email: ${CLOUDFLARE_EMAIL}" \
+                -H "X-Auth-Key: ${CLOUDFLARE_API_KEY}" \
+                -H "Content-Type: application/json" \
+                --data "{\"type\":\"A\",\"name\":\"${RECORD_NAME}\",\"content\":\"${SERVER_IP}\",\"ttl\":1,\"proxied\":false}")
+        else
+            info "Creating A record for ${RECORD_NAME} → ${SERVER_IP}..."
+            RESULT=$(curl -s -X POST \
+                "https://api.cloudflare.com/client/v4/zones/${CF_ZONE_TASKAI}/dns_records" \
+                -H "X-Auth-Email: ${CLOUDFLARE_EMAIL}" \
+                -H "X-Auth-Key: ${CLOUDFLARE_API_KEY}" \
+                -H "Content-Type: application/json" \
+                --data "{\"type\":\"A\",\"name\":\"${RECORD_NAME}\",\"content\":\"${SERVER_IP}\",\"ttl\":1,\"proxied\":false}")
+        fi
+
+        SUCCESS=$(echo "$RESULT" | python3 -c "import sys,json; print(json.load(sys.stdin)['success'])" 2>/dev/null || echo "False")
+        if [ "$SUCCESS" = "True" ]; then
+            ok "DNS: ${RECORD_NAME} → ${SERVER_IP}"
+        else
+            fail "DNS failed for ${RECORD_NAME}: $(echo "$RESULT" | python3 -c "import sys,json; print(json.load(sys.stdin).get('errors','unknown'))" 2>/dev/null)"
+            exit 1
+        fi
+    done
+}
+
+# Step 2: Rename server directories and DB files
+rename_server_dirs() {
+    step 2 "Renaming server directories and DB files"
+
+    $SSH << 'REMOTE_SCRIPT'
+set -e
+
+echo "-> Checking current state..."
+
+# Check what exists
+OLD_STAGING="/home/ubuntu/sprintspark-staging"
+NEW_STAGING="/home/ubuntu/taskai-staging"
+OLD_PROD="/home/ubuntu/sprintspark"
+NEW_PROD="/home/ubuntu/taskai"
+
+# --- Staging ---
+if [ -d "$OLD_STAGING" ]; then
+    echo "-> Stopping staging containers..."
+    cd "$OLD_STAGING" && docker compose down 2>/dev/null || true
+    cd /home/ubuntu
+
+    echo "-> Renaming staging directory..."
+    mv "$OLD_STAGING" "$NEW_STAGING"
+    echo "OK: $OLD_STAGING → $NEW_STAGING"
+elif [ -d "$NEW_STAGING" ]; then
+    echo "SKIP: $NEW_STAGING already exists"
+else
+    echo "WARN: Neither $OLD_STAGING nor $NEW_STAGING exists"
+fi
+
+# --- Production ---
+if [ -d "$OLD_PROD" ]; then
+    echo "-> Stopping production containers..."
+    cd "$OLD_PROD" && docker compose down 2>/dev/null || true
+    cd /home/ubuntu
+
+    echo "-> Renaming production directory..."
+    mv "$OLD_PROD" "$NEW_PROD"
+    echo "OK: $OLD_PROD → $NEW_PROD"
+elif [ -d "$NEW_PROD" ]; then
+    echo "SKIP: $NEW_PROD already exists"
+else
+    echo "WARN: Neither $OLD_PROD nor $NEW_PROD exists"
+fi
+
+# --- Rename DB files inside data directories ---
+for DIR in "$NEW_STAGING" "$NEW_PROD"; do
+    if [ -d "$DIR/data" ]; then
+        if [ -f "$DIR/data/sprintspark.db" ]; then
+            echo "-> Renaming DB in $DIR/data..."
+            mv "$DIR/data/sprintspark.db" "$DIR/data/taskai.db"
+            [ -f "$DIR/data/sprintspark.db-shm" ] && mv "$DIR/data/sprintspark.db-shm" "$DIR/data/taskai.db-shm"
+            [ -f "$DIR/data/sprintspark.db-wal" ] && mv "$DIR/data/sprintspark.db-wal" "$DIR/data/taskai.db-wal"
+            echo "OK: DB renamed in $DIR"
+        elif [ -f "$DIR/data/taskai.db" ]; then
+            echo "SKIP: $DIR/data/taskai.db already exists"
+        fi
+    fi
+done
+
+# --- Also check Docker volumes for DB files ---
+echo "-> Checking Docker volumes..."
+for VOL in sprintspark-staging-data sprintspark-data; do
+    MOUNT=$(docker volume inspect "$VOL" --format '{{ .Mountpoint }}' 2>/dev/null || echo "")
+    if [ -n "$MOUNT" ] && [ -f "$MOUNT/sprintspark.db" ]; then
+        echo "-> Renaming DB in Docker volume $VOL..."
+        sudo mv "$MOUNT/sprintspark.db" "$MOUNT/taskai.db"
+        [ -f "$MOUNT/sprintspark.db-shm" ] && sudo mv "$MOUNT/sprintspark.db-shm" "$MOUNT/taskai.db-shm"
+        [ -f "$MOUNT/sprintspark.db-wal" ] && sudo mv "$MOUNT/sprintspark.db-wal" "$MOUNT/taskai.db-wal"
+        echo "OK: DB renamed in volume $VOL"
+    fi
+done
+
+echo "-> Directory and DB renames complete"
+REMOTE_SCRIPT
+
+    ok "Server directories and DB files renamed"
+}
+
+# Step 3: Update webhook config on server
+update_webhook_config() {
+    step 3 "Updating webhook config on server"
+
+    # Read the local webhook config and push it to the server
+    info "Copying webhook config to server..."
+    scp "$(dirname "$0")/../webhook/config.yaml" "${REMOTE_USER}@${REMOTE_HOST}:/home/ubuntu/webhooks/config.yaml"
+
+    # Restart the webhook service
+    $SSH << 'REMOTE_SCRIPT'
+echo "-> Restarting webhook service..."
+cd /home/ubuntu/webhooks
+if [ -f docker-compose.yml ]; then
+    docker compose restart 2>/dev/null || docker compose up -d 2>/dev/null || true
+elif systemctl is-active --quiet webhook 2>/dev/null; then
+    sudo systemctl restart webhook
+fi
+echo "OK: Webhook config updated"
+REMOTE_SCRIPT
+
+    ok "Webhook config updated on server"
+}
+
+# Step 4: Nginx configs for new domains
+setup_nginx() {
+    step 4 "Setting up Nginx for new domains"
+
+    $SSH << 'REMOTE_SCRIPT'
+set -e
+
+# staging.taskai.cc - pre-SSL config
+if [ ! -f "/etc/nginx/sites-available/staging.taskai.cc" ]; then
+    echo "-> Creating Nginx config for staging.taskai.cc..."
+    sudo tee /etc/nginx/sites-available/staging.taskai.cc > /dev/null << 'NGINX_CONF'
+server {
+    listen 80;
+    listen [::]:80;
+    server_name staging.taskai.cc;
+
+    location /.well-known/acme-challenge/ {
+        root /var/www/html;
+    }
+
+    location / {
+        return 200 'Server is ready for SSL setup';
+        add_header Content-Type text/plain;
+    }
+}
+NGINX_CONF
+    sudo ln -sf /etc/nginx/sites-available/staging.taskai.cc /etc/nginx/sites-enabled/
+    echo "OK: staging.taskai.cc nginx config created"
+else
+    echo "SKIP: staging.taskai.cc nginx config already exists"
+fi
+
+# mcp.staging.taskai.cc - pre-SSL config
+if [ ! -f "/etc/nginx/sites-available/mcp.staging.taskai.cc" ]; then
+    echo "-> Creating Nginx config for mcp.staging.taskai.cc..."
+    sudo tee /etc/nginx/sites-available/mcp.staging.taskai.cc > /dev/null << 'NGINX_CONF'
+server {
+    listen 80;
+    listen [::]:80;
+    server_name mcp.staging.taskai.cc;
+
+    location /.well-known/acme-challenge/ {
+        root /var/www/html;
+    }
+
+    location / {
+        return 200 'Server is ready for SSL setup';
+        add_header Content-Type text/plain;
+    }
+}
+NGINX_CONF
+    sudo ln -sf /etc/nginx/sites-available/mcp.staging.taskai.cc /etc/nginx/sites-enabled/
+    echo "OK: mcp.staging.taskai.cc nginx config created"
+else
+    echo "SKIP: mcp.staging.taskai.cc nginx config already exists"
+fi
+
+# Remove old sprintspark nginx configs
+for OLD_CONF in sprintspark.biswas.me mcp.sprintspark.biswas.me; do
+    if [ -f "/etc/nginx/sites-enabled/$OLD_CONF" ]; then
+        echo "-> Removing old nginx config for $OLD_CONF..."
+        sudo rm -f "/etc/nginx/sites-enabled/$OLD_CONF"
+    fi
+done
+
+sudo nginx -t && sudo systemctl reload nginx
+echo "OK: Nginx reloaded"
+REMOTE_SCRIPT
+
+    ok "Nginx configs created for new domains"
+}
+
+# Step 5: SSL certificates
+setup_ssl() {
+    step 5 "Setting up SSL certificates"
+
+    info "Waiting 30s for DNS propagation..."
+    sleep 30
+
+    $SSH << 'REMOTE_SCRIPT'
+set -e
+
+for DOMAIN in staging.taskai.cc mcp.staging.taskai.cc; do
+    if [ -f "/etc/letsencrypt/live/$DOMAIN/fullchain.pem" ]; then
+        echo "SKIP: SSL cert already exists for $DOMAIN"
+    else
+        echo "-> Obtaining SSL cert for $DOMAIN..."
+        sudo certbot --nginx -d "$DOMAIN" \
+            --non-interactive --agree-tos \
+            --email anshuman@biswas.me \
+            --redirect
+        echo "OK: SSL cert obtained for $DOMAIN"
+    fi
+done
+REMOTE_SCRIPT
+
+    ok "SSL certificates configured"
+}
+
+# Step 6: Create full Nginx SSL configs and restart apps
+finalize_nginx() {
+    step 6 "Creating full Nginx SSL configs"
+
+    $SSH << 'REMOTE_SCRIPT'
+set -e
+
+# staging.taskai.cc - full SSL config
+if [ -f "/etc/letsencrypt/live/staging.taskai.cc/fullchain.pem" ]; then
+    echo "-> Writing full SSL Nginx config for staging.taskai.cc..."
+    sudo tee /etc/nginx/sites-available/staging.taskai.cc > /dev/null << 'NGINX_CONF'
+# Nginx configuration for staging.taskai.cc (with SSL)
+
+limit_req_zone $binary_remote_addr zone=staging_taskai_cc_api:10m rate=100r/m;
+limit_req_zone $binary_remote_addr zone=staging_taskai_cc_auth:10m rate=20r/m;
+
+server {
+    listen 80;
+    listen [::]:80;
+    server_name staging.taskai.cc;
+
+    location /.well-known/acme-challenge/ {
+        root /var/www/html;
+    }
+
+    location / {
+        return 301 https://$server_name$request_uri;
+    }
+}
+
+server {
+    listen 443 ssl;
+    listen [::]:443 ssl;
+    http2 on;
+    server_name staging.taskai.cc;
+
+    ssl_certificate /etc/letsencrypt/live/staging.taskai.cc/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/staging.taskai.cc/privkey.pem;
+    ssl_session_timeout 1d;
+    ssl_session_cache shared:SSL:50m;
+    ssl_session_tickets off;
+
+    ssl_protocols TLSv1.2 TLSv1.3;
+    ssl_ciphers ECDHE-ECDSA-AES128-GCM-SHA256:ECDHE-RSA-AES128-GCM-SHA256:ECDHE-ECDSA-AES256-GCM-SHA384:ECDHE-RSA-AES256-GCM-SHA384;
+    ssl_prefer_server_ciphers off;
+
+    ssl_stapling on;
+    ssl_stapling_verify on;
+    ssl_trusted_certificate /etc/letsencrypt/live/staging.taskai.cc/chain.pem;
+
+    add_header Strict-Transport-Security "max-age=63072000" always;
+    add_header X-Frame-Options "SAMEORIGIN" always;
+    add_header X-Content-Type-Options "nosniff" always;
+    add_header X-XSS-Protection "1; mode=block" always;
+    add_header Referrer-Policy "no-referrer-when-downgrade" always;
+
+    access_log /var/log/nginx/staging.taskai.cc_access.log;
+    error_log /var/log/nginx/staging.taskai.cc_error.log;
+
+    client_max_body_size 10M;
+
+    location ~ ^/api/auth {
+        limit_req zone=staging_taskai_cc_auth burst=3 nodelay;
+        proxy_pass http://127.0.0.1:8082;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+
+    location /api/ {
+        limit_req zone=staging_taskai_cc_api burst=20 nodelay;
+        proxy_pass http://127.0.0.1:8082;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection 'upgrade';
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_cache_bypass $http_upgrade;
+        proxy_connect_timeout 60s;
+        proxy_send_timeout 60s;
+        proxy_read_timeout 60s;
+    }
+
+    location /health {
+        proxy_pass http://127.0.0.1:8082;
+        access_log off;
+    }
+
+    location / {
+        proxy_pass http://127.0.0.1:8086;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection 'upgrade';
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_cache_bypass $http_upgrade;
+
+        location ~* \.(js|css|png|jpg|jpeg|gif|ico|svg|woff|woff2|ttf|eot)$ {
+            proxy_pass http://127.0.0.1:8086;
+            expires 1y;
+            add_header Cache-Control "public, immutable";
+        }
+    }
+
+    gzip on;
+    gzip_vary on;
+    gzip_proxied any;
+    gzip_comp_level 6;
+    gzip_types text/plain text/css text/xml text/javascript application/json application/javascript application/xml+rss application/rss+xml font/truetype font/opentype application/vnd.ms-fontobject image/svg+xml;
+}
+NGINX_CONF
+    echo "OK: staging.taskai.cc full SSL config"
+fi
+
+# mcp.staging.taskai.cc - full SSL config
+if [ -f "/etc/letsencrypt/live/mcp.staging.taskai.cc/fullchain.pem" ]; then
+    echo "-> Writing full SSL Nginx config for mcp.staging.taskai.cc..."
+    sudo tee /etc/nginx/sites-available/mcp.staging.taskai.cc > /dev/null << 'NGINX_CONF'
+# Nginx configuration for mcp.staging.taskai.cc (with SSL)
+
+server {
+    listen 80;
+    listen [::]:80;
+    server_name mcp.staging.taskai.cc;
+
+    location /.well-known/acme-challenge/ {
+        root /var/www/html;
+    }
+
+    location / {
+        return 301 https://$server_name$request_uri;
+    }
+}
+
+server {
+    listen 443 ssl;
+    listen [::]:443 ssl;
+    http2 on;
+    server_name mcp.staging.taskai.cc;
+
+    ssl_certificate /etc/letsencrypt/live/mcp.staging.taskai.cc/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/mcp.staging.taskai.cc/privkey.pem;
+    ssl_session_timeout 1d;
+    ssl_session_cache shared:SSL:50m;
+    ssl_session_tickets off;
+
+    ssl_protocols TLSv1.2 TLSv1.3;
+    ssl_ciphers ECDHE-ECDSA-AES128-GCM-SHA256:ECDHE-RSA-AES128-GCM-SHA256:ECDHE-ECDSA-AES256-GCM-SHA384:ECDHE-RSA-AES256-GCM-SHA384;
+    ssl_prefer_server_ciphers off;
+
+    ssl_stapling on;
+    ssl_stapling_verify on;
+    ssl_trusted_certificate /etc/letsencrypt/live/mcp.staging.taskai.cc/chain.pem;
+
+    add_header Strict-Transport-Security "max-age=63072000" always;
+    add_header X-Frame-Options "SAMEORIGIN" always;
+    add_header X-Content-Type-Options "nosniff" always;
+
+    access_log /var/log/nginx/mcp.staging.taskai.cc_access.log;
+    error_log /var/log/nginx/mcp.staging.taskai.cc_error.log;
+
+    client_max_body_size 1M;
+
+    location /health {
+        proxy_pass http://127.0.0.1:8084;
+        access_log off;
+    }
+
+    location /mcp {
+        proxy_pass http://127.0.0.1:8084;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_connect_timeout 60s;
+        proxy_send_timeout 60s;
+        proxy_read_timeout 60s;
+    }
+
+    location / {
+        return 404;
+    }
+
+    gzip on;
+    gzip_vary on;
+    gzip_proxied any;
+    gzip_comp_level 6;
+    gzip_types application/json;
+}
+NGINX_CONF
+    echo "OK: mcp.staging.taskai.cc full SSL config"
+fi
+
+sudo nginx -t && sudo systemctl reload nginx
+echo "OK: Nginx reloaded with SSL configs"
+REMOTE_SCRIPT
+
+    ok "Full Nginx SSL configs deployed"
+}
+
+# Step 7: Update docker-compose on server and restart apps
+restart_apps() {
+    step 7 "Restarting applications"
+
+    $SSH << 'REMOTE_SCRIPT'
+set -e
+
+# Update git remote in both environments
+for DIR in /home/ubuntu/taskai-staging/source /home/ubuntu/taskai/source; do
+    if [ -d "$DIR/.git" ]; then
+        echo "-> Updating git remote in $DIR..."
+        cd "$DIR"
+        git remote set-url origin https://github.com/anchoo2kewl/taskai.git
+        git pull origin main
+        echo "OK: Git updated in $DIR"
+    fi
+done
+
+# Rebuild and start staging
+if [ -d "/home/ubuntu/taskai-staging" ]; then
+    echo "-> Rebuilding staging..."
+    cd /home/ubuntu/taskai-staging
+    docker compose build --no-cache
+    docker compose up -d
+    sleep 10
+    echo "OK: Staging started"
+fi
+
+# Rebuild and start production
+if [ -d "/home/ubuntu/taskai" ]; then
+    echo "-> Rebuilding production..."
+    cd /home/ubuntu/taskai
+    docker compose build --no-cache
+    docker compose up -d
+    sleep 10
+    echo "OK: Production started"
+fi
+REMOTE_SCRIPT
+
+    ok "Applications restarted"
+}
+
+# Step 8: GitHub secrets
+setup_github_secrets() {
+    step 8 "Setting up GitHub secrets"
+
+    info "Setting STAGING_WEBHOOK_SECRET..."
+    echo -n "taskai-staging-webhook-secret-2025" | gh secret set STAGING_WEBHOOK_SECRET --repo anchoo2kewl/taskai
+
+    info "Setting PRODUCTION_WEBHOOK_SECRET..."
+    echo -n "taskai-production-webhook-secret-2025" | gh secret set PRODUCTION_WEBHOOK_SECRET --repo anchoo2kewl/taskai
+
+    ok "GitHub secrets configured"
+}
+
+# Step 9: Health checks
+verify_health() {
+    step 9 "Verifying health"
+
+    for URL in "https://staging.taskai.cc/api/health" "https://taskai.cc/api/health" "https://mcp.staging.taskai.cc/health" "https://mcp.taskai.cc/health"; do
+        info "Checking $URL..."
+        if curl -sf --max-time 10 "$URL" > /dev/null 2>&1; then
+            ok "$URL is healthy"
+        else
+            warn "$URL is not responding (may need time)"
+        fi
+    done
+}
+
+# Main
+main() {
+    echo -e "${BLUE}╔══════════════════════════════════════════╗${NC}"
+    echo -e "${BLUE}║  TaskAI Server Migration                 ║${NC}"
+    echo -e "${BLUE}║  SprintSpark → TaskAI                    ║${NC}"
+    echo -e "${BLUE}╚══════════════════════════════════════════╝${NC}"
+    echo
+
+    check_prereqs
+    create_dns
+    rename_server_dirs
+    update_webhook_config
+    setup_nginx
+    setup_ssl
+    finalize_nginx
+    restart_apps
+    setup_github_secrets
+    verify_health
+
+    echo
+    echo -e "${GREEN}╔══════════════════════════════════════════╗${NC}"
+    echo -e "${GREEN}║  Migration complete!                     ║${NC}"
+    echo -e "${GREEN}╚══════════════════════════════════════════╝${NC}"
+    echo
+    echo "Staging:    https://staging.taskai.cc"
+    echo "Production: https://taskai.cc"
+    echo "MCP Stage:  https://mcp.staging.taskai.cc/mcp"
+    echo "MCP Prod:   https://mcp.taskai.cc/mcp"
+}
+
+main "$@"

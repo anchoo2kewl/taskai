@@ -25,7 +25,18 @@ interface UserActivity {
   created_at: string
 }
 
-type AdminTab = 'users' | 'email'
+type AdminTab = 'users' | 'email' | 'system'
+
+interface VersionInfo {
+  version: string
+  git_commit: string
+  build_time: string
+  go_version: string
+  platform: string
+  server_time: string
+  db_version: number
+  environment: string
+}
 
 export default function Admin() {
   const { user } = useAuth()
@@ -53,6 +64,10 @@ export default function Admin() {
   const [isDeletingEmail, setIsDeletingEmail] = useState(false)
   const [isTestingEmail, setIsTestingEmail] = useState(false)
 
+  // System/version state
+  const [versionInfo, setVersionInfo] = useState<VersionInfo | null>(null)
+  const [versionLoading, setVersionLoading] = useState(false)
+
   useEffect(() => {
     if (!user?.is_admin) {
       navigate('/app')
@@ -60,6 +75,7 @@ export default function Admin() {
     }
     loadUsers()
     loadEmailProvider()
+    loadVersionInfo()
   }, [user, navigate])
 
   // === User Management ===
@@ -203,6 +219,19 @@ export default function Admin() {
     }
   }
 
+  // === System/Version ===
+  const loadVersionInfo = async () => {
+    try {
+      setVersionLoading(true)
+      const data = await api.getVersion()
+      setVersionInfo(data)
+    } catch (err) {
+      console.error('Failed to load version info:', err)
+    } finally {
+      setVersionLoading(false)
+    }
+  }
+
   // === Formatting ===
   const formatDate = (dateStr: string) => {
     const date = new Date(dateStr)
@@ -308,6 +337,16 @@ export default function Admin() {
                   emailProvider.status === 'suspended' ? 'bg-orange-400' : 'bg-gray-400'
                 }`} />
               )}
+            </button>
+            <button
+              onClick={() => setActiveTab('system')}
+              className={`px-4 py-2 text-sm font-medium rounded-lg transition-colors ${
+                activeTab === 'system'
+                  ? 'bg-primary-500/10 text-primary-400 border border-primary-500/30'
+                  : 'text-dark-text-secondary hover:text-dark-text-primary hover:bg-dark-bg-tertiary/30'
+              }`}
+            >
+              System
             </button>
           </div>
         </div>
@@ -553,6 +592,104 @@ export default function Admin() {
                   {isSavingEmail ? 'Saving...' : emailProvider ? 'Update Provider' : 'Save Provider'}
                 </button>
               </form>
+            </div>
+          )}
+
+          {/* System Tab */}
+          {activeTab === 'system' && (
+            <div className="space-y-6">
+              {/* Version Info Card */}
+              <div className="bg-dark-bg-secondary rounded-lg border border-dark-border-subtle p-6">
+                <div className="flex items-center justify-between mb-6">
+                  <h2 className="text-lg font-semibold text-dark-text-primary">System Information</h2>
+                  <button
+                    onClick={loadVersionInfo}
+                    disabled={versionLoading}
+                    className="px-3 py-1.5 text-xs font-medium bg-dark-bg-tertiary text-dark-text-primary border border-dark-border-subtle rounded hover:bg-dark-bg-tertiary/70 transition-colors disabled:opacity-50"
+                  >
+                    {versionLoading ? 'Refreshing...' : 'Refresh'}
+                  </button>
+                </div>
+
+                {versionInfo ? (
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                    {/* Backend Version */}
+                    <div className="space-y-3">
+                      <h3 className="text-sm font-medium text-dark-text-secondary uppercase tracking-wide">Backend</h3>
+                      <div className="space-y-2 text-sm">
+                        <div className="flex justify-between">
+                          <span className="text-dark-text-tertiary">Version</span>
+                          <span className="text-dark-text-primary font-mono">{versionInfo.version}</span>
+                        </div>
+                        <div className="flex justify-between">
+                          <span className="text-dark-text-tertiary">Git Commit</span>
+                          <span className="text-dark-text-primary font-mono text-xs">
+                            {versionInfo.git_commit.substring(0, 8)}
+                          </span>
+                        </div>
+                        <div className="flex justify-between">
+                          <span className="text-dark-text-tertiary">Build Time</span>
+                          <span className="text-dark-text-primary text-xs">{versionInfo.build_time}</span>
+                        </div>
+                        <div className="flex justify-between">
+                          <span className="text-dark-text-tertiary">Go Version</span>
+                          <span className="text-dark-text-primary font-mono text-xs">{versionInfo.go_version}</span>
+                        </div>
+                        <div className="flex justify-between">
+                          <span className="text-dark-text-tertiary">Platform</span>
+                          <span className="text-dark-text-primary font-mono text-xs">{versionInfo.platform}</span>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Database & Environment */}
+                    <div className="space-y-3">
+                      <h3 className="text-sm font-medium text-dark-text-secondary uppercase tracking-wide">Database & Environment</h3>
+                      <div className="space-y-2 text-sm">
+                        <div className="flex justify-between">
+                          <span className="text-dark-text-tertiary">DB Migration Version</span>
+                          <span className="text-dark-text-primary font-mono font-semibold text-primary-400">
+                            {versionInfo.db_version} migrations
+                          </span>
+                        </div>
+                        <div className="flex justify-between">
+                          <span className="text-dark-text-tertiary">Environment</span>
+                          <span className={`inline-flex px-2 py-0.5 rounded text-xs font-medium ${
+                            versionInfo.environment === 'production'
+                              ? 'bg-red-500/10 text-red-400 border border-red-500/30'
+                              : versionInfo.environment === 'staging'
+                              ? 'bg-yellow-500/10 text-yellow-400 border border-yellow-500/30'
+                              : 'bg-blue-500/10 text-blue-400 border border-blue-500/30'
+                          }`}>
+                            {versionInfo.environment}
+                          </span>
+                        </div>
+                        <div className="flex justify-between">
+                          <span className="text-dark-text-tertiary">Server Time</span>
+                          <span className="text-dark-text-primary text-xs">
+                            {new Date(versionInfo.server_time).toLocaleString()}
+                          </span>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="text-center py-8 text-dark-text-tertiary">
+                    {versionLoading ? 'Loading version information...' : 'Failed to load version information'}
+                  </div>
+                )}
+              </div>
+
+              {/* Deployment Info */}
+              <div className="bg-dark-bg-secondary rounded-lg border border-dark-border-subtle p-6">
+                <h2 className="text-lg font-semibold text-dark-text-primary mb-4">Deployment</h2>
+                <div className="space-y-2 text-sm text-dark-text-tertiary">
+                  <p>• Deployments are automated via GitHub Actions</p>
+                  <p>• Push to main → Staging deployment via webhook</p>
+                  <p>• Promote to production: <code className="px-1.5 py-0.5 bg-dark-bg-primary rounded text-xs font-mono text-dark-text-primary">gh workflow run deploy-production.yml -f ref="main"</code></p>
+                  <p>• DB migrations run automatically on container startup</p>
+                </div>
+              </div>
             </div>
           )}
         </div>

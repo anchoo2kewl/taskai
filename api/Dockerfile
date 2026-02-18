@@ -13,9 +13,17 @@ RUN go mod download
 # Copy source code
 COPY . .
 
-# Build static binary with CGO enabled for SQLite
+# Get version information
+ARG VERSION=dev
+ARG GIT_COMMIT=unknown
+ARG BUILD_TIME=unknown
+
+# Build static binary with CGO enabled for SQLite and version info
 RUN CGO_ENABLED=1 go build \
-    -ldflags='-w -s -extldflags "-static"' \
+    -ldflags="-w -s -extldflags '-static' \
+      -X 'taskai/internal/version.Version=${VERSION}' \
+      -X 'taskai/internal/version.GitCommit=${GIT_COMMIT}' \
+      -X 'taskai/internal/version.BuildTime=${BUILD_TIME}'" \
     -tags sqlite_omit_load_extension \
     -o taskai \
     ./cmd/api

@@ -129,6 +129,9 @@ func main() {
 			fmt.Fprintf(w, `{"status":"ok"}`)
 		})
 
+		// Version endpoint (public)
+		r.Get("/version", server.HandleVersion)
+
 		// OpenAPI specification (public)
 		r.Get("/openapi", server.HandleOpenAPI)
 

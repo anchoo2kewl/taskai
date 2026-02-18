@@ -196,4 +196,22 @@ export class TaskAIClient {
     if (projectId) qs.set("project_id", projectId);
     return this.request(`/api/wiki/autocomplete?${qs}`);
   }
+
+  // Version/health methods
+  async getVersion(): Promise<{
+    version: string;
+    git_commit: string;
+    build_time: string;
+    go_version: string;
+    platform: string;
+    server_time: string;
+    db_version: number;
+    environment: string;
+  }> {
+    return this.request("/api/version");
+  }
+
+  async healthCheck(): Promise<{ status: string; database?: string }> {
+    return this.request("/healthz");
+  }
 }

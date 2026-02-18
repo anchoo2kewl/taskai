@@ -144,6 +144,8 @@ show_help() {
     echo ""
     echo -e "${YELLOW}Utility Commands:${NC}"
     echo "  validate-openapi     Validate OpenAPI spec"
+    echo "  staging version      Show staging version info"
+    echo "  prod version         Show production version info"
     echo ""
     echo -e "${YELLOW}Examples:${NC}"
     echo "  $0 deploy \"feat: add dark mode\"       # Deploy to staging"
@@ -205,6 +207,11 @@ Co-Authored-By: Claude <noreply@anthropic.com>" || {
             echo -e "${CYAN}Staging URL:${NC} https://$STAGING_DOMAIN"
             echo -e "${CYAN}API Health:${NC} https://$STAGING_DOMAIN/api/health"
             echo ""
+
+            # Show version information
+            env_version staging
+            echo ""
+
             print_status "To promote to production: $0 promote"
             return 0
         fi
@@ -353,6 +360,34 @@ env_health() {
         echo -e "${GREEN}✓ Database${NC} - Accessible from API"
     else
         echo -e "${YELLOW}⚠ Database${NC} - Unable to verify"
+    fi
+
+    # Show version information
+    echo ""
+    env_version "$env"
+}
+
+env_version() {
+    local env="$1"
+    resolve_env "$env"
+    print_header "$ENV_LABEL Version Info"
+
+    local version_data=$(curl -f -s "https://$REMOTE_DOMAIN/api/version" 2>/dev/null)
+
+    if [ -n "$version_data" ]; then
+        local version=$(echo "$version_data" | grep -o '"version":"[^"]*"' | cut -d'"' -f4)
+        local git_commit=$(echo "$version_data" | grep -o '"git_commit":"[^"]*"' | cut -d'"' -f4 | cut -c1-8)
+        local build_time=$(echo "$version_data" | grep -o '"build_time":"[^"]*"' | cut -d'"' -f4)
+        local db_version=$(echo "$version_data" | grep -o '"db_version":[0-9]*' | cut -d':' -f2)
+        local environment=$(echo "$version_data" | grep -o '"environment":"[^"]*"' | cut -d'"' -f4)
+
+        echo -e "${CYAN}Version:${NC}      $version"
+        echo -e "${CYAN}Git Commit:${NC}   $git_commit"
+        echo -e "${CYAN}Build Time:${NC}   $build_time"
+        echo -e "${CYAN}DB Migration:${NC} $db_version migrations applied"
+        echo -e "${CYAN}Environment:${NC}  $environment"
+    else
+        echo -e "${YELLOW}⚠ Unable to fetch version information${NC}"
     fi
 }
 
@@ -1326,6 +1361,9 @@ case ${1:-help} in
             health)
                 env_health staging
                 ;;
+            version)
+                env_version staging
+                ;;
             restart)
                 env_restart staging
                 ;;
@@ -1364,6 +1402,9 @@ case ${1:-help} in
                 ;;
             health)
                 env_health production
+                ;;
+            version)
+                env_version production
                 ;;
             restart)
                 env_restart production

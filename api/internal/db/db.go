@@ -281,3 +281,13 @@ func (db *DB) HealthCheck(ctx context.Context) error {
 
 	return db.PingContext(ctx)
 }
+
+// GetMigrationVersion returns the count of applied migrations
+func (db *DB) GetMigrationVersion(ctx context.Context) (int, error) {
+	var count int
+	err := db.QueryRowContext(ctx, "SELECT COUNT(*) FROM schema_migrations").Scan(&count)
+	if err != nil {
+		return 0, fmt.Errorf("failed to get migration version: %w", err)
+	}
+	return count, nil
+}

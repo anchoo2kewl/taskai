@@ -880,6 +880,20 @@ class ApiClient {
       body: JSON.stringify({ query, project_id: projectId, limit }),
     })
   }
+
+  // Version endpoint
+  async getVersion(): Promise<{
+    version: string
+    git_commit: string
+    build_time: string
+    go_version: string
+    platform: string
+    server_time: string
+    db_version: number
+    environment: string
+  }> {
+    return this.request('/api/version')
+  }
 }
 
 // Export a singleton instance

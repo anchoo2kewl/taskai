@@ -297,6 +297,32 @@ function createServer(client: TaskAIClient): McpServer {
     }
   );
 
+  // --- get_version ---
+  server.tool(
+    "get_version",
+    "Get system version information (backend version, DB migration version, build info)",
+    {
+      verbose: z.boolean().optional().describe("Pretty print JSON (default: false)"),
+    },
+    async ({ verbose }) => {
+      const version = await client.getVersion();
+      return { content: [{ type: "text", text: formatResponse(version, verbose) }] };
+    }
+  );
+
+  // --- health_check ---
+  server.tool(
+    "health_check",
+    "Check system health status (database connectivity)",
+    {
+      verbose: z.boolean().optional().describe("Pretty print JSON (default: false)"),
+    },
+    async ({ verbose }) => {
+      const health = await client.healthCheck();
+      return { content: [{ type: "text", text: formatResponse(health, verbose) }] };
+    }
+  );
+
   return server;
 }
 

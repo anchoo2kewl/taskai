@@ -4,7 +4,7 @@ import Card from '../components/ui/Card'
 import Button from '../components/ui/Button'
 import TextInput from '../components/ui/TextInput'
 import FormError from '../components/ui/FormError'
-import { apiClient, type SwimLane } from '../lib/api'
+import { apiClient, type SwimLane, type Project } from '../lib/api'
 
 interface ProjectMember {
   id: number
@@ -37,6 +37,9 @@ export default function ProjectSettings() {
   const navigate = useNavigate()
   const { projectId: projectIdParam } = useParams<{ projectId: string }>()
   const projectId = parseInt(projectIdParam || '0')
+
+  // Project state
+  const [project, setProject] = useState<Project | null>(null)
 
   // Members state
   const [members, setMembers] = useState<ProjectMember[]>([])
@@ -76,12 +79,22 @@ export default function ProjectSettings() {
   const [swimLaneSuccess, setSwimLaneSuccess] = useState('')
 
   useEffect(() => {
+    loadProject()
     loadMembers()
     loadTeamMembers()
     loadGitHubSettings()
     loadSwimLanes()
     loadStorageUsage()
   }, [projectId])
+
+  const loadProject = async () => {
+    try {
+      const proj = await apiClient.getProject(projectId)
+      setProject(proj)
+    } catch (error: unknown) {
+      console.error('Failed to load project:', error)
+    }
+  }
 
   const loadMembers = async () => {
     try {
@@ -325,18 +338,18 @@ export default function ProjectSettings() {
         {/* Top bar with project info and actions */}
         <div className="px-6 py-4 flex items-start justify-between gap-4">
           <div className="flex-1 min-w-0">
-            <h1 className="text-xl font-semibold text-dark-text-primary">
-              Project Settings
+            <h1 className="text-xl font-semibold text-dark-text-primary truncate">
+              {project?.name}
             </h1>
-            <p className="mt-1 text-sm text-dark-text-tertiary">
-              Manage project access and GitHub integration
-            </p>
+            {project?.description && (
+              <p className="mt-1 text-sm text-dark-text-tertiary line-clamp-1">{project.description}</p>
+            )}
           </div>
           <Button onClick={() => navigate(`/app/projects/${projectId}`)} variant="secondary" className="flex-shrink-0">
             <svg className="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 19l-7-7m0 0l7-7m-7 7h18" />
             </svg>
-            Back to Project
+            Settings
           </Button>
         </div>
 

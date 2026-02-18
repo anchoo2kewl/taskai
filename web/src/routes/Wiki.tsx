@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { useParams, useNavigate, useSearchParams } from 'react-router-dom'
-import { api, WikiPage } from '../lib/api'
+import { api, WikiPage, Project } from '../lib/api'
 import WikiEditor from '../components/WikiEditor'
 
 export default function Wiki() {
@@ -9,6 +9,7 @@ export default function Wiki() {
   const [searchParams, setSearchParams] = useSearchParams()
   const selectedPageId = searchParams.get('page')
 
+  const [project, setProject] = useState<Project | null>(null)
   const [pages, setPages] = useState<WikiPage[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -19,9 +20,19 @@ export default function Wiki() {
 
   useEffect(() => {
     if (projectId) {
+      loadProject()
       loadPages()
     }
   }, [projectId])
+
+  const loadProject = async () => {
+    try {
+      const proj = await api.getProject(Number(projectId))
+      setProject(proj)
+    } catch (err) {
+      console.error('Failed to load project:', err)
+    }
+  }
 
   const loadPages = async () => {
     try {
@@ -78,15 +89,15 @@ export default function Wiki() {
     <div className="flex flex-col h-full">
       {/* Project Header */}
       <div className="bg-dark-bg-secondary border-b border-dark-border-subtle">
-        {/* Top bar - placeholder for consistent height */}
+        {/* Top bar with project info */}
         <div className="px-6 py-4 flex items-start justify-between gap-4">
           <div className="flex-1 min-w-0">
-            <h1 className="text-xl font-semibold text-dark-text-primary">
-              Wiki
+            <h1 className="text-xl font-semibold text-dark-text-primary truncate">
+              {project?.name}
             </h1>
-            <p className="mt-1 text-sm text-dark-text-tertiary">
-              Project documentation and notes
-            </p>
+            {project?.description && (
+              <p className="mt-1 text-sm text-dark-text-tertiary line-clamp-1">{project.description}</p>
+            )}
           </div>
         </div>
 

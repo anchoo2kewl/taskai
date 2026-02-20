@@ -68,10 +68,9 @@ jobs:
 
           ssh -i ~/.ssh/deploy_key ubuntu@92.4.83.28 << ENDSSH
             set -e
-            cd /home/ubuntu/taskai-uat/source
+            cd /home/ubuntu/taskai-uat
             git fetch origin
             git reset --hard $COMMIT_SHA
-            cd ..
 
             export VERSION='$VERSION'
             export GIT_COMMIT='$GIT_COMMIT'

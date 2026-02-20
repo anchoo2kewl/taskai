@@ -737,15 +737,15 @@ export default function Admin() {
                     setBackupStatus('')
 
                     try {
-                      const formData = new FormData()
-                      formData.append('file', file)
+                      const fileContent = await file.text()
 
                       const response = await fetch(`${import.meta.env.VITE_API_URL}/admin/backup/import`, {
                         method: 'POST',
                         headers: {
-                          'Authorization': `Bearer ${localStorage.getItem('access_token')}`
+                          'Authorization': `Bearer ${localStorage.getItem('access_token')}`,
+                          'Content-Type': 'application/json'
                         },
-                        body: await file.text()
+                        body: fileContent
                       })
 
                       if (!response.ok) {

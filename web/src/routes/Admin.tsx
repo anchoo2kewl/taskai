@@ -26,7 +26,7 @@ interface UserActivity {
   created_at: string
 }
 
-type AdminTab = 'users' | 'email' | 'system'
+type AdminTab = 'users' | 'email' | 'backup' | 'system'
 
 interface VersionInfo {
   version: string
@@ -68,6 +68,12 @@ export default function Admin() {
   const [isSavingEmail, setIsSavingEmail] = useState(false)
   const [isDeletingEmail, setIsDeletingEmail] = useState(false)
   const [isTestingEmail, setIsTestingEmail] = useState(false)
+
+  // Backup/restore state
+  const [isExporting, setIsExporting] = useState(false)
+  const [isImporting, setIsImporting] = useState(false)
+  const [backupStatus, setBackupStatus] = useState('')
+  const [backupError, setBackupError] = useState('')
 
   // System/version state
   const [versionInfo, setVersionInfo] = useState<VersionInfo | null>(null)
@@ -358,6 +364,16 @@ export default function Admin() {
               )}
             </button>
             <button
+              onClick={() => handleTabChange('backup')}
+              className={`px-4 py-2 text-sm font-medium rounded-lg transition-colors ${
+                activeTab === 'backup'
+                  ? 'bg-primary-500/10 text-primary-400 border border-primary-500/30'
+                  : 'text-dark-text-secondary hover:text-dark-text-primary hover:bg-dark-bg-tertiary/30'
+              }`}
+            >
+              Backup & Restore
+            </button>
+            <button
               onClick={() => handleTabChange('system')}
               className={`px-4 py-2 text-sm font-medium rounded-lg transition-colors ${
                 activeTab === 'system'
@@ -611,6 +627,179 @@ export default function Admin() {
                   {isSavingEmail ? 'Saving...' : emailProvider ? 'Update Provider' : 'Save Provider'}
                 </button>
               </form>
+            </div>
+          )}
+
+          {/* Backup & Restore Tab */}
+          {activeTab === 'backup' && (
+            <div className="space-y-6">
+              {/* Export Section */}
+              <div className="bg-dark-bg-secondary rounded-lg border border-dark-border-subtle p-6">
+                <div className="flex items-start justify-between mb-4">
+                  <div>
+                    <h2 className="text-lg font-semibold text-dark-text-primary mb-2">Export Data</h2>
+                    <p className="text-sm text-dark-text-secondary">
+                      Download a complete backup of all database data including migration version.
+                    </p>
+                  </div>
+                  <button
+                    onClick={async () => {
+                      setIsExporting(true)
+                      setBackupError('')
+                      setBackupStatus('')
+                      try {
+                        const response = await fetch(`${import.meta.env.VITE_API_URL}/admin/backup/export`, {
+                          method: 'GET',
+                          headers: {
+                            'Authorization': `Bearer ${localStorage.getItem('access_token')}`
+                          }
+                        })
+                        if (!response.ok) {
+                          const error = await response.json()
+                          throw new Error(error.error || 'Export failed')
+                        }
+
+                        const blob = await response.blob()
+                        const url = window.URL.createObjectURL(blob)
+                        const a = document.createElement('a')
+                        a.href = url
+                        a.download = `taskai-backup-${new Date().toISOString().split('T')[0]}.json`
+                        document.body.appendChild(a)
+                        a.click()
+                        window.URL.revokeObjectURL(url)
+                        document.body.removeChild(a)
+
+                        setBackupStatus('✅ Export completed successfully')
+                      } catch (err: unknown) {
+                        setBackupError(err instanceof Error ? err.message : 'Export failed')
+                      } finally {
+                        setIsExporting(false)
+                      }
+                    }}
+                    disabled={isExporting}
+                    className="px-4 py-2 text-sm font-medium bg-primary-500 text-white rounded-lg hover:bg-primary-600 transition-colors disabled:opacity-50 flex items-center gap-2"
+                  >
+                    {isExporting ? (
+                      <>
+                        <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white"></div>
+                        Exporting...
+                      </>
+                    ) : (
+                      <>
+                        <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+                        </svg>
+                        Export Data
+                      </>
+                    )}
+                  </button>
+                </div>
+
+                <div className="mt-4 p-4 bg-dark-bg-tertiary rounded border border-dark-border-subtle">
+                  <h3 className="text-sm font-medium text-dark-text-primary mb-2">Export includes:</h3>
+                  <ul className="text-sm text-dark-text-secondary space-y-1">
+                    <li>• All users, teams, and members</li>
+                    <li>• All projects, tasks, and comments</li>
+                    <li>• Tags, sprints, and swim lanes</li>
+                    <li>• User activity and invitations</li>
+                    <li>• API keys and provider settings</li>
+                    <li>• Migration version for compatibility check</li>
+                  </ul>
+                </div>
+              </div>
+
+              {/* Import Section */}
+              <div className="bg-dark-bg-secondary rounded-lg border border-dark-border-subtle p-6">
+                <div className="mb-4">
+                  <h2 className="text-lg font-semibold text-dark-text-primary mb-2">Import Data</h2>
+                  <p className="text-sm text-dark-text-secondary mb-4">
+                    Restore data from a backup file. The migration version must match your current database.
+                  </p>
+                  <div className="p-4 bg-orange-500/10 border border-orange-500/30 rounded-lg">
+                    <p className="text-sm text-orange-400 font-medium">⚠️ Warning</p>
+                    <p className="text-sm text-orange-300 mt-1">
+                      Importing will replace existing data with the backup. Make sure to export current data first.
+                    </p>
+                  </div>
+                </div>
+
+                <input
+                  type="file"
+                  accept=".json"
+                  id="backup-file-input"
+                  className="hidden"
+                  onChange={async (e) => {
+                    const file = e.target.files?.[0]
+                    if (!file) return
+
+                    setIsImporting(true)
+                    setBackupError('')
+                    setBackupStatus('')
+
+                    try {
+                      const formData = new FormData()
+                      formData.append('file', file)
+
+                      const response = await fetch(`${import.meta.env.VITE_API_URL}/admin/backup/import`, {
+                        method: 'POST',
+                        headers: {
+                          'Authorization': `Bearer ${localStorage.getItem('access_token')}`
+                        },
+                        body: await file.text()
+                      })
+
+                      if (!response.ok) {
+                        const error = await response.json()
+                        throw new Error(error.error || 'Import failed')
+                      }
+
+                      const result = await response.json()
+                      setBackupStatus(`✅ Import completed: ${result.rows} rows imported`)
+
+                      // Reload page after successful import
+                      setTimeout(() => window.location.reload(), 2000)
+                    } catch (err: unknown) {
+                      setBackupError(err instanceof Error ? err.message : 'Import failed')
+                    } finally {
+                      setIsImporting(false)
+                      e.target.value = '' // Reset input
+                    }
+                  }}
+                />
+
+                <button
+                  onClick={() => document.getElementById('backup-file-input')?.click()}
+                  disabled={isImporting}
+                  className="px-4 py-2 text-sm font-medium bg-orange-500 text-white rounded-lg hover:bg-orange-600 transition-colors disabled:opacity-50 flex items-center gap-2"
+                >
+                  {isImporting ? (
+                    <>
+                      <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white"></div>
+                      Importing...
+                    </>
+                  ) : (
+                    <>
+                      <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" />
+                      </svg>
+                      Choose Backup File
+                    </>
+                  )}
+                </button>
+              </div>
+
+              {/* Status Messages */}
+              {backupStatus && (
+                <div className="p-4 bg-emerald-500/10 border border-emerald-500/30 rounded-lg">
+                  <p className="text-sm text-emerald-400">{backupStatus}</p>
+                </div>
+              )}
+
+              {backupError && (
+                <div className="p-4 bg-red-500/10 border border-red-500/30 rounded-lg">
+                  <p className="text-sm text-red-400">{backupError}</p>
+                </div>
+              )}
             </div>
           )}
 

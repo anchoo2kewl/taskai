@@ -670,8 +670,8 @@ export default function Admin() {
                         document.body.removeChild(a)
 
                         setBackupStatus('✅ Export completed successfully')
-                      } catch (err: any) {
-                        setBackupError(err.message || 'Export failed')
+                      } catch (err: unknown) {
+                        setBackupError(err instanceof Error ? err.message : 'Export failed')
                       } finally {
                         setIsExporting(false)
                       }
@@ -758,8 +758,8 @@ export default function Admin() {
 
                       // Reload page after successful import
                       setTimeout(() => window.location.reload(), 2000)
-                    } catch (err: any) {
-                      setBackupError(err.message || 'Import failed')
+                    } catch (err: unknown) {
+                      setBackupError(err instanceof Error ? err.message : 'Import failed')
                     } finally {
                       setIsImporting(false)
                       e.target.value = '' // Reset input

@@ -1,15 +1,14 @@
 name: Deploy to Production
 
 on:
-  pull_request:
-    types: [ closed ]
-    branches: [ production ]  # PR merged to production branch triggers deployment
+  push:
+    branches: [ production ]
   workflow_dispatch:
     inputs:
       ref:
-        description: 'Git ref to deploy'
+        description: 'Git ref to deploy (branch, tag, or commit SHA)'
         required: true
-        default: 'production'
+        default: 'main'
 
 env:
   GO_VERSION: "1.24"
@@ -18,7 +17,6 @@ env:
 jobs:
   security-scan:
     runs-on: ubuntu-latest
-    if: github.event.pull_request.merged == true || github.event_name == 'workflow_dispatch'
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -36,12 +34,13 @@ jobs:
   deploy-production:
     needs: security-scan
     runs-on: ubuntu-latest
-    if: github.event.pull_request.merged == true || github.event_name == 'workflow_dispatch'
+    environment: production
 
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
         with:
+          ref: ${{ github.event.inputs.ref }}
           fetch-depth: 0
 
       - name: Set version information

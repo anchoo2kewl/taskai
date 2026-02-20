@@ -47,42 +47,44 @@ jobs:
           echo "GIT_COMMIT=$GIT_COMMIT" >> $GITHUB_OUTPUT
           echo "BUILD_TIME=$BUILD_TIME" >> $GITHUB_OUTPUT
 
-      - name: Checkout infrastructure repository
-        uses: actions/checkout@v4
-        with:
-          repository: anchoo2kewl/biswas-infrastructure
-          path: biswas-infrastructure
-          ssh-key: ${{ secrets.INFRA_SSH_PRIVATE_KEY }}
+          echo "🏷️  Version: $VERSION"
+          echo "📝 Commit: $GIT_COMMIT"
+          echo "🕐 Build Time: $BUILD_TIME"
 
-      - name: Setup SSH for deployment
+      - name: Deploy to UAT server
         env:
           SSH_PRIVATE_KEY: ${{ secrets.UAT_SSH_PRIVATE_KEY }}
-        run: |
-          mkdir -p ~/.ssh
-          echo "$SSH_PRIVATE_KEY" > ~/.ssh/id_ed25519
-          chmod 600 ~/.ssh/id_ed25519
-          ssh-keyscan 92.4.83.28 >> ~/.ssh/known_hosts
-
-      - name: Install Ansible
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y ansible
-
-      - name: Deploy to UAT using Ansible
-        env:
           COMMIT_SHA: ${{ github.sha }}
           VERSION: ${{ steps.version.outputs.VERSION }}
           GIT_COMMIT: ${{ steps.version.outputs.GIT_COMMIT }}
           BUILD_TIME: ${{ steps.version.outputs.BUILD_TIME }}
         run: |
-          cd biswas-infrastructure/ansible
-          ansible-playbook \
-            -i inventory/uat.yml \
-            playbooks/deploy-taskai-uat.yml \
-            -e "commit_sha=$COMMIT_SHA" \
-            -e "version=$VERSION" \
-            -e "git_commit=$GIT_COMMIT" \
-            -e "build_time=$BUILD_TIME"
+          mkdir -p ~/.ssh
+          echo "$SSH_PRIVATE_KEY" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          ssh-keyscan 92.4.83.28 >> ~/.ssh/known_hosts
+
+          echo "🚀 Deploying TaskAI to UAT..."
+
+          ssh -i ~/.ssh/deploy_key ubuntu@92.4.83.28 << ENDSSH
+            set -e
+            cd /home/ubuntu/taskai-uat/source
+            git fetch origin
+            git reset --hard $COMMIT_SHA
+            cd ..
+
+            export VERSION='$VERSION'
+            export GIT_COMMIT='$GIT_COMMIT'
+            export BUILD_TIME='$BUILD_TIME'
+            export TASKAI_API_PORT=38888
+            export TASKAI_WEB_PORT=33333
+
+            docker compose down || true
+            docker compose build --build-arg VERSION="\$VERSION" --build-arg GIT_COMMIT="\$GIT_COMMIT" --build-arg BUILD_TIME="\$BUILD_TIME"
+            docker compose up -d
+            sleep 15
+            docker compose ps
+          ENDSSH
 
       - name: Verify deployment
         run: |

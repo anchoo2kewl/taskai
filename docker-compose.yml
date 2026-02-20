@@ -8,7 +8,7 @@ services:
         - GIT_COMMIT=${GIT_COMMIT:-unknown}
         - BUILD_TIME=${BUILD_TIME:-unknown}
     ports:
-      - "8083:8080"
+      - "${TASKAI_API_PORT:-8083}:8080"
     environment:
       # Database config - defaults to SQLite for backward compatibility
       - DB_DRIVER=${DB_DRIVER:-sqlite}
@@ -90,8 +90,12 @@ services:
     build:
       context: .
       dockerfile: ./web/Dockerfile
+      args:
+        - VERSION=${VERSION:-dev}
+        - GIT_COMMIT=${GIT_COMMIT:-unknown}
+        - BUILD_TIME=${BUILD_TIME:-unknown}
     ports:
-      - "8084:80"
+      - "${TASKAI_WEB_PORT:-8084}:80"
     networks:
       - taskai
     depends_on:

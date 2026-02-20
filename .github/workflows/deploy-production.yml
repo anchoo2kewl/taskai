@@ -1,87 +1,106 @@
 name: Deploy to Production
 
 on:
+  pull_request:
+    types: [ closed ]
+    branches: [ production ]  # PR merged to production branch triggers deployment
   workflow_dispatch:
     inputs:
       ref:
         description: 'Git ref to deploy'
-        required: false
-        default: 'main'
+        required: true
+        default: 'production'
+
+env:
+  GO_VERSION: "1.24"
+  NODE_VERSION: "20"
 
 jobs:
-  deploy:
+  security-scan:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
-    environment: production
+    if: github.event.pull_request.merged == true || github.event_name == 'workflow_dispatch'
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Run Trivy vulnerability scanner
+        uses: aquasecurity/trivy-action@master
+        with:
+          scan-type: 'fs'
+          scan-ref: '.'
+          format: 'table'
+          severity: 'CRITICAL,HIGH'
+          exit-code: '1'
+          ignore-unfixed: true
+
+  deploy-production:
+    needs: security-scan
+    runs-on: ubuntu-latest
+    if: github.event.pull_request.merged == true || github.event_name == 'workflow_dispatch'
 
     steps:
-      - name: Display deployment info
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set version information
+        id: version
         run: |
-          echo "Deploying to PRODUCTION"
-          echo "Ref: ${{ github.event.inputs.ref }}"
-          echo "Triggered by: ${{ github.actor }}"
+          VERSION=$(cat VERSION 2>/dev/null || echo "dev")
+          GIT_COMMIT=${GITHUB_SHA::7}
+          BUILD_TIME=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
 
-      - name: Trigger production webhook
+          echo "VERSION=$VERSION" >> $GITHUB_OUTPUT
+          echo "GIT_COMMIT=$GIT_COMMIT" >> $GITHUB_OUTPUT
+          echo "BUILD_TIME=$BUILD_TIME" >> $GITHUB_OUTPUT
+
+          echo "🏷️  Version: $VERSION"
+          echo "📝 Commit: $GIT_COMMIT"
+          echo "🕐 Build Time: $BUILD_TIME"
+
+      - name: Deploy to Production server
+        env:
+          SSH_PRIVATE_KEY: ${{ secrets.SSH_PRIVATE_KEY }}
+          COMMIT_SHA: ${{ github.sha }}
+          VERSION: ${{ steps.version.outputs.VERSION }}
+          GIT_COMMIT: ${{ steps.version.outputs.GIT_COMMIT }}
+          BUILD_TIME: ${{ steps.version.outputs.BUILD_TIME }}
         run: |
-          echo "=== Deploying TaskAI to PRODUCTION ==="
-          PAYLOAD='{"repository":{"full_name":"anchoo2kewl/taskai"},"ref":"refs/heads/main"}'
-          SIGNATURE=$(echo -n "$PAYLOAD" | openssl dgst -sha256 -hmac '${{ secrets.PRODUCTION_WEBHOOK_SECRET }}' | awk '{print $2}')
-          RESPONSE=$(curl -s -o /dev/null -w "%{http_code}" \
-            -X POST "https://taskai.cc/webhook/taskai" \
-            -H "X-Hub-Signature-256: sha256=$SIGNATURE" \
-            -H "X-GitHub-Event: push" \
-            -H "Content-Type: application/json" \
-            -d "$PAYLOAD")
-          echo "Webhook response: $RESPONSE"
-          if [ "$RESPONSE" -lt 200 ] || [ "$RESPONSE" -ge 300 ]; then
-            echo "WARNING: Webhook returned $RESPONSE, deployment may not have triggered"
-          fi
+          mkdir -p ~/.ssh
+          echo "$SSH_PRIVATE_KEY" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          ssh-keyscan 31.97.102.48 >> ~/.ssh/known_hosts
 
-      - name: Wait for deployment
+          echo "🚀 Deploying TaskAI to Production..."
+
+          ssh -i ~/.ssh/deploy_key ubuntu@31.97.102.48 << ENDSSH
+            set -e
+            cd /home/ubuntu/taskai/source
+            git fetch origin
+            git reset --hard $COMMIT_SHA
+            cd ..
+
+            export VERSION='$VERSION'
+            export GIT_COMMIT='$GIT_COMMIT'
+            export BUILD_TIME='$BUILD_TIME'
+
+            docker compose down || true
+            docker compose build --build-arg VERSION="\$VERSION" --build-arg GIT_COMMIT="\$GIT_COMMIT" --build-arg BUILD_TIME="\$BUILD_TIME"
+            docker compose up -d
+            sleep 15
+            docker compose ps
+          ENDSSH
+
+      - name: Verify deployment
         run: |
-          echo "Waiting 60 seconds for deployment to complete..."
-          sleep 60
+          sleep 10
+          curl -f https://taskai.cc/api/health || exit 1
+          echo "✅ Production deployed successfully"
 
-      - name: Verify production health
+      - name: Deployment summary
         run: |
-          echo "-> Checking API health..."
-          for i in $(seq 1 30); do
-            if curl -sf https://taskai.cc/api/health > /dev/null 2>&1; then
-              echo "OK: API is healthy"
-              break
-            fi
-            if [ $i -eq 30 ]; then
-              echo "FAIL: API health check failed"
-              exit 1
-            fi
-            sleep 5
-          done
-
-          echo "-> Checking web health..."
-          for i in $(seq 1 30); do
-            if curl -sf -o /dev/null https://taskai.cc/ 2>&1; then
-              echo "OK: Web is healthy"
-              break
-            fi
-            if [ $i -eq 30 ]; then
-              echo "FAIL: Web health check failed"
-              exit 1
-            fi
-            sleep 5
-          done
-
-          echo "-> Checking MCP health..."
-          for i in $(seq 1 10); do
-            if curl -sf https://mcp.taskai.cc/health > /dev/null 2>&1; then
-              echo "OK: MCP is healthy"
-              break
-            fi
-            if [ $i -eq 10 ]; then
-              echo "WARNING: MCP health check failed (non-blocking)"
-            fi
-            sleep 3
-          done
-
-          echo ""
-          echo "=== Production deployment completed! ==="
-          echo "URL: https://taskai.cc"
+          echo "## 🚀 Production Deployed" >> $GITHUB_STEP_SUMMARY
+          echo "- **Server:** 31.97.102.48" >> $GITHUB_STEP_SUMMARY
+          echo "- **Version:** ${{ steps.version.outputs.VERSION }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **URL:** https://taskai.cc" >> $GITHUB_STEP_SUMMARY

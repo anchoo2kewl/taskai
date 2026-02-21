@@ -4,6 +4,9 @@ import { useAuth } from '../state/AuthContext'
 import { api, type EmailProviderResponse } from '../lib/api'
 import { version as frontendVersion } from '../lib/version'
 
+// API URL with fallback for production (empty string = relative URL)
+const API_URL = import.meta.env.VITE_API_URL || ''
+
 // Types from backend
 interface UserWithStats {
   id: number
@@ -648,7 +651,7 @@ export default function Admin() {
                       setBackupError('')
                       setBackupStatus('')
                       try {
-                        const response = await fetch(`${import.meta.env.VITE_API_URL}/admin/backup/export`, {
+                        const response = await fetch(`${API_URL}/api/admin/backup/export`, {
                           method: 'GET',
                           headers: {
                             'Authorization': `Bearer ${localStorage.getItem('access_token')}`
@@ -739,7 +742,7 @@ export default function Admin() {
                     try {
                       const fileContent = await file.text()
 
-                      const response = await fetch(`${import.meta.env.VITE_API_URL}/admin/backup/import`, {
+                      const response = await fetch(`${API_URL}/api/admin/backup/import`, {
                         method: 'POST',
                         headers: {
                           'Authorization': `Bearer ${localStorage.getItem('access_token')}`,

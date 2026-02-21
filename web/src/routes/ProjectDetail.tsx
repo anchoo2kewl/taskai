@@ -289,12 +289,12 @@ export default function ProjectDetail() {
         {/* New Task Modal */}
         {showNewTaskModal && (
           <div className="fixed inset-0 bg-black/70 flex items-center justify-center p-4 z-50">
-            <div className="bg-dark-bg-elevated rounded-xl shadow-linear-xl max-w-md w-full p-5 border border-dark-border-subtle">
-              <h2 className="text-base font-semibold text-dark-text-primary mb-4">Create New Task</h2>
+            <div className="bg-dark-bg-elevated rounded-xl shadow-linear-xl max-w-2xl w-full p-6 border border-dark-border-subtle max-h-[90vh] overflow-y-auto">
+              <h2 className="text-lg font-semibold text-dark-text-primary mb-5">Create New Task</h2>
 
-              <div className="space-y-3">
+              <div className="space-y-4">
                 <div>
-                  <label htmlFor="task-title" className="block text-xs font-medium text-dark-text-secondary mb-1">
+                  <label htmlFor="task-title" className="block text-sm font-medium text-dark-text-secondary mb-2">
                     Title *
                   </label>
                   <input
@@ -314,15 +314,15 @@ export default function ProjectDetail() {
                 </div>
 
                 <div>
-                  <label htmlFor="task-description" className="block text-xs font-medium text-dark-text-secondary mb-1">
+                  <label htmlFor="task-description" className="block text-sm font-medium text-dark-text-secondary mb-2">
                     Description
                   </label>
                   <textarea
                     id="task-description"
                     value={newTaskDescription}
                     onChange={(e) => setNewTaskDescription(e.target.value)}
-                    rows={3}
-                    className="w-full px-3 py-2 text-sm bg-dark-bg-secondary border border-dark-border-subtle text-dark-text-primary rounded-md focus:outline-none focus:ring-1 focus:ring-primary-500 focus:border-primary-500 resize-none"
+                    rows={12}
+                    className="w-full px-3 py-2 text-sm bg-dark-bg-secondary border border-dark-border-subtle text-dark-text-primary rounded-md focus:outline-none focus:ring-1 focus:ring-primary-500 focus:border-primary-500 resize-y"
                     placeholder="Enter task description (optional)"
                   />
                 </div>
@@ -341,7 +341,7 @@ export default function ProjectDetail() {
                 </div>
               </div>
 
-              <div className="flex gap-2 mt-5">
+              <div className="flex gap-3 mt-6">
                 <button
                   onClick={() => {
                     setShowNewTaskModal(false)
@@ -349,7 +349,7 @@ export default function ProjectDetail() {
                     setNewTaskDescription('')
                     setNewTaskDueDate('')
                   }}
-                  className="flex-1 px-3 py-1.5 text-sm border border-dark-border-subtle text-dark-text-secondary rounded-md hover:bg-dark-bg-secondary transition-colors duration-150"
+                  className="flex-1 px-4 py-2 text-sm border border-dark-border-subtle text-dark-text-secondary rounded-md hover:bg-dark-bg-secondary transition-colors duration-150"
                   disabled={creating}
                 >
                   Cancel
@@ -357,7 +357,7 @@ export default function ProjectDetail() {
                 <button
                   onClick={handleCreateTask}
                   disabled={!newTaskTitle.trim() || creating}
-                  className="flex-1 px-3 py-1.5 text-sm bg-primary-500 text-white rounded-md hover:bg-primary-600 disabled:opacity-50 disabled:cursor-not-allowed transition-colors duration-150"
+                  className="flex-1 px-4 py-2 text-sm bg-primary-500 text-white rounded-md hover:bg-primary-600 disabled:opacity-50 disabled:cursor-not-allowed transition-colors duration-150"
                 >
                   {creating ? 'Creating...' : 'Create Task'}
                 </button>

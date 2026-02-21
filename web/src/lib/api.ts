@@ -357,6 +357,21 @@ class ApiClient {
         return {} as T
       }
 
+      // Check if response is JSON before attempting to parse
+      const contentType = response.headers.get('content-type')
+      const isJson = contentType?.includes('application/json')
+
+      if (!isJson) {
+        // Server returned non-JSON (likely HTML error page)
+        const text = await response.text()
+        console.error('[API] Non-JSON response:', text.substring(0, 500))
+        throw new Error(
+          response.ok
+            ? 'Server returned unexpected response format'
+            : `Server error (${response.status}): ${response.statusText}`
+        )
+      }
+
       const data = await response.json()
 
       if (!response.ok) {

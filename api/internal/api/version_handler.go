@@ -17,7 +17,7 @@ func (s *Server) HandleVersion(w http.ResponseWriter, r *http.Request) {
 		dbVersion = 0
 	}
 
-	info := version.Get(s.config.Env, dbVersion)
+	info := version.Get(s.config.Env, dbVersion, s.config.DBDriver)
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(info)

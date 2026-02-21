@@ -40,6 +40,7 @@ interface VersionInfo {
   server_time: string
   db_version: number
   environment: string
+  db_driver: string
 }
 
 export default function Admin() {
@@ -882,6 +883,16 @@ export default function Admin() {
                           <span className="text-dark-text-tertiary">DB Migration Version</span>
                           <span className="text-dark-text-primary font-mono font-semibold text-primary-400">
                             {versionInfo.db_version} migrations
+                          </span>
+                        </div>
+                        <div className="flex justify-between">
+                          <span className="text-dark-text-tertiary">Database Type</span>
+                          <span className={`inline-flex px-2 py-0.5 rounded text-xs font-medium ${
+                            versionInfo.db_driver === 'postgres'
+                              ? 'bg-green-500/10 text-green-400 border border-green-500/30'
+                              : 'bg-gray-500/10 text-gray-400 border border-gray-500/30'
+                          }`}>
+                            {versionInfo.db_driver === 'postgres' ? 'PostgreSQL' : 'SQLite'}
                           </span>
                         </div>
                         <div className="flex justify-between">

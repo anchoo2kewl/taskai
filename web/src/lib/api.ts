@@ -945,6 +945,7 @@ class ApiClient {
     server_time: string
     db_version: number
     environment: string
+    db_driver: string
   }> {
     return this.request('/api/version')
   }

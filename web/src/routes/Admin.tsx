@@ -654,7 +654,7 @@ export default function Admin() {
                         const response = await fetch(`${API_URL}/api/admin/backup/export`, {
                           method: 'GET',
                           headers: {
-                            'Authorization': `Bearer ${localStorage.getItem('access_token')}`
+                            'Authorization': `Bearer ${localStorage.getItem('auth_token')}`
                           }
                         })
                         if (!response.ok) {
@@ -745,7 +745,7 @@ export default function Admin() {
                       const response = await fetch(`${API_URL}/api/admin/backup/import`, {
                         method: 'POST',
                         headers: {
-                          'Authorization': `Bearer ${localStorage.getItem('access_token')}`,
+                          'Authorization': `Bearer ${localStorage.getItem('auth_token')}`,
                           'Content-Type': 'application/json'
                         },
                         body: fileContent

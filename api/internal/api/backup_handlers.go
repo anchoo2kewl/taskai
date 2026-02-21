@@ -299,10 +299,10 @@ func (s *Server) importTable(ctx context.Context, tableName string, data []map[s
 
 // getCurrentMigrationVersion gets the current migration version from schema_migrations
 func (s *Server) getCurrentMigrationVersion(ctx context.Context) (int, error) {
-	var version int
-	query := "SELECT MAX(version) FROM schema_migrations WHERE dirty = 0"
-	err := s.db.DB.QueryRowContext(ctx, query).Scan(&version)
-	return version, err
+	var count int
+	query := "SELECT COUNT(*) FROM schema_migrations"
+	err := s.db.DB.QueryRowContext(ctx, query).Scan(&count)
+	return count, err
 }
 
 // Helper functions

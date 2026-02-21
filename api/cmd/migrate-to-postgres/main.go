@@ -5,56 +5,61 @@ import (
 	"database/sql"
 	"flag"
 	"fmt"
-	"log"
+
+	"go.uber.org/zap"
 
 	_ "github.com/jackc/pgx/v5/stdlib"
 	_ "modernc.org/sqlite"
 )
 
 func main() {
+	logger, _ := zap.NewProduction()
+	defer logger.Sync()
+
 	sqlitePath := flag.String("sqlite", "./data/taskai.db", "Path to SQLite database")
 	postgresDSN := flag.String("postgres", "", "Postgres DSN (required)")
 	flag.Parse()
 
 	if *postgresDSN == "" {
-		log.Fatal("Postgres DSN is required. Example: postgres://user:pass@localhost/dbname")
+		logger.Fatal("Postgres DSN is required. Example: postgres://user:pass@localhost/dbname")
 	}
 
-	log.Println("🔄 Starting migration from SQLite to Postgres...")
-	log.Printf("SQLite: %s\n", *sqlitePath)
-	log.Printf("Postgres: %s\n", maskPassword(*postgresDSN))
+	logger.Info("Starting migration from SQLite to Postgres",
+		zap.String("sqlite", *sqlitePath),
+		zap.String("postgres", maskPassword(*postgresDSN)),
+	)
 
 	// Open SQLite
 	sqliteDB, err := sql.Open("sqlite", *sqlitePath)
 	if err != nil {
-		log.Fatal("Failed to open SQLite:", err)
+		logger.Fatal("Failed to open SQLite", zap.Error(err))
 	}
 	defer sqliteDB.Close()
 
 	// Open Postgres
 	postgresDB, err := sql.Open("pgx", *postgresDSN)
 	if err != nil {
-		log.Fatal("Failed to open Postgres:", err)
+		logger.Fatal("Failed to open Postgres", zap.Error(err))
 	}
 	defer postgresDB.Close()
 
 	// Test connections
 	if err := sqliteDB.Ping(); err != nil {
-		log.Fatal("Failed to ping SQLite:", err)
+		logger.Fatal("Failed to ping SQLite", zap.Error(err))
 	}
 	if err := postgresDB.Ping(); err != nil {
-		log.Fatal("Failed to ping Postgres:", err)
+		logger.Fatal("Failed to ping Postgres", zap.Error(err))
 	}
 
-	log.Println("✅ Database connections established")
+	logger.Info("Database connections established")
 
 	// Get list of tables from SQLite
 	tables, err := getTables(sqliteDB)
 	if err != nil {
-		log.Fatal("Failed to get tables:", err)
+		logger.Fatal("Failed to get tables", zap.Error(err))
 	}
 
-	log.Printf("📊 Found %d tables to migrate\n", len(tables))
+	logger.Info("Found tables to migrate", zap.Int("count", len(tables)))
 
 	ctx := context.Background()
 
@@ -99,13 +104,13 @@ func main() {
 			continue
 		}
 
-		log.Printf("📦 Migrating table: %s\n", table)
+		logger.Info("Migrating table", zap.String("table", table))
 		count, err := migrateTable(ctx, sqliteDB, postgresDB, table)
 		if err != nil {
-			log.Printf("❌ Failed to migrate %s: %v\n", table, err)
+			logger.Error("Failed to migrate table", zap.String("table", table), zap.Error(err))
 			continue
 		}
-		log.Printf("✅ Migrated %s: %d rows\n", table, count)
+		logger.Info("Migrated table", zap.String("table", table), zap.Int("rows", count))
 	}
 
 	// Migrate any remaining tables not in the order list
@@ -126,25 +131,25 @@ func main() {
 			continue
 		}
 
-		log.Printf("📦 Migrating table: %s\n", table)
+		logger.Info("Migrating table", zap.String("table", table))
 		count, err := migrateTable(ctx, sqliteDB, postgresDB, table)
 		if err != nil {
-			log.Printf("❌ Failed to migrate %s: %v\n", table, err)
+			logger.Error("Failed to migrate table", zap.String("table", table), zap.Error(err))
 			continue
 		}
-		log.Printf("✅ Migrated %s: %d rows\n", table, count)
+		logger.Info("Migrated table", zap.String("table", table), zap.Int("rows", count))
 	}
 
 	// Migrate schema_migrations last
-	log.Println("📦 Migrating schema_migrations...")
+	logger.Info("Migrating schema_migrations")
 	count, err := migrateTable(ctx, sqliteDB, postgresDB, "schema_migrations")
 	if err != nil {
-		log.Printf("❌ Failed to migrate schema_migrations: %v\n", err)
+		logger.Error("Failed to migrate schema_migrations", zap.Error(err))
 	} else {
-		log.Printf("✅ Migrated schema_migrations: %d rows\n", count)
+		logger.Info("Migrated schema_migrations", zap.Int("rows", count))
 	}
 
-	log.Println("🎉 Migration completed successfully!")
+	logger.Info("Migration completed successfully")
 }
 
 func getTables(db *sql.DB) ([]string, error) {

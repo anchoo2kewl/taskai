@@ -96,6 +96,32 @@ export interface WikiSearchResult {
   rank?: number
 }
 
+export interface SearchTaskResult {
+  id: number
+  project_id: number
+  project_name: string
+  task_number: number
+  title: string
+  snippet: string
+  status: string
+  priority: string
+}
+
+export interface GlobalSearchWikiResult {
+  page_id: number
+  page_title: string
+  page_slug: string
+  project_id: number
+  project_name: string
+  snippet: string
+  headings_path?: string
+}
+
+export interface GlobalSearchResponse {
+  tasks: SearchTaskResult[]
+  wiki: GlobalSearchWikiResult[]
+}
+
 export interface MessageResponse {
   message: string
 }
@@ -893,6 +919,19 @@ class ApiClient {
     return this.request('/api/wiki/search', {
       method: 'POST',
       body: JSON.stringify({ query, project_id: projectId, limit }),
+    })
+  }
+
+  async globalSearch(query: string, projectId?: number, types?: string[], limit?: number, signal?: AbortSignal): Promise<GlobalSearchResponse> {
+    return this.request<GlobalSearchResponse>('/api/search', {
+      method: 'POST',
+      body: JSON.stringify({
+        query,
+        project_id: projectId,
+        types,
+        limit,
+      }),
+      signal,
     })
   }
 

@@ -55,10 +55,15 @@ jobs:
       - name: Deploy to UAT server
         env:
           SSH_PRIVATE_KEY: ${{ secrets.UAT_SSH_PRIVATE_KEY }}
+          DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
+          DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
           COMMIT_SHA: ${{ github.sha }}
           VERSION: ${{ steps.version.outputs.VERSION }}
           GIT_COMMIT: ${{ steps.version.outputs.GIT_COMMIT }}
           BUILD_TIME: ${{ steps.version.outputs.BUILD_TIME }}
+          DB_DRIVER: postgres
+          DB_DSN: ${{ secrets.UAT_DB_DSN }}
+          JWT_SECRET: ${{ secrets.UAT_JWT_SECRET }}
         run: |
           mkdir -p ~/.ssh
           echo "$SSH_PRIVATE_KEY" > ~/.ssh/deploy_key
@@ -78,6 +83,13 @@ jobs:
             export BUILD_TIME='$BUILD_TIME'
             export TASKAI_API_PORT=38888
             export TASKAI_WEB_PORT=33333
+            export DB_DRIVER='$DB_DRIVER'
+            export DB_DSN='$DB_DSN'
+            export JWT_SECRET='$JWT_SECRET'
+            export ENV=uat
+
+            # Login to Docker Hub to avoid rate limiting
+            echo '$DOCKERHUB_TOKEN' | docker login -u '$DOCKERHUB_USERNAME' --password-stdin
 
             docker compose down || true
             echo "🧹 Cleaning up Docker build cache and unused images to free disk space..."

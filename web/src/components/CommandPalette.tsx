@@ -10,6 +10,10 @@ import { useAuth } from '../state/AuthContext'
 import { api } from '../lib/api'
 import type { SearchTaskResult, GlobalSearchWikiResult } from '../lib/api'
 
+// Detect Mac vs Windows/Linux for keyboard shortcut display
+const isMac = typeof navigator !== 'undefined' && /Mac|iPod|iPhone|iPad/.test(navigator.userAgent)
+export const searchShortcutLabel = isMac ? '⌘K' : 'Ctrl+K'
+
 interface Command {
   id: string
   name: string
@@ -115,7 +119,7 @@ export default function CommandPalette() {
 
     debounceTimerRef.current = setTimeout(() => {
       performSearch(value)
-    }, 300)
+    }, 150)
   }, [performSearch])
 
   // Define available commands
@@ -395,7 +399,7 @@ export default function CommandPalette() {
                         Type to search • Use <kbd className="px-1.5 py-0.5 bg-dark-bg-tertiary rounded border border-dark-border-subtle text-dark-text-tertiary">↑↓</kbd> to navigate
                       </span>
                       <span>
-                        <kbd className="px-1.5 py-0.5 bg-dark-bg-tertiary rounded border border-dark-border-subtle text-dark-text-tertiary">⌘K</kbd> to toggle
+                        <kbd className="px-1.5 py-0.5 bg-dark-bg-tertiary rounded border border-dark-border-subtle text-dark-text-tertiary">{searchShortcutLabel}</kbd> to toggle
                       </span>
                     </div>
                   </div>

@@ -17,6 +17,7 @@ vi.mock('../components/SyncStatus', () => ({
 }))
 vi.mock('../components/CommandPalette', () => ({
   default: () => <div data-testid="command-palette" />,
+  searchShortcutLabel: '⌘K',
 }))
 
 // Mock react-router-dom

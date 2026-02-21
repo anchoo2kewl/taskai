@@ -10,11 +10,27 @@ import (
 	"io"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/go-chi/chi/v5"
 	"go.uber.org/zap"
 )
+
+// convertToPostgresQuery converts SQLite-style ? placeholders to Postgres $1, $2, etc.
+func convertToPostgresQuery(query string) string {
+	count := 0
+	result := strings.Builder{}
+	for i := 0; i < len(query); i++ {
+		if query[i] == '?' {
+			count++
+			result.WriteString(fmt.Sprintf("$%d", count))
+		} else {
+			result.WriteByte(query[i])
+		}
+	}
+	return result.String()
+}
 
 // Cloudinary credential types
 
@@ -96,12 +112,11 @@ func (s *Server) HandleGetCloudinaryCredential(w http.ResponseWriter, r *http.Re
 	userID := r.Context().Value(UserIDKey).(int64)
 
 	var cred CloudinaryCredential
-	err := s.db.QueryRowContext(ctx,
-		`SELECT id, user_id, cloud_name, api_key, max_file_size_mb,
+	query := convertToPostgresQuery(`SELECT id, user_id, cloud_name, api_key, max_file_size_mb,
 		        status, last_checked_at, last_error, consecutive_failures,
 		        created_at, updated_at
-		 FROM cloudinary_credentials WHERE user_id = ?`, userID,
-	).Scan(&cred.ID, &cred.UserID, &cred.CloudName, &cred.APIKey, &cred.MaxFileSizeMB,
+		 FROM cloudinary_credentials WHERE user_id = $1`)
+	err := s.db.QueryRowContext(ctx, query, userID).Scan(&cred.ID, &cred.UserID, &cred.CloudName, &cred.APIKey, &cred.MaxFileSizeMB,
 		&cred.Status, &cred.LastCheckedAt, &cred.LastError, &cred.ConsecutiveFailures,
 		&cred.CreatedAt, &cred.UpdatedAt)
 
@@ -143,7 +158,7 @@ func (s *Server) HandleSaveCloudinaryCredential(w http.ResponseWriter, r *http.R
 
 	_, err := s.db.ExecContext(ctx,
 		`INSERT INTO cloudinary_credentials (user_id, cloud_name, api_key, api_secret, max_file_size_mb, updated_at)
-		 VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+		 VALUES ($1, $2, $3, $4, $5, CURRENT_TIMESTAMP)
 		 ON CONFLICT(user_id) DO UPDATE SET
 		   cloud_name = excluded.cloud_name,
 		   api_key = excluded.api_key,
@@ -171,8 +186,8 @@ func (s *Server) HandleSaveCloudinaryCredential(w http.ResponseWriter, r *http.R
 
 	_, err = s.db.ExecContext(ctx,
 		`UPDATE cloudinary_credentials
-		 SET status = ?, last_checked_at = ?, last_error = ?, consecutive_failures = ?
-		 WHERE user_id = ?`,
+		 SET status = $1, last_checked_at = $2, last_error = $3, consecutive_failures = $4
+		 WHERE user_id = $5`,
 		status, now, lastError, consecutiveFailures, userID,
 	)
 	if err != nil {
@@ -185,7 +200,7 @@ func (s *Server) HandleSaveCloudinaryCredential(w http.ResponseWriter, r *http.R
 		`SELECT id, user_id, cloud_name, api_key, max_file_size_mb,
 		        status, last_checked_at, last_error, consecutive_failures,
 		        created_at, updated_at
-		 FROM cloudinary_credentials WHERE user_id = ?`, userID,
+		 FROM cloudinary_credentials WHERE user_id = $1`, userID,
 	).Scan(&cred.ID, &cred.UserID, &cred.CloudName, &cred.APIKey, &cred.MaxFileSizeMB,
 		&cred.Status, &cred.LastCheckedAt, &cred.LastError, &cred.ConsecutiveFailures,
 		&cred.CreatedAt, &cred.UpdatedAt)
@@ -206,7 +221,7 @@ func (s *Server) HandleDeleteCloudinaryCredential(w http.ResponseWriter, r *http
 	userID := r.Context().Value(UserIDKey).(int64)
 
 	_, err := s.db.ExecContext(ctx,
-		`DELETE FROM cloudinary_credentials WHERE user_id = ?`, userID,
+		`DELETE FROM cloudinary_credentials WHERE user_id = $1`, userID,
 	)
 	if err != nil {
 		s.logger.Error("Failed to delete cloudinary credentials", zap.Error(err))
@@ -252,7 +267,7 @@ func (s *Server) HandleTestCloudinaryConnection(w http.ResponseWriter, r *http.R
 	var consecutiveFailures int
 	err := s.db.QueryRowContext(ctx,
 		`SELECT cloud_name, api_key, api_secret, consecutive_failures
-		 FROM cloudinary_credentials WHERE user_id = ?`, userID,
+		 FROM cloudinary_credentials WHERE user_id = $1`, userID,
 	).Scan(&cloudName, &apiKey, &apiSecret, &consecutiveFailures)
 
 	if err == sql.ErrNoRows {
@@ -279,8 +294,8 @@ func (s *Server) HandleTestCloudinaryConnection(w http.ResponseWriter, r *http.R
 
 	_, err = s.db.ExecContext(ctx,
 		`UPDATE cloudinary_credentials
-		 SET status = ?, last_checked_at = ?, last_error = ?, consecutive_failures = ?
-		 WHERE user_id = ?`,
+		 SET status = $1, last_checked_at = $2, last_error = $3, consecutive_failures = $4
+		 WHERE user_id = $5`,
 		status, now, lastError, consecutiveFailures, userID,
 	)
 	if err != nil {
@@ -293,7 +308,7 @@ func (s *Server) HandleTestCloudinaryConnection(w http.ResponseWriter, r *http.R
 		`SELECT id, user_id, cloud_name, api_key, max_file_size_mb,
 		        status, last_checked_at, last_error, consecutive_failures,
 		        created_at, updated_at
-		 FROM cloudinary_credentials WHERE user_id = ?`, userID,
+		 FROM cloudinary_credentials WHERE user_id = $1`, userID,
 	).Scan(&cred.ID, &cred.UserID, &cred.CloudName, &cred.APIKey, &cred.MaxFileSizeMB,
 		&cred.Status, &cred.LastCheckedAt, &cred.LastError, &cred.ConsecutiveFailures,
 		&cred.CreatedAt, &cred.UpdatedAt)
@@ -315,7 +330,7 @@ func (s *Server) HandleGetUploadSignature(w http.ResponseWriter, r *http.Request
 
 	var cloudName, apiKey, apiSecret string
 	err := s.db.QueryRowContext(ctx,
-		`SELECT cloud_name, api_key, api_secret FROM cloudinary_credentials WHERE user_id = ?`, userID,
+		`SELECT cloud_name, api_key, api_secret FROM cloudinary_credentials WHERE user_id = $1`, userID,
 	).Scan(&cloudName, &apiKey, &apiSecret)
 
 	if err == sql.ErrNoRows {
@@ -360,7 +375,7 @@ func (s *Server) HandleListTaskAttachments(w http.ResponseWriter, r *http.Reques
 		        u.name as user_name
 		 FROM task_attachments ta
 		 LEFT JOIN users u ON ta.user_id = u.id
-		 WHERE ta.task_id = ?
+		 WHERE ta.task_id = $1
 		 ORDER BY ta.created_at DESC`, taskID,
 	)
 	if err != nil {
@@ -414,7 +429,7 @@ func (s *Server) HandleCreateTaskAttachment(w http.ResponseWriter, r *http.Reque
 	// Look up the project_id from the task
 	var projectID int64
 	err = s.db.QueryRowContext(ctx,
-		`SELECT project_id FROM tasks WHERE id = ?`, taskID,
+		`SELECT project_id FROM tasks WHERE id = $1`, taskID,
 	).Scan(&projectID)
 	if err == sql.ErrNoRows {
 		respondError(w, http.StatusNotFound, "task not found", "not_found")
@@ -428,7 +443,7 @@ func (s *Server) HandleCreateTaskAttachment(w http.ResponseWriter, r *http.Reque
 
 	result, err := s.db.ExecContext(ctx,
 		`INSERT INTO task_attachments (task_id, project_id, user_id, filename, alt_name, file_type, content_type, file_size, cloudinary_url, cloudinary_public_id)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
 		taskID, projectID, userID, req.Filename, req.AltName, req.FileType, req.ContentType, req.FileSize, req.CloudinaryURL, req.CloudinaryPublicID,
 	)
 	if err != nil {
@@ -479,7 +494,7 @@ func (s *Server) HandleDeleteTaskAttachment(w http.ResponseWriter, r *http.Reque
 	// Verify ownership
 	var ownerID int64
 	err = s.db.QueryRowContext(ctx,
-		`SELECT user_id FROM task_attachments WHERE id = ?`, attachmentID,
+		`SELECT user_id FROM task_attachments WHERE id = $1`, attachmentID,
 	).Scan(&ownerID)
 	if err == sql.ErrNoRows {
 		respondError(w, http.StatusNotFound, "attachment not found", "not_found")
@@ -495,7 +510,7 @@ func (s *Server) HandleDeleteTaskAttachment(w http.ResponseWriter, r *http.Reque
 	}
 
 	_, err = s.db.ExecContext(ctx,
-		`DELETE FROM task_attachments WHERE id = ?`, attachmentID,
+		`DELETE FROM task_attachments WHERE id = $1`, attachmentID,
 	)
 	if err != nil {
 		s.logger.Error("Failed to delete attachment", zap.Error(err))
@@ -527,12 +542,12 @@ func (s *Server) HandleListImages(w http.ResponseWriter, r *http.Request) {
 			 FROM task_attachments ta
 			 LEFT JOIN users u ON ta.user_id = u.id
 			 WHERE ta.file_type = 'image' AND (
-			   ta.user_id = ? OR ta.user_id IN (
+			   ta.user_id = $1 OR ta.user_id IN (
 			     SELECT DISTINCT pm2.user_id FROM project_members pm1
 			     JOIN project_members pm2 ON pm1.project_id = pm2.project_id
-			     WHERE pm1.user_id = ? AND pm2.user_id != ?
+			     WHERE pm1.user_id = $2 AND pm2.user_id != $3
 			   )
-			 ) AND (ta.alt_name LIKE ? OR ta.filename LIKE ?)
+			 ) AND (ta.alt_name LIKE $4 OR ta.filename LIKE $5)
 			 ORDER BY ta.created_at DESC
 			 LIMIT 50`, userID, userID, userID, searchPattern, searchPattern,
 		)
@@ -545,10 +560,10 @@ func (s *Server) HandleListImages(w http.ResponseWriter, r *http.Request) {
 			 FROM task_attachments ta
 			 LEFT JOIN users u ON ta.user_id = u.id
 			 WHERE ta.file_type = 'image' AND (
-			   ta.user_id = ? OR ta.user_id IN (
+			   ta.user_id = $1 OR ta.user_id IN (
 			     SELECT DISTINCT pm2.user_id FROM project_members pm1
 			     JOIN project_members pm2 ON pm1.project_id = pm2.project_id
-			     WHERE pm1.user_id = ? AND pm2.user_id != ?
+			     WHERE pm1.user_id = $2 AND pm2.user_id != $3
 			   )
 			 )
 			 ORDER BY ta.created_at DESC
@@ -596,7 +611,7 @@ func (s *Server) HandleUpdateAttachment(w http.ResponseWriter, r *http.Request) 
 	// Verify ownership
 	var ownerID int64
 	err = s.db.QueryRowContext(ctx,
-		`SELECT user_id FROM task_attachments WHERE id = ?`, attachmentID,
+		`SELECT user_id FROM task_attachments WHERE id = $1`, attachmentID,
 	).Scan(&ownerID)
 	if err == sql.ErrNoRows {
 		respondError(w, http.StatusNotFound, "attachment not found", "not_found")
@@ -619,7 +634,7 @@ func (s *Server) HandleUpdateAttachment(w http.ResponseWriter, r *http.Request) 
 
 	if req.AltName != nil {
 		_, err = s.db.ExecContext(ctx,
-			`UPDATE task_attachments SET alt_name = ? WHERE id = ?`, *req.AltName, attachmentID,
+			`UPDATE task_attachments SET alt_name = $1 WHERE id = $2`, *req.AltName, attachmentID,
 		)
 		if err != nil {
 			s.logger.Error("Failed to update attachment", zap.Error(err))
@@ -637,7 +652,7 @@ func (s *Server) HandleUpdateAttachment(w http.ResponseWriter, r *http.Request) 
 		        u.name as user_name
 		 FROM task_attachments ta
 		 LEFT JOIN users u ON ta.user_id = u.id
-		 WHERE ta.id = ?`, attachmentID,
+		 WHERE ta.id = $1`, attachmentID,
 	).Scan(&a.ID, &a.TaskID, &a.ProjectID, &a.UserID,
 		&a.Filename, &a.AltName, &a.FileType, &a.ContentType, &a.FileSize,
 		&a.CloudinaryURL, &a.CloudinaryPublicID, &a.CreatedAt,
@@ -667,7 +682,7 @@ func (s *Server) HandleGetStorageUsage(w http.ResponseWriter, r *http.Request) {
 		        COUNT(*) as file_count, COALESCE(SUM(ta.file_size), 0) as total_size
 		 FROM task_attachments ta
 		 LEFT JOIN users u ON ta.user_id = u.id
-		 WHERE ta.project_id = ?
+		 WHERE ta.project_id = $1
 		 GROUP BY ta.user_id
 		 ORDER BY total_size DESC`, projectID,
 	)
@@ -714,31 +729,31 @@ func (s *Server) HandleListAssets(w http.ResponseWriter, r *http.Request) {
 		ta.file_type, ta.content_type, ta.file_size,
 		ta.cloudinary_url, ta.cloudinary_public_id, ta.created_at,
 		u.name as user_name,
-		CASE WHEN ta.user_id = ? THEN 1 ELSE 0 END as is_owner
+		CASE WHEN ta.user_id = $1 THEN 1 ELSE 0 END as is_owner
 	 FROM task_attachments ta
 	 LEFT JOIN users u ON ta.user_id = u.id
 	 WHERE (
-	   ta.user_id = ? OR ta.user_id IN (
+	   ta.user_id = $2 OR ta.user_id IN (
 	     SELECT DISTINCT pm2.user_id FROM project_members pm1
 	     JOIN project_members pm2 ON pm1.project_id = pm2.project_id
-	     WHERE pm1.user_id = ? AND pm2.user_id != ?
+	     WHERE pm1.user_id = $3 AND pm2.user_id != $4
 	   )
 	 )`
 
 	args := []interface{}{userID, userID, userID, userID}
 
 	if fileType != "" {
-		baseQuery += ` AND ta.file_type = ?`
+		baseQuery += fmt.Sprintf(` AND ta.file_type = $%d`, len(args)+1)
 		args = append(args, fileType)
 	}
 
 	if query != "" {
 		searchPattern := "%" + query + "%"
-		baseQuery += ` AND (ta.alt_name LIKE ? OR ta.filename LIKE ?)`
+		baseQuery += fmt.Sprintf(` AND (ta.alt_name LIKE $%d OR ta.filename LIKE $%d)`, len(args)+1, len(args)+2)
 		args = append(args, searchPattern, searchPattern)
 	}
 
-	baseQuery += ` ORDER BY ta.created_at DESC LIMIT ? OFFSET ?`
+	baseQuery += fmt.Sprintf(` ORDER BY ta.created_at DESC LIMIT $%d OFFSET $%d`, len(args)+1, len(args)+2)
 	args = append(args, limit, offset)
 
 	rows, err := s.db.QueryContext(ctx, baseQuery, args...)
@@ -784,7 +799,7 @@ func (s *Server) HandleDeleteAttachment(w http.ResponseWriter, r *http.Request) 
 	// Verify ownership
 	var ownerID int64
 	err = s.db.QueryRowContext(ctx,
-		`SELECT user_id FROM task_attachments WHERE id = ?`, attachmentID,
+		`SELECT user_id FROM task_attachments WHERE id = $1`, attachmentID,
 	).Scan(&ownerID)
 	if err == sql.ErrNoRows {
 		respondError(w, http.StatusNotFound, "attachment not found", "not_found")
@@ -800,7 +815,7 @@ func (s *Server) HandleDeleteAttachment(w http.ResponseWriter, r *http.Request) 
 	}
 
 	_, err = s.db.ExecContext(ctx,
-		`DELETE FROM task_attachments WHERE id = ?`, attachmentID,
+		`DELETE FROM task_attachments WHERE id = $1`, attachmentID,
 	)
 	if err != nil {
 		s.logger.Error("Failed to delete attachment", zap.Error(err))

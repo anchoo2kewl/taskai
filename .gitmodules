@@ -1,0 +1,3 @@
+[submodule ".me"]
+	path = .me
+	url = git@github.com:anchoo2kewl/me.git

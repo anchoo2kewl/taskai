@@ -287,6 +287,10 @@ func main() {
 			r.Post("/admin/settings/email", server.HandleSaveEmailProvider)
 			r.Delete("/admin/settings/email", server.HandleDeleteEmailProvider)
 			r.Post("/admin/settings/email/test", server.HandleTestEmailProvider)
+
+			// Admin backup/restore routes
+			r.Get("/admin/backup/export", server.HandleExportData)
+			r.Post("/admin/backup/import", server.HandleImportData)
 		})
 	})
 

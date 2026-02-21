@@ -134,26 +134,23 @@ func (s *Server) HandleGlobalSearch(w http.ResponseWriter, r *http.Request) {
 		Wiki:  []GlobalSearchWikiResult{},
 	}
 
-	// Search tasks
+	// Search tasks and wiki independently — partial results are better than none
 	if searchTasks {
 		taskResults, err := s.searchTasks(ctx, req, accessibleProjects, projectNameMap)
 		if err != nil {
 			s.logger.Error("Failed to search tasks", zap.Error(err), zap.String("query", req.Query))
-			respondError(w, http.StatusInternalServerError, "failed to search tasks", "internal_error")
-			return
+		} else {
+			response.Tasks = taskResults
 		}
-		response.Tasks = taskResults
 	}
 
-	// Search wiki
 	if searchWiki {
 		wikiResults, err := s.searchWikiForGlobal(ctx, req, accessibleProjects, projectNameMap)
 		if err != nil {
 			s.logger.Error("Failed to search wiki", zap.Error(err), zap.String("query", req.Query))
-			respondError(w, http.StatusInternalServerError, "failed to search wiki", "internal_error")
-			return
+		} else {
+			response.Wiki = wikiResults
 		}
-		response.Wiki = wikiResults
 	}
 
 	respondJSON(w, http.StatusOK, response)
@@ -217,6 +214,16 @@ func (s *Server) searchTasks(ctx context.Context, req GlobalSearchRequest, acces
 // searchWikiForGlobal searches wiki blocks and returns results with project info
 func (s *Server) searchWikiForGlobal(ctx context.Context, req GlobalSearchRequest, accessibleProjects []int64, projectNameMap map[int64]string) ([]GlobalSearchWikiResult, error) {
 	query := s.db.Client.WikiBlock.Query().
+		// Select only columns that exist in both SQLite and Postgres (excludes search_text/search_vector)
+		Select(
+			wikiblock.FieldID,
+			wikiblock.FieldPageID,
+			wikiblock.FieldBlockType,
+			wikiblock.FieldLevel,
+			wikiblock.FieldHeadingsPath,
+			wikiblock.FieldPlainText,
+			wikiblock.FieldPosition,
+		).
 		WithPage(func(q *ent.WikiPageQuery) {
 			q.Select(wikipage.FieldID, wikipage.FieldTitle, wikipage.FieldSlug, wikipage.FieldProjectID)
 		})
@@ -228,10 +235,10 @@ func (s *Server) searchWikiForGlobal(ctx context.Context, req GlobalSearchReques
 		query = query.Where(wikiblock.HasPageWith(wikipage.ProjectIDIn(accessibleProjects...)))
 	}
 
-	// Apply search filter
+	// Use ContainsFold for case-insensitive search (generates ILIKE on Postgres)
 	query = query.Where(wikiblock.Or(
-		wikiblock.PlainTextContains(req.Query),
-		wikiblock.HeadingsPathContains(req.Query),
+		wikiblock.PlainTextContainsFold(req.Query),
+		wikiblock.HeadingsPathContainsFold(req.Query),
 	))
 
 	blocks, err := query.

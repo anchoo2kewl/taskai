@@ -106,8 +106,17 @@ func (s *Server) searchWikiBlocks(ctx context.Context, userID int64, req SearchW
 		return []SearchResultBlock{}, nil
 	}
 
-	// Build base query
+	// Build base query — select only columns that exist in both SQLite and Postgres
 	query := s.db.Client.WikiBlock.Query().
+		Select(
+			wikiblock.FieldID,
+			wikiblock.FieldPageID,
+			wikiblock.FieldBlockType,
+			wikiblock.FieldLevel,
+			wikiblock.FieldHeadingsPath,
+			wikiblock.FieldPlainText,
+			wikiblock.FieldPosition,
+		).
 		WithPage(func(q *ent.WikiPageQuery) {
 			q.Select(wikipage.FieldID, wikipage.FieldTitle, wikipage.FieldSlug, wikipage.FieldProjectID)
 		})
@@ -120,12 +129,10 @@ func (s *Server) searchWikiBlocks(ctx context.Context, userID int64, req SearchW
 		query = query.Where(wikiblock.HasPageWith(wikipage.ProjectIDIn(accessibleProjects...)))
 	}
 
-	// Apply search filter
-	// For SQLite, use LIKE for simple text search
-	// For Postgres, this will be replaced with full-text search
+	// Use ContainsFold for case-insensitive search (generates ILIKE on Postgres)
 	query = query.Where(wikiblock.Or(
-		wikiblock.PlainTextContains(req.Query),
-		wikiblock.HeadingsPathContains(req.Query),
+		wikiblock.PlainTextContainsFold(req.Query),
+		wikiblock.HeadingsPathContainsFold(req.Query),
 	))
 
 	// Apply recency filter if specified

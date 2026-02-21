@@ -249,8 +249,13 @@ func (db *DB) runMigrations(ctx context.Context, migrationsPath string, driver s
 			return fmt.Errorf("failed to execute migration %s: %w", filename, err)
 		}
 
-		// Record migration
-		_, err = tx.ExecContext(ctx, "INSERT INTO schema_migrations (version) VALUES (?)", version)
+		// Record migration (use correct placeholder syntax based on driver)
+		placeholder := "?"
+		if driver == "postgres" || driver == "pgx" {
+			placeholder = "$1"
+		}
+		recordSQL := fmt.Sprintf("INSERT INTO schema_migrations (version) VALUES (%s)", placeholder)
+		_, err = tx.ExecContext(ctx, recordSQL, version)
 		if err != nil {
 			tx.Rollback()
 			return fmt.Errorf("failed to record migration %s: %w", filename, err)

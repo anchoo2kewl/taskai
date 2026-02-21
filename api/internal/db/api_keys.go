@@ -8,6 +8,8 @@ import (
 	"fmt"
 	"time"
 
+	"go.uber.org/zap"
+
 	"taskai/ent"
 	"taskai/ent/apikey"
 )
@@ -145,7 +147,7 @@ func (db *DB) ValidateAPIKey(ctx context.Context, key string) (int64, error) {
 		Save(ctx)
 	if err != nil {
 		// Log but don't fail on update error
-		fmt.Printf("failed to update API key last_used_at: %v\n", err)
+		db.logger.Warn("Failed to update API key last_used_at", zap.Error(err))
 	}
 
 	return apiKeyEntity.UserID, nil

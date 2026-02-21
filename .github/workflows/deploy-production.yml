@@ -73,24 +73,43 @@ jobs:
 
           echo "🚀 Deploying TaskAI to Production..."
 
-          ssh -i ~/.ssh/deploy_key ubuntu@31.97.102.48 << ENDSSH
-            set -e
+          ssh -i ~/.ssh/deploy_key ubuntu@31.97.102.48 << 'ENDSSH'
+            set -ex
+            echo "📂 Changing to source directory..."
             cd /home/ubuntu/taskai/source
+
+            echo "📥 Fetching from origin..."
             git fetch origin
-            git reset --hard $COMMIT_SHA
+
+            echo "🔄 Resetting to commit: $COMMIT_SHA"
+            git reset --hard "$COMMIT_SHA"
+
+            echo "📂 Moving to parent directory..."
             cd ..
 
+            echo "📌 Setting version info..."
             export VERSION='$VERSION'
             export GIT_COMMIT='$GIT_COMMIT'
             export BUILD_TIME='$BUILD_TIME'
+            echo "Version: $VERSION, Commit: $GIT_COMMIT, Build Time: $BUILD_TIME"
 
+            echo "🛑 Stopping containers..."
             docker compose down || true
-            echo "🧹 Cleaning up Docker build cache and unused images to free disk space..."
+
+            echo "🧹 Cleaning up Docker build cache and unused images..."
             docker builder prune -af || true
             docker image prune -af || true
-            docker compose build --build-arg VERSION="\$VERSION" --build-arg GIT_COMMIT="\$GIT_COMMIT" --build-arg BUILD_TIME="\$BUILD_TIME"
+
+            echo "🔨 Building containers..."
+            docker compose build --build-arg VERSION="$VERSION" --build-arg GIT_COMMIT="$GIT_COMMIT" --build-arg BUILD_TIME="$BUILD_TIME"
+
+            echo "🚀 Starting containers..."
             docker compose up -d
+
+            echo "⏳ Waiting for containers to be healthy..."
             sleep 15
+
+            echo "📊 Container status:"
             docker compose ps
           ENDSSH
 

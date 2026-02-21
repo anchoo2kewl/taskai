@@ -55,6 +55,8 @@ jobs:
       - name: Deploy to Staging server
         env:
           SSH_PRIVATE_KEY: ${{ secrets.STAGING_SSH_PRIVATE_KEY }}
+          DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
+          DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
           COMMIT_SHA: ${{ github.sha }}
           VERSION: ${{ steps.version.outputs.VERSION }}
           GIT_COMMIT: ${{ steps.version.outputs.GIT_COMMIT }}
@@ -77,6 +79,9 @@ jobs:
             export VERSION='$VERSION'
             export GIT_COMMIT='$GIT_COMMIT'
             export BUILD_TIME='$BUILD_TIME'
+
+            # Login to Docker Hub to avoid rate limiting
+            echo '$DOCKERHUB_TOKEN' | docker login -u '$DOCKERHUB_USERNAME' --password-stdin
 
             docker compose down || true
             echo "🧹 Cleaning up Docker build cache and unused images to free disk space..."

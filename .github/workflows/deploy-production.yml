@@ -61,6 +61,8 @@ jobs:
       - name: Deploy to Production server
         env:
           SSH_PRIVATE_KEY: ${{ secrets.SSH_PRIVATE_KEY }}
+          DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
+          DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
           COMMIT_SHA: ${{ github.sha }}
           VERSION: ${{ steps.version.outputs.VERSION }}
           GIT_COMMIT: ${{ steps.version.outputs.GIT_COMMIT }}
@@ -92,6 +94,9 @@ jobs:
             export GIT_COMMIT="$GIT_COMMIT"
             export BUILD_TIME="$BUILD_TIME"
             echo "Version: \$VERSION, Commit: \$GIT_COMMIT, Build Time: \$BUILD_TIME"
+
+            echo "🔐 Login to Docker Hub..."
+            echo '$DOCKERHUB_TOKEN' | docker login -u '$DOCKERHUB_USERNAME' --password-stdin
 
             echo "🛑 Stopping containers..."
             docker compose down || true

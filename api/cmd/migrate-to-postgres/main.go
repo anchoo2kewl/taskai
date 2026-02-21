@@ -58,10 +58,71 @@ func main() {
 
 	ctx := context.Background()
 
-	// Migrate each table
+	// Define table migration order (respecting foreign key dependencies)
+	tableOrder := []string{
+		"users",           // No dependencies
+		"projects",        // Depends on users (owner_id)
+		"teams",          // Depends on users (owner_id)
+		"team_members",   // Depends on teams, users
+		"team_invitations", // Depends on teams
+		"project_members", // Depends on projects, users
+		"project_invitations", // Depends on projects, users
+		"swim_lanes",     // Depends on projects
+		"tasks",          // Depends on projects, users
+		"sprints",        // Depends on projects
+		"tags",           // Depends on projects
+		"task_tags",      // Depends on tasks, tags
+		"task_comments",  // Depends on tasks, users
+		"task_attachments", // Depends on tasks, users
+		"user_activity",  // Depends on users
+		"api_keys",       // Depends on users
+		"cloudinary_credentials", // Depends on users
+		"invites",        // Depends on users (inviter_id)
+		"email_provider", // No dependencies
+		"wiki_pages",     // Depends on projects, users
+		"yjs_updates",    // Depends on wiki_pages
+		"page_versions",  // Depends on wiki_pages
+		"wiki_blocks",    // Depends on wiki_pages
+	}
+
+	// Migrate tables in order
+	for _, table := range tableOrder {
+		// Check if table exists
+		found := false
+		for _, t := range tables {
+			if t == table {
+				found = true
+				break
+			}
+		}
+		if !found {
+			continue
+		}
+
+		log.Printf("📦 Migrating table: %s\n", table)
+		count, err := migrateTable(ctx, sqliteDB, postgresDB, table)
+		if err != nil {
+			log.Printf("❌ Failed to migrate %s: %v\n", table, err)
+			continue
+		}
+		log.Printf("✅ Migrated %s: %d rows\n", table, count)
+	}
+
+	// Migrate any remaining tables not in the order list
 	for _, table := range tables {
 		if table == "schema_migrations" {
-			log.Printf("⏭️  Skipping %s (will be handled separately)\n", table)
+			continue
+		}
+
+		// Check if already migrated
+		alreadyMigrated := false
+		for _, ordered := range tableOrder {
+			if table == ordered {
+				alreadyMigrated = true
+				break
+			}
+		}
+		if alreadyMigrated {
 			continue
 		}
 
@@ -149,12 +210,8 @@ func migrateTable(ctx context.Context, from, to *sql.DB, table string) (int, err
 			return count, fmt.Errorf("scan row: %w", err)
 		}
 
-		// Convert []byte to string for text fields
-		for i, val := range values {
-			if b, ok := val.([]byte); ok {
-				values[i] = string(b)
-			}
-		}
+		// Convert values for Postgres compatibility
+		values = convertValues(table, columns, values)
 
 		if _, err := stmt.ExecContext(ctx, values...); err != nil {
 			return count, fmt.Errorf("insert row: %w", err)
@@ -173,6 +230,41 @@ func joinStrings(strs []string, sep string) string {
 	for i := 1; i < len(strs); i++ {
 		result += sep + strs[i]
 	}
+	return result
+}
+
+func convertValues(table string, columns []string, values []interface{}) []interface{} {
+	// Define boolean columns per table (SQLite stores as INTEGER 0/1)
+	booleanColumns := map[string][]string{
+		"users":       {"is_admin", "totp_enabled"},
+		"projects":    {"is_public", "github_sync_enabled"},
+		"invites":     {"used"},
+	}
+
+	result := make([]interface{}, len(values))
+	for i, val := range values {
+		// Convert []byte to string for text fields
+		if b, ok := val.([]byte); ok {
+			result[i] = string(b)
+			continue
+		}
+
+		// Convert INTEGER (0/1) to BOOLEAN for known boolean columns
+		if boolCols, ok := booleanColumns[table]; ok {
+			for _, boolCol := range boolCols {
+				if columns[i] == boolCol {
+					if intVal, ok := val.(int64); ok {
+						result[i] = intVal != 0
+						goto next
+					}
+				}
+			}
+		}
+
+		result[i] = val
+	next:
+	}
+
 	return result
 }
 

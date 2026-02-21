@@ -26,10 +26,11 @@ type Info struct {
 	ServerTime  time.Time `json:"server_time"`
 	DBVersion   int       `json:"db_version,omitempty"`
 	Environment string    `json:"environment"`
+	DBDriver    string    `json:"db_driver"`
 }
 
 // Get returns the current version information
-func Get(env string, dbVersion int) Info {
+func Get(env string, dbVersion int, dbDriver string) Info {
 	return Info{
 		Version:     Version,
 		GitCommit:   GitCommit,
@@ -39,5 +40,6 @@ func Get(env string, dbVersion int) Info {
 		ServerTime:  time.Now().UTC(),
 		DBVersion:   dbVersion,
 		Environment: env,
+		DBDriver:    dbDriver,
 	}
 }

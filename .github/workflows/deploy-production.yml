@@ -67,6 +67,9 @@ jobs:
           VERSION: ${{ steps.version.outputs.VERSION }}
           GIT_COMMIT: ${{ steps.version.outputs.GIT_COMMIT }}
           BUILD_TIME: ${{ steps.version.outputs.BUILD_TIME }}
+          DB_DRIVER: postgres
+          DB_DSN: ${{ secrets.PRODUCTION_DB_DSN }}
+          JWT_SECRET: ${{ secrets.PRODUCTION_JWT_SECRET }}
         run: |
           mkdir -p ~/.ssh
           echo "$SSH_PRIVATE_KEY" > ~/.ssh/deploy_key
@@ -93,7 +96,12 @@ jobs:
             export VERSION="$VERSION"
             export GIT_COMMIT="$GIT_COMMIT"
             export BUILD_TIME="$BUILD_TIME"
+            export DB_DRIVER="$DB_DRIVER"
+            export DB_DSN="$DB_DSN"
+            export JWT_SECRET="$JWT_SECRET"
+            export ENV=production
             echo "Version: \$VERSION, Commit: \$GIT_COMMIT, Build Time: \$BUILD_TIME"
+            echo "DB Driver: \$DB_DRIVER"
 
             echo "🔐 Login to Docker Hub..."
             echo '$DOCKERHUB_TOKEN' | docker login -u '$DOCKERHUB_USERNAME' --password-stdin

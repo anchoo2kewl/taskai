@@ -33,6 +33,9 @@ function mockResponse(data: unknown, status = 200) {
   mockFetch.mockResolvedValueOnce({
     ok: status >= 200 && status < 300,
     status,
+    headers: {
+      get: (name: string) => name === 'content-type' ? 'application/json' : null,
+    },
     json: () => Promise.resolve(data),
   })
 }
@@ -41,6 +44,9 @@ function mock204() {
   mockFetch.mockResolvedValueOnce({
     ok: true,
     status: 204,
+    headers: {
+      get: (name: string) => name === 'content-type' ? 'application/json' : null,
+    },
     json: () => Promise.resolve({}),
   })
 }
@@ -49,6 +55,9 @@ function mockErrorResponse(error: string, status = 400) {
   mockFetch.mockResolvedValueOnce({
     ok: false,
     status,
+    headers: {
+      get: (name: string) => name === 'content-type' ? 'application/json' : null,
+    },
     json: () => Promise.resolve({ error }),
   })
 }
@@ -868,6 +877,9 @@ describe('ApiClient', () => {
       mockFetch.mockResolvedValueOnce({
         ok: false,
         status: 500,
+        headers: {
+          get: (name: string) => name === 'content-type' ? 'application/json' : null,
+        },
         json: () => Promise.resolve({ error: 'Internal server error' }),
       })
       await expect(apiClient.getAssets()).rejects.toThrow('Internal server error')

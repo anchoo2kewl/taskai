@@ -3,12 +3,12 @@
  * Linear-style command palette for quick navigation and actions
  */
 
-import { useState, useEffect, useMemo, Fragment } from 'react'
+import { useState, useEffect, useMemo, useRef, useCallback, Fragment } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { Dialog, Transition, Combobox } from '@headlessui/react'
-import { useSync } from '../state/SyncContext'
 import { useAuth } from '../state/AuthContext'
-import type { TaskDocument, ProjectDocument } from '../lib/db/schema'
+import { api } from '../lib/api'
+import type { SearchTaskResult, GlobalSearchWikiResult } from '../lib/api'
 
 interface Command {
   id: string
@@ -16,37 +16,20 @@ interface Command {
   description?: string
   icon: string
   action: () => void
-  category: 'navigation' | 'actions' | 'search' | 'create'
+  category: 'navigation' | 'actions' | 'tasks' | 'wiki'
   keywords?: string[]
 }
 
 export default function CommandPalette() {
   const [isOpen, setIsOpen] = useState(false)
   const [query, setQuery] = useState('')
-  const { db } = useSync()
+  const [taskResults, setTaskResults] = useState<SearchTaskResult[]>([])
+  const [wikiResults, setWikiResults] = useState<GlobalSearchWikiResult[]>([])
+  const [isLoading, setIsLoading] = useState(false)
   const { logout } = useAuth()
   const navigate = useNavigate()
-
-  const [tasks, setTasks] = useState<TaskDocument[]>([])
-  const [projects, setProjects] = useState<ProjectDocument[]>([])
-
-  // Load data from local database
-  useEffect(() => {
-    if (!db) return
-
-    const tasksSub = db.tasks
-      .find({ selector: { _deleted: { $ne: true } }, limit: 50 })
-      .$.subscribe(docs => setTasks(docs.map(d => d.toJSON())))
-
-    const projectsSub = db.projects
-      .find({ selector: { _deleted: { $ne: true } } })
-      .$.subscribe(docs => setProjects(docs.map(d => d.toJSON())))
-
-    return () => {
-      tasksSub.unsubscribe()
-      projectsSub.unsubscribe()
-    }
-  }, [db])
+  const abortControllerRef = useRef<AbortController | null>(null)
+  const debounceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   // Keyboard shortcut to open/close palette
   useEffect(() => {
@@ -66,15 +49,77 @@ export default function CommandPalette() {
     return () => document.removeEventListener('keydown', handleKeyDown)
   }, [])
 
-  // Reset query when closed
+  // Reset state when closed
   useEffect(() => {
     if (!isOpen) {
       setQuery('')
+      setTaskResults([])
+      setWikiResults([])
+      setIsLoading(false)
+      if (abortControllerRef.current) {
+        abortControllerRef.current.abort()
+        abortControllerRef.current = null
+      }
+      if (debounceTimerRef.current) {
+        clearTimeout(debounceTimerRef.current)
+        debounceTimerRef.current = null
+      }
     }
   }, [isOpen])
 
+  // Debounced search
+  const performSearch = useCallback(async (searchQuery: string) => {
+    // Cancel any in-flight request
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort()
+    }
+
+    if (searchQuery.length < 2) {
+      setTaskResults([])
+      setWikiResults([])
+      setIsLoading(false)
+      return
+    }
+
+    const controller = new AbortController()
+    abortControllerRef.current = controller
+    setIsLoading(true)
+
+    try {
+      const results = await api.globalSearch(searchQuery, undefined, undefined, 10, controller.signal)
+      // Only update if this request wasn't aborted
+      if (!controller.signal.aborted) {
+        setTaskResults(results.tasks)
+        setWikiResults(results.wiki)
+        setIsLoading(false)
+      }
+    } catch (err) {
+      if (err instanceof DOMException && err.name === 'AbortError') {
+        return // Ignore aborted requests
+      }
+      if (!controller.signal.aborted) {
+        setTaskResults([])
+        setWikiResults([])
+        setIsLoading(false)
+      }
+    }
+  }, [])
+
+  // Handle query change with debounce
+  const handleQueryChange = useCallback((value: string) => {
+    setQuery(value)
+
+    if (debounceTimerRef.current) {
+      clearTimeout(debounceTimerRef.current)
+    }
+
+    debounceTimerRef.current = setTimeout(() => {
+      performSearch(value)
+    }, 300)
+  }, [performSearch])
+
   // Define available commands
-  const staticCommands: Command[] = [
+  const staticCommands: Command[] = useMemo(() => [
     // Navigation
     {
       id: 'nav-projects',
@@ -138,88 +183,86 @@ export default function CommandPalette() {
         setIsOpen(false)
       },
     },
-  ]
+  ], [navigate, logout])
 
-  // Dynamic commands from data
-  const dynamicCommands: Command[] = useMemo(() => {
+  // Convert search results to commands
+  const searchCommands: Command[] = useMemo(() => {
     const commands: Command[] = []
 
-    // Add projects
-    projects.forEach(project => {
+    taskResults.forEach(task => {
+      const statusIcon = task.status === 'done' ? '✅' : task.status === 'in_progress' ? '🔄' : '📝'
       commands.push({
-        id: `project-${project.id}`,
-        name: project.name,
-        description: project.description || 'Open project',
-        icon: '📂',
-        category: 'search',
-        keywords: ['project', project.name.toLowerCase()],
+        id: `task-${task.id}`,
+        name: `#${task.task_number} ${task.title}`,
+        description: `${task.project_name} · ${task.status.replace('_', ' ')}${task.priority !== 'medium' ? ` · ${task.priority}` : ''}`,
+        icon: statusIcon,
+        category: 'tasks',
         action: () => {
-          navigate(`/app/projects/${project.id}`)
+          navigate(`/app/projects/${task.project_id}/tasks/${task.task_number}`)
           setIsOpen(false)
         },
       })
     })
 
-    // Add recent tasks (limit to 20 for performance)
-    tasks.slice(0, 20).forEach(task => {
+    wikiResults.forEach(wiki => {
       commands.push({
-        id: `task-${task.id}`,
-        name: task.title,
-        description: `${task.status} · Project ${task.project_id}`,
-        icon: task.status === 'done' ? '✅' : task.status === 'in_progress' ? '🔄' : '📝',
-        category: 'search',
-        keywords: ['task', 'issue', task.title.toLowerCase()],
+        id: `wiki-${wiki.page_id}-${wiki.snippet.slice(0, 20)}`,
+        name: wiki.page_title,
+        description: `${wiki.project_name}${wiki.headings_path ? ` · ${wiki.headings_path}` : ''}`,
+        icon: '📄',
+        category: 'wiki',
         action: () => {
-          navigate(`/app/projects/${task.project_id}/tasks/${task.id}`)
+          navigate(`/app/projects/${wiki.project_id}/wiki/${wiki.page_slug}`)
           setIsOpen(false)
         },
       })
     })
 
     return commands
-  }, [projects, tasks, navigate])
+  }, [taskResults, wikiResults, navigate])
 
-  const allCommands = [...staticCommands, ...dynamicCommands]
-
-  // Filter commands based on query
-  const filteredCommands = useMemo(() => {
-    if (!query) return allCommands
+  // Filter static commands based on query
+  const filteredStaticCommands = useMemo(() => {
+    if (!query) return staticCommands
 
     const lowerQuery = query.toLowerCase()
-
-    return allCommands.filter(cmd => {
-      // Search in name
+    return staticCommands.filter(cmd => {
       if (cmd.name.toLowerCase().includes(lowerQuery)) return true
-      // Search in description
       if (cmd.description?.toLowerCase().includes(lowerQuery)) return true
-      // Search in keywords
       if (cmd.keywords?.some(k => k.includes(lowerQuery))) return true
       return false
     })
-  }, [query, allCommands])
+  }, [query, staticCommands])
 
-  // Group commands by category
+  // Group all commands
+  const allCommands = [...filteredStaticCommands, ...searchCommands]
+
   const groupedCommands = useMemo(() => {
-    const groups = {
-      navigation: [] as Command[],
-      create: [] as Command[],
-      actions: [] as Command[],
-      search: [] as Command[],
+    const groups: Record<string, Command[]> = {
+      tasks: [],
+      wiki: [],
+      navigation: [],
+      actions: [],
     }
 
-    filteredCommands.forEach(cmd => {
-      groups[cmd.category].push(cmd)
+    allCommands.forEach(cmd => {
+      if (groups[cmd.category]) {
+        groups[cmd.category].push(cmd)
+      }
     })
 
     return groups
-  }, [filteredCommands])
+  }, [allCommands])
 
   const categoryLabels: Record<string, string> = {
+    tasks: 'Tasks',
+    wiki: 'Wiki Pages',
     navigation: 'Navigation',
-    create: 'Create',
     actions: 'Actions',
-    search: 'Search Results',
   }
+
+  const hasResults = allCommands.length > 0
+  const hasSearchQuery = query.length >= 2
 
   return (
     <Transition.Root show={isOpen} as={Fragment} afterLeave={() => setQuery('')}>
@@ -252,12 +295,21 @@ export default function CommandPalette() {
                 {/* Search input */}
                 <div className="relative">
                   <div className="pointer-events-none absolute inset-y-0 left-0 flex items-center pl-4">
-                    <span className="text-dark-text-quaternary text-xl">🔍</span>
+                    {isLoading ? (
+                      <svg className="animate-spin h-5 w-5 text-dark-text-quaternary" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                        <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                        <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+                      </svg>
+                    ) : (
+                      <svg className="h-5 w-5 text-dark-text-quaternary" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+                      </svg>
+                    )}
                   </div>
                   <Combobox.Input
                     className="h-14 w-full border-0 bg-transparent pl-12 pr-4 text-dark-text-primary placeholder-dark-text-quaternary focus:ring-0 text-base"
-                    placeholder="Search or type a command..."
-                    onChange={(e: React.ChangeEvent<HTMLInputElement>) => setQuery(e.target.value)}
+                    placeholder="Search tasks, wiki pages, or type a command..."
+                    onChange={(e: React.ChangeEvent<HTMLInputElement>) => handleQueryChange(e.target.value)}
                     autoFocus
                   />
                   <div className="absolute inset-y-0 right-0 flex items-center pr-4">
@@ -268,7 +320,7 @@ export default function CommandPalette() {
                 </div>
 
                 {/* Results */}
-                {filteredCommands.length > 0 && (
+                {hasResults && (
                   <Combobox.Options
                     static
                     className="max-h-96 scroll-py-2 overflow-y-auto border-t border-dark-border-subtle"
@@ -279,7 +331,7 @@ export default function CommandPalette() {
                       return (
                         <div key={category} className="p-2">
                           <div className="px-3 py-2 text-[11px] font-semibold text-dark-text-quaternary uppercase tracking-wider">
-                            {categoryLabels[category as keyof typeof categoryLabels]}
+                            {categoryLabels[category] || category}
                           </div>
                           {commands.map((command) => (
                             <Combobox.Option
@@ -293,7 +345,7 @@ export default function CommandPalette() {
                             >
                               {({ active }: { active: boolean }) => (
                                 <>
-                                  <span className="mr-3 text-xl">{command.icon}</span>
+                                  <span className="mr-3 text-xl flex-shrink-0">{command.icon}</span>
                                   <div className="flex-1 min-w-0">
                                     <p className={`text-sm font-medium truncate ${active ? 'text-dark-text-primary' : 'text-dark-text-secondary'}`}>
                                       {command.name}
@@ -304,7 +356,7 @@ export default function CommandPalette() {
                                       </p>
                                     )}
                                   </div>
-                                  <span className={`ml-3 text-xs ${active ? 'text-dark-text-tertiary' : 'text-dark-text-quaternary'}`}>
+                                  <span className={`ml-3 text-xs flex-shrink-0 ${active ? 'text-dark-text-tertiary' : 'text-dark-text-quaternary'}`}>
                                     ↵
                                   </span>
                                 </>
@@ -317,9 +369,20 @@ export default function CommandPalette() {
                   </Combobox.Options>
                 )}
 
+                {/* Loading state for search */}
+                {isLoading && hasSearchQuery && searchCommands.length === 0 && (
+                  <div className="border-t border-dark-border-subtle px-6 py-8 text-center">
+                    <svg className="animate-spin h-5 w-5 text-dark-text-quaternary mx-auto mb-2" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+                    </svg>
+                    <p className="text-sm text-dark-text-tertiary">Searching...</p>
+                  </div>
+                )}
+
                 {/* Empty state */}
-                {query && filteredCommands.length === 0 && (
-                  <div className="px-6 py-14 text-center">
+                {query && !isLoading && !hasResults && (
+                  <div className="border-t border-dark-border-subtle px-6 py-14 text-center">
                     <p className="text-sm text-dark-text-tertiary">No results found for "{query}"</p>
                   </div>
                 )}

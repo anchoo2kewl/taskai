@@ -96,6 +96,32 @@ export interface WikiSearchResult {
   rank?: number
 }
 
+export interface SearchTaskResult {
+  id: number
+  project_id: number
+  project_name: string
+  task_number: number
+  title: string
+  snippet: string
+  status: string
+  priority: string
+}
+
+export interface GlobalSearchWikiResult {
+  page_id: number
+  page_title: string
+  page_slug: string
+  project_id: number
+  project_name: string
+  snippet: string
+  headings_path?: string
+}
+
+export interface GlobalSearchResponse {
+  tasks: SearchTaskResult[]
+  wiki: GlobalSearchWikiResult[]
+}
+
 export interface MessageResponse {
   message: string
 }
@@ -355,6 +381,21 @@ class ApiClient {
       // Handle non-JSON responses (like 204 No Content)
       if (response.status === 204) {
         return {} as T
+      }
+
+      // Check if response is JSON before attempting to parse
+      const contentType = response.headers.get('content-type')
+      const isJson = contentType?.includes('application/json')
+
+      if (!isJson) {
+        // Server returned non-JSON (likely HTML error page)
+        const text = await response.text()
+        console.error('[API] Non-JSON response:', text.substring(0, 500))
+        throw new Error(
+          response.ok
+            ? 'Server returned unexpected response format'
+            : `Server error (${response.status}): ${response.statusText}`
+        )
       }
 
       const data = await response.json()
@@ -881,6 +922,19 @@ class ApiClient {
     })
   }
 
+  async globalSearch(query: string, projectId?: number, types?: string[], limit?: number, signal?: AbortSignal): Promise<GlobalSearchResponse> {
+    return this.request<GlobalSearchResponse>('/api/search', {
+      method: 'POST',
+      body: JSON.stringify({
+        query,
+        project_id: projectId,
+        types,
+        limit,
+      }),
+      signal,
+    })
+  }
+
   // Version endpoint
   async getVersion(): Promise<{
     version: string
@@ -891,6 +945,7 @@ class ApiClient {
     server_time: string
     db_version: number
     environment: string
+    db_driver: string
   }> {
     return this.request('/api/version')
   }

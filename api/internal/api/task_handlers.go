@@ -363,7 +363,7 @@ func (s *Server) HandleCreateTask(w http.ResponseWriter, r *http.Request) {
 	// Get next task_number for this project
 	// Note: The UNIQUE index on (project_id, task_number) will prevent duplicates
 	var maxNumber sql.NullInt64
-	err = s.db.QueryRowContext(ctx, `SELECT MAX(task_number) FROM tasks WHERE project_id = ?`, projectID).Scan(&maxNumber)
+	err = s.db.QueryRowContext(ctx, `SELECT MAX(task_number) FROM tasks WHERE project_id = $1`, projectID).Scan(&maxNumber)
 	if err != nil {
 		respondError(w, http.StatusInternalServerError, "failed to get next task number", "internal_error")
 		return

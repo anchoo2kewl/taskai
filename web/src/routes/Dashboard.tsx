@@ -54,6 +54,17 @@ export default function Dashboard() {
 
           <div className="flex items-center gap-2 md:gap-4">
             <SyncStatus />
+            <button
+              onClick={() => document.dispatchEvent(new KeyboardEvent('keydown', { key: 'k', metaKey: true }))}
+              className="hidden md:inline-flex items-center gap-2 px-3 py-1.5 text-xs text-dark-text-quaternary hover:text-dark-text-tertiary bg-dark-bg-secondary hover:bg-dark-bg-tertiary border border-dark-border-subtle rounded-md transition-all duration-150 cursor-pointer"
+              aria-label="Search (Cmd+K)"
+            >
+              <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+              </svg>
+              <span>Search...</span>
+              <kbd className="px-1.5 py-0.5 text-[10px] font-semibold bg-dark-bg-tertiary rounded border border-dark-border-subtle">⌘K</kbd>
+            </button>
             <div className="flex items-center gap-2">
               <div className="w-7 h-7 bg-primary-500/10 border border-primary-500/20 rounded-full flex items-center justify-center">
                 <span className="text-xs font-medium text-primary-400">

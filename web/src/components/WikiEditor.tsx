@@ -325,22 +325,28 @@ export default function WikiEditor({ page }: WikiEditorProps) {
 
   // ── Image picker ─────────────────────────────────────────────
 
-  const insertImageMarkdown = (alt: string, url: string) => {
+  const insertImageMarkdown = (alt: string, url: string, caption?: string) => {
     const textarea = isFullscreen ? fsTextareaRef.current : textareaRef.current
-    const markdown = `![${alt}](${url})`
+    const escHtml = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;')
+    let markup: string
+    if (caption) {
+      markup = `<figure style="text-align:center;margin:1.5rem 0"><a href="${url}" data-lightbox="article-images" data-title="${escHtml(alt)}"><img src="${url}" alt="${escHtml(alt)}" style="width:66%;height:auto;max-width:100%"/></a><figcaption>${escHtml(caption)}</figcaption></figure>\n`
+    } else {
+      markup = `![${alt}](${url})`
+    }
 
     if (textarea) {
       const start = textarea.selectionStart
       const end = textarea.selectionEnd
-      const newContent = content.substring(0, start) + markdown + content.substring(end)
+      const newContent = content.substring(0, start) + markup + content.substring(end)
       setContent(newContent)
       syncToYjs(newContent)
       setTimeout(() => {
-        textarea.selectionStart = textarea.selectionEnd = start + markdown.length
+        textarea.selectionStart = textarea.selectionEnd = start + markup.length
         textarea.focus()
       }, 0)
     } else {
-      const newContent = content + (content.endsWith('\n') ? '' : '\n') + markdown + '\n'
+      const newContent = content + (content.endsWith('\n') ? '' : '\n') + markup + '\n'
       setContent(newContent)
       syncToYjs(newContent)
     }

@@ -2,7 +2,7 @@ import { useState, useEffect, useRef } from 'react'
 import { apiClient, type Attachment } from '../lib/api'
 
 interface ImagePickerModalProps {
-  onSelect: (alt: string, url: string) => void
+  onSelect: (alt: string, url: string, caption?: string) => void
   onClose: () => void
   taskId?: number
   wikiPageId?: number
@@ -18,6 +18,9 @@ export default function ImagePickerModal({ onSelect, onClose, taskId, wikiPageId
   const searchTimeout = useRef<ReturnType<typeof setTimeout> | null>(null)
   const [pendingUploadFile, setPendingUploadFile] = useState<File | null>(null)
   const [uploadAltText, setUploadAltText] = useState('')
+  const [uploadCaption, setUploadCaption] = useState('')
+  const [browseCaption, setBrowseCaption] = useState('')
+  const [pendingBrowseImage, setPendingBrowseImage] = useState<{ alt: string; url: string } | null>(null)
 
   useEffect(() => {
     loadImages()
@@ -105,13 +108,14 @@ export default function ImagePickerModal({ onSelect, onClose, taskId, wikiPageId
       }
 
       onUploadComplete()
-      onSelect(altName, uploadData.secure_url)
+      onSelect(altName, uploadData.secure_url, uploadCaption.trim() || undefined)
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : 'Failed to upload')
     } finally {
       setUploading(false)
       setPendingUploadFile(null)
       setUploadAltText('')
+      setUploadCaption('')
     }
   }
 
@@ -191,16 +195,27 @@ export default function ImagePickerModal({ onSelect, onClose, taskId, wikiPageId
                   autoFocus
                   onKeyDown={(e) => {
                     if (e.key === 'Enter' && uploadAltText.trim().length >= 3 && !uploading) handleConfirmUploadAndInsert()
-                    if (e.key === 'Escape') { setPendingUploadFile(null); setUploadAltText('') }
+                    if (e.key === 'Escape') { setPendingUploadFile(null); setUploadAltText(''); setUploadCaption('') }
                   }}
                 />
                 {uploadAltText.trim().length > 0 && uploadAltText.trim().length < 3 && (
                   <p className="text-xs text-danger-400 mt-0.5">At least 3 characters</p>
                 )}
+                <input
+                  type="text"
+                  value={uploadCaption}
+                  onChange={(e) => setUploadCaption(e.target.value)}
+                  placeholder="Caption (optional figcaption)"
+                  className="w-full mt-1 px-2.5 py-1.5 text-sm bg-dark-bg-secondary border border-dark-border-subtle text-dark-text-primary rounded-md focus:ring-1 focus:ring-primary-500 focus:border-primary-500 outline-none placeholder-dark-text-tertiary"
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' && uploadAltText.trim().length >= 3 && !uploading) handleConfirmUploadAndInsert()
+                    if (e.key === 'Escape') { setPendingUploadFile(null); setUploadAltText(''); setUploadCaption('') }
+                  }}
+                />
               </div>
               <div className="flex gap-1.5 flex-shrink-0">
                 <button
-                  onClick={() => { setPendingUploadFile(null); setUploadAltText('') }}
+                  onClick={() => { setPendingUploadFile(null); setUploadAltText(''); setUploadCaption('') }}
                   disabled={uploading}
                   className="px-2.5 py-1.5 text-xs font-medium text-dark-text-secondary bg-dark-bg-tertiary hover:bg-dark-bg-tertiary/80 rounded-md transition-colors disabled:opacity-50"
                 >
@@ -237,12 +252,15 @@ export default function ImagePickerModal({ onSelect, onClose, taskId, wikiPageId
               </p>
             </div>
           ) : (
+            <>
             <div className="grid grid-cols-3 sm:grid-cols-4 gap-2">
               {images.map((img: Attachment) => (
                 <button
                   key={img.id}
-                  onClick={() => onSelect(img.alt_name || img.filename, img.cloudinary_url)}
-                  className="group relative border border-dark-border-subtle rounded-lg overflow-hidden bg-dark-bg-primary hover:border-primary-500 hover:ring-1 hover:ring-primary-500/30 transition-all"
+                  onClick={() => setPendingBrowseImage({ alt: img.alt_name || img.filename, url: img.cloudinary_url })}
+                  className={`group relative border rounded-lg overflow-hidden bg-dark-bg-primary hover:border-primary-500 hover:ring-1 hover:ring-primary-500/30 transition-all ${
+                    pendingBrowseImage?.url === img.cloudinary_url ? 'border-primary-500 ring-1 ring-primary-500/30' : 'border-dark-border-subtle'
+                  }`}
                   title={img.alt_name || img.filename}
                 >
                   <img
@@ -263,6 +281,57 @@ export default function ImagePickerModal({ onSelect, onClose, taskId, wikiPageId
                 </button>
               ))}
             </div>
+
+            {/* Caption input for selected browse image */}
+            {pendingBrowseImage && (
+              <div className="mt-3 p-3 rounded-lg border border-dark-border-subtle bg-dark-bg-primary/50">
+                <div className="flex items-center gap-3">
+                  <img
+                    src={pendingBrowseImage.url}
+                    alt={pendingBrowseImage.alt}
+                    className="w-12 h-12 rounded border border-dark-border-subtle object-cover flex-shrink-0"
+                  />
+                  <div className="flex-1 min-w-0">
+                    <p className="text-xs text-dark-text-secondary truncate mb-1">{pendingBrowseImage.alt}</p>
+                    <input
+                      type="text"
+                      value={browseCaption}
+                      onChange={(e) => setBrowseCaption(e.target.value)}
+                      placeholder="Caption (optional figcaption)"
+                      className="w-full px-2.5 py-1.5 text-sm bg-dark-bg-secondary border border-dark-border-subtle text-dark-text-primary rounded-md focus:ring-1 focus:ring-primary-500 focus:border-primary-500 outline-none placeholder-dark-text-tertiary"
+                      autoFocus
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter') {
+                          onSelect(pendingBrowseImage.alt, pendingBrowseImage.url, browseCaption.trim() || undefined)
+                          setPendingBrowseImage(null)
+                          setBrowseCaption('')
+                        }
+                        if (e.key === 'Escape') { setPendingBrowseImage(null); setBrowseCaption('') }
+                      }}
+                    />
+                  </div>
+                  <div className="flex gap-1.5 flex-shrink-0">
+                    <button
+                      onClick={() => { setPendingBrowseImage(null); setBrowseCaption('') }}
+                      className="px-2.5 py-1.5 text-xs font-medium text-dark-text-secondary bg-dark-bg-tertiary hover:bg-dark-bg-tertiary/80 rounded-md transition-colors"
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      onClick={() => {
+                        onSelect(pendingBrowseImage.alt, pendingBrowseImage.url, browseCaption.trim() || undefined)
+                        setPendingBrowseImage(null)
+                        setBrowseCaption('')
+                      }}
+                      className="px-2.5 py-1.5 text-xs font-medium text-white bg-primary-500 hover:bg-primary-600 rounded-md transition-colors"
+                    >
+                      Insert
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )}
+            </>
           )}
         </div>
       </div>

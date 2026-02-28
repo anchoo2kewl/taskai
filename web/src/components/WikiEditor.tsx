@@ -535,6 +535,42 @@ export default function WikiEditor({ page }: WikiEditorProps) {
     setSelectedEditImg(null)
   }, [selectedEditImg, editAlt, editCaption, content, syncToYjs])
 
+  // ── Draw handler ────────────────────────────────────────────
+
+  const [isDrawCreating, setIsDrawCreating] = useState(false)
+
+  const handleDraw = useCallback(async () => {
+    if (isDrawCreating) return
+    setIsDrawCreating(true)
+    try {
+      const res = await fetch('/draw/api/new', { method: 'POST' })
+      const data = await res.json()
+      if (data && data.id) {
+        const textarea = isFullscreen ? fsTextareaRef.current : textareaRef.current
+        const markup = `\n[draw:${data.id}:edit]\n`
+        if (textarea) {
+          const start = textarea.selectionStart
+          const end = textarea.selectionEnd
+          const newContent = content.substring(0, start) + markup + content.substring(end)
+          setContent(newContent)
+          syncToYjs(newContent)
+          setTimeout(() => {
+            textarea.focus()
+            textarea.selectionStart = textarea.selectionEnd = start + markup.length
+          }, 0)
+        } else {
+          const newContent = content + markup
+          setContent(newContent)
+          syncToYjs(newContent)
+        }
+      }
+    } catch (err) {
+      console.error('Failed to create drawing:', err)
+    } finally {
+      setIsDrawCreating(false)
+    }
+  }, [isDrawCreating, isFullscreen, content, setContent, syncToYjs])
+
   // ── Toolbar JSX ──────────────────────────────────────────────
 
   const Toolbar = ({ compact }: { compact?: boolean }) => (
@@ -566,6 +602,20 @@ export default function WikiEditor({ page }: WikiEditorProps) {
         <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
         </svg>
+      </button>
+      <button
+        onClick={handleDraw}
+        disabled={isDrawCreating}
+        className="px-2 py-1 rounded text-xs font-medium transition-colors bg-dark-bg-tertiary text-dark-text-secondary hover:bg-dark-bg-tertiary/80 hover:text-dark-text-primary flex items-center gap-1 disabled:opacity-50"
+        title="Insert a drawing canvas"
+      >
+        <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
+          <path d="M12 19l7-7 3 3-7 7-3-3z" />
+          <path d="M18 13l-1.5-7.5L2 2l3.5 14.5L13 18l5-5z" />
+          <path d="M2 2l7.586 7.586" />
+          <circle cx="11" cy="11" r="2" />
+        </svg>
+        Draw
       </button>
     </div>
   )

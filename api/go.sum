@@ -10,6 +10,8 @@ github.com/anchoo2kewl/go-draw v0.0.0-20260228200306-4995b30e1408 h1:PyXTn6mwi73
 github.com/anchoo2kewl/go-draw v0.0.0-20260228200306-4995b30e1408/go.mod h1:QPqDIJDVJcbB/WTGGPoRmQpDxxTCVr6dhMV76uvVx84=
 github.com/anchoo2kewl/go-wiki v0.1.1-0.20260228213051-70d183470217 h1:oeRJAxuqkwFokD6eyuNq9fAkGJ/+4m3hhEULcMX7e4I=
 github.com/anchoo2kewl/go-wiki v0.1.1-0.20260228213051-70d183470217/go.mod h1:Q+Mdj3RCfVlaj8CdRRkSelRWQVRJFUwrSvAxgFB1efY=
+github.com/anchoo2kewl/go-wiki v0.1.1-0.20260228215946-8d61e00351fb h1:6mfYoRi1vMJKrom+ljVIKsnoeJDgg+4mslF2NyKUDXE=
+github.com/anchoo2kewl/go-wiki v0.1.1-0.20260228215946-8d61e00351fb/go.mod h1:Q+Mdj3RCfVlaj8CdRRkSelRWQVRJFUwrSvAxgFB1efY=
 github.com/apparentlymart/go-textseg/v15 v15.0.0 h1:uYvfpb3DyLSCGWnctWKGj857c6ew1u1fNQOlOtuGxQY=
 github.com/apparentlymart/go-textseg/v15 v15.0.0/go.mod h1:K8XmNZdhEBkdlyDdvbmmsvpAG721bKi0joRfFdHIWJ4=
 github.com/bmatcuk/doublestar v1.3.4 h1:gPypJ5xD31uhX6Tf54sDPUOBXTqKH4c9aPY66CyQrS0=

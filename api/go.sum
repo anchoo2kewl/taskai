@@ -6,6 +6,8 @@ github.com/DATA-DOG/go-sqlmock v1.5.0 h1:Shsta01QNfFxHCfpW6YH2STWB0MudeXXEWMr20O
 github.com/DATA-DOG/go-sqlmock v1.5.0/go.mod h1:f/Ixk793poVmq4qj/V1dPUg2JEAKC73Q5eFN3EC/SaM=
 github.com/agext/levenshtein v1.2.3 h1:YB2fHEn0UJagG8T1rrWknE3ZQzWM06O8AMAatNn7lmo=
 github.com/agext/levenshtein v1.2.3/go.mod h1:JEDfjyjHDjOF/1e4FlBE/PkbqA9OfWu2ki2W0IB5558=
+github.com/anchoo2kewl/go-draw v0.0.0-20260228200306-4995b30e1408 h1:PyXTn6mwi73uBayqrQTpZywtP6NHtUlsbKrupwPHLGg=
+github.com/anchoo2kewl/go-draw v0.0.0-20260228200306-4995b30e1408/go.mod h1:QPqDIJDVJcbB/WTGGPoRmQpDxxTCVr6dhMV76uvVx84=
 github.com/anchoo2kewl/go-wiki v0.1.1-0.20260228201805-1b028aa7f1cb h1:zQmoCMspYDimOHECrC++cUe1WcjcDwQdCbf7jxbt6yo=
 github.com/anchoo2kewl/go-wiki v0.1.1-0.20260228201805-1b028aa7f1cb/go.mod h1:Q+Mdj3RCfVlaj8CdRRkSelRWQVRJFUwrSvAxgFB1efY=
 github.com/apparentlymart/go-textseg/v15 v15.0.0 h1:uYvfpb3DyLSCGWnctWKGj857c6ew1u1fNQOlOtuGxQY=

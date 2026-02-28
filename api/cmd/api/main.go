@@ -9,6 +9,7 @@ import (
 	"syscall"
 	"time"
 
+	godraw "github.com/anchoo2kewl/go-draw"
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
 	"github.com/go-chi/cors"
@@ -119,6 +120,13 @@ func main() {
 		w.WriteHeader(http.StatusOK)
 		fmt.Fprintf(w, `{"status":"ok","database":"connected"}`)
 	})
+
+	// go-draw canvas editor
+	drawHandler, err := godraw.New(godraw.WithBasePath("/draw"))
+	if err != nil {
+		logger.Fatal("could not initialize go-draw", zap.Error(err))
+	}
+	r.Handle("/draw/*", drawHandler.Handler())
 
 	// API routes
 	r.Route("/api", func(r chi.Router) {

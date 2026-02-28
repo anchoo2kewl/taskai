@@ -192,6 +192,11 @@ func main() {
 			// Wiki WebSocket route for real-time collaboration
 			r.Get("/wiki/collab", server.HandleWikiWebSocket)
 
+			// Wiki page attachment routes
+			r.Get("/wiki/pages/{pageId}/attachments", server.HandleListWikiPageAttachments)
+			r.Post("/wiki/pages/{pageId}/attachments", server.HandleCreateWikiPageAttachment)
+			r.Delete("/wiki/attachments/{attachmentId}", server.HandleDeleteWikiPageAttachment)
+
 			// Wiki search routes
 			r.Post("/wiki/search", server.HandleSearchWiki)
 			r.Get("/wiki/autocomplete", server.HandleAutocompletePages)

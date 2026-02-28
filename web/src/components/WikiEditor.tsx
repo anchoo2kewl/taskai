@@ -1,5 +1,6 @@
 import { useEffect, useState, useCallback, useRef } from 'react'
 import { WikiPage } from '../lib/api'
+import ImagePickerModal from './ImagePickerModal'
 import * as Y from 'yjs'
 import { WebsocketProvider } from 'y-websocket'
 import ReactMarkdown from 'react-markdown'
@@ -14,6 +15,7 @@ export default function WikiEditor({ page }: WikiEditorProps) {
   const [isPreview, setIsPreview] = useState(false)
   const [syncState, setSyncState] = useState<'connecting' | 'connected' | 'disconnected'>('connecting')
   const [lastSaved, setLastSaved] = useState<Date | null>(null)
+  const [showImagePicker, setShowImagePicker] = useState(false)
 
   const ydocRef = useRef<Y.Doc | null>(null)
   const providerRef = useRef<WebsocketProvider | null>(null)
@@ -118,6 +120,32 @@ export default function WikiEditor({ page }: WikiEditorProps) {
     }
   }
 
+  const insertImageMarkdown = (alt: string, url: string) => {
+    const textarea = textareaRef.current
+    const markdown = `![${alt}](${url})`
+
+    if (textarea) {
+      const start = textarea.selectionStart
+      const end = textarea.selectionEnd
+      const newContent = content.substring(0, start) + markdown + content.substring(end)
+      setContent(newContent)
+      handleContentChange(newContent)
+
+      // Move cursor after inserted markdown
+      setTimeout(() => {
+        textarea.selectionStart = textarea.selectionEnd = start + markdown.length
+        textarea.focus()
+      }, 0)
+    } else {
+      // Fallback: append to end
+      const newContent = content + (content.endsWith('\n') ? '' : '\n') + markdown + '\n'
+      setContent(newContent)
+      handleContentChange(newContent)
+    }
+
+    setShowImagePicker(false)
+  }
+
   const getSyncStatusColor = () => {
     switch (syncState) {
       case 'connected':
@@ -164,6 +192,18 @@ export default function WikiEditor({ page }: WikiEditorProps) {
           </div>
 
           <div className="flex items-center gap-2">
+            {!isPreview && (
+              <button
+                onClick={() => setShowImagePicker(true)}
+                className="px-3 py-2 rounded text-sm font-medium transition-colors bg-dark-bg-tertiary text-dark-text-secondary hover:bg-dark-bg-tertiary/80 flex items-center gap-1.5"
+                title="Insert image"
+              >
+                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
+                </svg>
+                Image
+              </button>
+            )}
             <button
               onClick={() => setIsPreview(false)}
               className={`px-4 py-2 rounded text-sm font-medium transition-colors ${
@@ -245,6 +285,16 @@ export default function WikiEditor({ page }: WikiEditorProps) {
             <span>Tab to indent</span>
           </div>
         </div>
+      )}
+
+      {/* Image Picker Modal */}
+      {showImagePicker && (
+        <ImagePickerModal
+          onSelect={insertImageMarkdown}
+          onClose={() => setShowImagePicker(false)}
+          wikiPageId={page.id}
+          onUploadComplete={() => {}}
+        />
       )}
     </div>
   )

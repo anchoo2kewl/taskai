@@ -1694,50 +1694,17 @@ func TestHandleCreateTaskAttachmentPersistence(t *testing.T) {
 func TestHandleGetUploadSignature(t *testing.T) {
 	tests := []struct {
 		name          string
+		queryParams   string // appended to path
 		wantStatus    int
 		wantError     string
 		wantErrorCode string
+		checkResp     func(t *testing.T, resp UploadSignatureResponse)
 		setupFunc     func(t *testing.T, ts *TestServer) int64
 	}{
 		{
-			name:       "generates signature with stored credentials",
+			name:       "generates signature with stored credentials and folder structure",
 			wantStatus: http.StatusOK,
-			setupFunc: func(t *testing.T, ts *TestServer) int64 {
-				userID := ts.CreateTestUser(t, "user@example.com", "password123")
-				createTestCloudinaryCredential(t, ts, userID, "my-cloud", "my-api-key", "my-api-secret")
-				return userID
-			},
-		},
-		{
-			name:          "returns error when no credentials exist",
-			wantStatus:    http.StatusBadRequest,
-			wantError:     "no Cloudinary credentials configured",
-			wantErrorCode: "no_credentials",
-			setupFunc: func(t *testing.T, ts *TestServer) int64 {
-				return ts.CreateTestUser(t, "user@example.com", "password123")
-			},
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			ts := NewTestServer(t)
-			defer ts.Close()
-
-			userID := tt.setupFunc(t, ts)
-
-			rec, req := makeAuthRequest(t, http.MethodGet, "/api/cloudinary/upload-signature", nil, userID, nil)
-			ts.HandleGetUploadSignature(rec, req)
-
-			AssertStatusCode(t, rec.Code, tt.wantStatus)
-
-			if tt.wantError != "" {
-				AssertError(t, rec, tt.wantStatus, tt.wantError, tt.wantErrorCode)
-			}
-
-			if tt.wantStatus == http.StatusOK {
-				var resp UploadSignatureResponse
-				DecodeJSON(t, rec, &resp)
+			checkResp: func(t *testing.T, resp UploadSignatureResponse) {
 				if resp.Signature == "" {
 					t.Error("Expected non-empty signature")
 				}
@@ -1750,6 +1717,100 @@ func TestHandleGetUploadSignature(t *testing.T) {
 				if resp.APIKey != "my-api-key" {
 					t.Errorf("Expected api_key 'my-api-key', got %q", resp.APIKey)
 				}
+				if resp.Folder != "taskai/test-project" {
+					t.Errorf("Expected folder 'taskai/test-project', got %q", resp.Folder)
+				}
+				// public_id should be {taskID}_01
+				if resp.PublicID == "" {
+					t.Error("Expected non-empty public_id")
+				}
+			},
+			setupFunc: func(t *testing.T, ts *TestServer) int64 {
+				userID := ts.CreateTestUser(t, "user@example.com", "password123")
+				createTestCloudinaryCredential(t, ts, userID, "my-cloud", "my-api-key", "my-api-secret")
+				projectID := createTestProjectForCloudinary(t, ts, userID)
+				createTestTaskForCloudinary(t, ts, projectID)
+				return userID
+			},
+		},
+		{
+			name:          "returns error when no credentials exist",
+			wantStatus:    http.StatusBadRequest,
+			wantError:     "no Cloudinary credentials configured",
+			wantErrorCode: "no_credentials",
+			setupFunc: func(t *testing.T, ts *TestServer) int64 {
+				userID := ts.CreateTestUser(t, "user@example.com", "password123")
+				projectID := createTestProjectForCloudinary(t, ts, userID)
+				createTestTaskForCloudinary(t, ts, projectID)
+				return userID
+			},
+		},
+		{
+			name:          "missing task_id returns 400",
+			queryParams:   "", // will override default
+			wantStatus:    http.StatusBadRequest,
+			wantError:     "task_id query parameter is required",
+			wantErrorCode: "bad_request",
+			setupFunc: func(t *testing.T, ts *TestServer) int64 {
+				userID := ts.CreateTestUser(t, "user@example.com", "password123")
+				createTestCloudinaryCredential(t, ts, userID, "cloud", "key", "secret")
+				return userID
+			},
+		},
+		{
+			name:          "invalid task_id returns 400",
+			queryParams:   "?task_id=abc",
+			wantStatus:    http.StatusBadRequest,
+			wantError:     "invalid task_id",
+			wantErrorCode: "bad_request",
+			setupFunc: func(t *testing.T, ts *TestServer) int64 {
+				userID := ts.CreateTestUser(t, "user@example.com", "password123")
+				createTestCloudinaryCredential(t, ts, userID, "cloud", "key", "secret")
+				return userID
+			},
+		},
+		{
+			name:          "non-existent task returns 404",
+			queryParams:   "?task_id=99999",
+			wantStatus:    http.StatusNotFound,
+			wantError:     "task not found",
+			wantErrorCode: "not_found",
+			setupFunc: func(t *testing.T, ts *TestServer) int64 {
+				userID := ts.CreateTestUser(t, "user@example.com", "password123")
+				createTestCloudinaryCredential(t, ts, userID, "cloud", "key", "secret")
+				return userID
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ts := NewTestServer(t)
+			defer ts.Close()
+
+			userID := tt.setupFunc(t, ts)
+
+			// Build path: default includes ?task_id=1 unless overridden
+			path := "/api/cloudinary/upload-signature?task_id=1"
+			if tt.queryParams != "" {
+				path = "/api/cloudinary/upload-signature" + tt.queryParams
+			} else if tt.name == "missing task_id returns 400" {
+				path = "/api/cloudinary/upload-signature"
+			}
+
+			rec, req := makeAuthRequest(t, http.MethodGet, path, nil, userID, nil)
+			ts.HandleGetUploadSignature(rec, req)
+
+			AssertStatusCode(t, rec.Code, tt.wantStatus)
+
+			if tt.wantError != "" {
+				AssertError(t, rec, tt.wantStatus, tt.wantError, tt.wantErrorCode)
+			}
+
+			if tt.checkResp != nil && tt.wantStatus == http.StatusOK {
+				var resp UploadSignatureResponse
+				DecodeJSON(t, rec, &resp)
+				tt.checkResp(t, resp)
 			}
 		})
 	}
@@ -1761,16 +1822,19 @@ func TestHandleGetUploadSignatureDeterministic(t *testing.T) {
 
 	userID := ts.CreateTestUser(t, "user@example.com", "password123")
 	createTestCloudinaryCredential(t, ts, userID, "cloud", "key", "secret")
+	projectID := createTestProjectForCloudinary(t, ts, userID)
+	taskID := createTestTaskForCloudinary(t, ts, projectID)
+	taskIDStr := strconv.FormatInt(taskID, 10)
 
-	// Get two signatures - they should have the same cloud_name and api_key
-	rec1, req1 := makeAuthRequest(t, http.MethodGet, "/api/cloudinary/upload-signature", nil, userID, nil)
+	// Get two signatures - they should have the same cloud_name, api_key, folder, and public_id
+	rec1, req1 := makeAuthRequest(t, http.MethodGet, "/api/cloudinary/upload-signature?task_id="+taskIDStr, nil, userID, nil)
 	ts.HandleGetUploadSignature(rec1, req1)
 	AssertStatusCode(t, rec1.Code, http.StatusOK)
 
 	var resp1 UploadSignatureResponse
 	DecodeJSON(t, rec1, &resp1)
 
-	rec2, req2 := makeAuthRequest(t, http.MethodGet, "/api/cloudinary/upload-signature", nil, userID, nil)
+	rec2, req2 := makeAuthRequest(t, http.MethodGet, "/api/cloudinary/upload-signature?task_id="+taskIDStr, nil, userID, nil)
 	ts.HandleGetUploadSignature(rec2, req2)
 	AssertStatusCode(t, rec2.Code, http.StatusOK)
 
@@ -1782,6 +1846,12 @@ func TestHandleGetUploadSignatureDeterministic(t *testing.T) {
 	}
 	if resp1.APIKey != resp2.APIKey {
 		t.Errorf("API keys should match: %q vs %q", resp1.APIKey, resp2.APIKey)
+	}
+	if resp1.Folder != resp2.Folder {
+		t.Errorf("Folders should match: %q vs %q", resp1.Folder, resp2.Folder)
+	}
+	if resp1.PublicID != resp2.PublicID {
+		t.Errorf("Public IDs should match: %q vs %q", resp1.PublicID, resp2.PublicID)
 	}
 }
 
@@ -1878,5 +1948,163 @@ func TestHandleUpdateAttachment_InvalidBody(t *testing.T) {
 	ts.HandleUpdateAttachment(rec, req)
 
 	AssertError(t, rec, http.StatusBadRequest, "invalid request body", "bad_request")
+}
+
+func TestSlugifyProjectName(t *testing.T) {
+	tests := []struct {
+		name      string
+		input     string
+		projectID int64
+		want      string
+	}{
+		{"simple lowercase", "My Project", 1, "my-project"},
+		{"special characters", "Hello! World@#2024", 2, "hello-world-2024"},
+		{"consecutive hyphens", "my---project", 3, "my-project"},
+		{"leading/trailing special", "  --My Project--  ", 4, "my-project"},
+		{"unicode chars replaced", "Projet Tache", 5, "projet-tache"},
+		{"empty after slugify", "!!!", 6, "project-6"},
+		{"all spaces", "   ", 7, "project-7"},
+		{"empty string", "", 8, "project-8"},
+		{"already slugified", "my-project", 9, "my-project"},
+		{"numbers only", "123", 10, "123"},
+		{"mixed case with numbers", "TaskAI v2.0", 11, "taskai-v2-0"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := slugifyProjectName(tt.input, tt.projectID)
+			if got != tt.want {
+				t.Errorf("slugifyProjectName(%q, %d) = %q, want %q", tt.input, tt.projectID, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestHandleGetUploadSignature_FolderAndPublicID(t *testing.T) {
+	ts := NewTestServer(t)
+	defer ts.Close()
+
+	userID := ts.CreateTestUser(t, "user@example.com", "password123")
+	createTestCloudinaryCredential(t, ts, userID, "cloud", "key", "secret")
+
+	// Create project with a specific name
+	ctx := context.Background()
+	result, err := ts.DB.ExecContext(ctx,
+		`INSERT INTO projects (owner_id, name, description) VALUES (?, ?, ?)`,
+		userID, "My Cool Project!", "desc")
+	if err != nil {
+		t.Fatalf("Failed to create project: %v", err)
+	}
+	projectID, _ := result.LastInsertId()
+
+	taskResult, err := ts.DB.ExecContext(ctx,
+		`INSERT INTO tasks (project_id, title, status, priority) VALUES (?, ?, ?, ?)`,
+		projectID, "Task 1", "todo", "medium")
+	if err != nil {
+		t.Fatalf("Failed to create task: %v", err)
+	}
+	taskID, _ := taskResult.LastInsertId()
+	taskIDStr := strconv.FormatInt(taskID, 10)
+
+	// First upload: should be _01
+	rec, req := makeAuthRequest(t, http.MethodGet, "/api/cloudinary/upload-signature?task_id="+taskIDStr, nil, userID, nil)
+	ts.HandleGetUploadSignature(rec, req)
+	AssertStatusCode(t, rec.Code, http.StatusOK)
+
+	var resp UploadSignatureResponse
+	DecodeJSON(t, rec, &resp)
+
+	expectedFolder := "taskai/my-cool-project"
+	expectedPublicID := fmt.Sprintf("%d_01", taskID)
+
+	if resp.Folder != expectedFolder {
+		t.Errorf("Expected folder %q, got %q", expectedFolder, resp.Folder)
+	}
+	if resp.PublicID != expectedPublicID {
+		t.Errorf("Expected public_id %q, got %q", expectedPublicID, resp.PublicID)
+	}
+
+	// Add an attachment, then get signature again — should be _02
+	createTestAttachment(t, ts, taskID, userID, projectID, "image", "photo.jpg", "Photo")
+
+	rec2, req2 := makeAuthRequest(t, http.MethodGet, "/api/cloudinary/upload-signature?task_id="+taskIDStr, nil, userID, nil)
+	ts.HandleGetUploadSignature(rec2, req2)
+	AssertStatusCode(t, rec2.Code, http.StatusOK)
+
+	var resp2 UploadSignatureResponse
+	DecodeJSON(t, rec2, &resp2)
+
+	expectedPublicID2 := fmt.Sprintf("%d_02", taskID)
+	if resp2.PublicID != expectedPublicID2 {
+		t.Errorf("Expected public_id %q after 1 attachment, got %q", expectedPublicID2, resp2.PublicID)
+	}
+}
+
+func TestHandleGetUploadSignature_AttachmentLimitExceeded(t *testing.T) {
+	ts := NewTestServer(t)
+	defer ts.Close()
+
+	userID := ts.CreateTestUser(t, "user@example.com", "password123")
+	createTestCloudinaryCredential(t, ts, userID, "cloud", "key", "secret")
+	projectID := createTestProjectForCloudinary(t, ts, userID)
+	taskID := createTestTaskForCloudinary(t, ts, projectID)
+
+	// Insert 99 attachments directly
+	ctx := context.Background()
+	for i := 0; i < 99; i++ {
+		_, err := ts.DB.ExecContext(ctx,
+			`INSERT INTO task_attachments (task_id, project_id, user_id, filename, alt_name, file_type, content_type, file_size, cloudinary_url, cloudinary_public_id)
+			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			taskID, projectID, userID, fmt.Sprintf("file_%02d.jpg", i+1), "", "image", "image/jpeg", 1024,
+			fmt.Sprintf("https://res.cloudinary.com/test/file_%02d.jpg", i+1),
+			fmt.Sprintf("taskai/test-project/%d_%02d", taskID, i+1),
+		)
+		if err != nil {
+			t.Fatalf("Failed to insert attachment %d: %v", i+1, err)
+		}
+	}
+
+	taskIDStr := strconv.FormatInt(taskID, 10)
+	rec, req := makeAuthRequest(t, http.MethodGet, "/api/cloudinary/upload-signature?task_id="+taskIDStr, nil, userID, nil)
+	ts.HandleGetUploadSignature(rec, req)
+
+	AssertError(t, rec, http.StatusBadRequest, "maximum 99 attachments per task", "attachment_limit_exceeded")
+}
+
+func TestHandleCreateTaskAttachment_AttachmentLimitExceeded(t *testing.T) {
+	ts := NewTestServer(t)
+	defer ts.Close()
+
+	userID := ts.CreateTestUser(t, "user@example.com", "password123")
+	projectID := createTestProjectForCloudinary(t, ts, userID)
+	taskID := createTestTaskForCloudinary(t, ts, projectID)
+
+	// Insert 99 attachments directly
+	ctx := context.Background()
+	for i := 0; i < 99; i++ {
+		_, err := ts.DB.ExecContext(ctx,
+			`INSERT INTO task_attachments (task_id, project_id, user_id, filename, alt_name, file_type, content_type, file_size, cloudinary_url, cloudinary_public_id)
+			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			taskID, projectID, userID, fmt.Sprintf("file_%02d.jpg", i+1), "", "image", "image/jpeg", 1024,
+			fmt.Sprintf("https://res.cloudinary.com/test/file_%02d.jpg", i+1),
+			fmt.Sprintf("taskai/test-project/%d_%02d", taskID, i+1),
+		)
+		if err != nil {
+			t.Fatalf("Failed to insert attachment %d: %v", i+1, err)
+		}
+	}
+
+	// Try to create the 100th via the handler
+	body := CreateAttachmentRequest{
+		Filename:           "overflow.jpg",
+		CloudinaryURL:      "https://res.cloudinary.com/test/overflow.jpg",
+		CloudinaryPublicID: "test/overflow",
+	}
+	taskIDStr := strconv.FormatInt(taskID, 10)
+	rec, req := makeAuthRequest(t, http.MethodPost, "/api/tasks/"+taskIDStr+"/attachments", body, userID,
+		map[string]string{"taskId": taskIDStr})
+	ts.HandleCreateTaskAttachment(rec, req)
+
+	AssertError(t, rec, http.StatusBadRequest, "maximum 99 attachments per task", "attachment_limit_exceeded")
 }
 

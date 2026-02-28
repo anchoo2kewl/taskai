@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -16,6 +17,20 @@ import (
 	"github.com/go-chi/chi/v5"
 	"go.uber.org/zap"
 )
+
+var nonAlphanumericRe = regexp.MustCompile(`[^a-z0-9]+`)
+
+// slugifyProjectName converts a project name into a URL-safe slug for Cloudinary folders.
+// Falls back to "project-{id}" if the result is empty.
+func slugifyProjectName(name string, projectID int64) string {
+	slug := strings.ToLower(name)
+	slug = nonAlphanumericRe.ReplaceAllString(slug, "-")
+	slug = strings.Trim(slug, "-")
+	if slug == "" {
+		return fmt.Sprintf("project-%d", projectID)
+	}
+	return slug
+}
 
 // convertToPostgresQuery converts SQLite-style ? placeholders to Postgres $1, $2, etc.
 func convertToPostgresQuery(query string) string {
@@ -60,6 +75,8 @@ type UploadSignatureResponse struct {
 	Timestamp int64  `json:"timestamp"`
 	CloudName string `json:"cloud_name"`
 	APIKey    string `json:"api_key"`
+	Folder    string `json:"folder"`
+	PublicID  string `json:"public_id"`
 }
 
 type TaskAttachment struct {
@@ -321,15 +338,71 @@ func (s *Server) HandleTestCloudinaryConnection(w http.ResponseWriter, r *http.R
 	respondJSON(w, http.StatusOK, cred)
 }
 
-// HandleGetUploadSignature generates a Cloudinary upload signature for the current user
+// HandleGetUploadSignature generates a Cloudinary upload signature for the current user.
+// Requires ?task_id= query parameter to determine folder structure and public ID.
 func (s *Server) HandleGetUploadSignature(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
 	defer cancel()
 
 	userID := r.Context().Value(UserIDKey).(int64)
 
+	// Require task_id query parameter
+	taskIDStr := r.URL.Query().Get("task_id")
+	if taskIDStr == "" {
+		respondError(w, http.StatusBadRequest, "task_id query parameter is required", "bad_request")
+		return
+	}
+	taskID, err := strconv.ParseInt(taskIDStr, 10, 64)
+	if err != nil {
+		respondError(w, http.StatusBadRequest, "invalid task_id", "bad_request")
+		return
+	}
+
+	// Look up task to get project_id
+	var projectID int64
+	err = s.db.QueryRowContext(ctx,
+		`SELECT project_id FROM tasks WHERE id = $1`, taskID,
+	).Scan(&projectID)
+	if err == sql.ErrNoRows {
+		respondError(w, http.StatusNotFound, "task not found", "not_found")
+		return
+	}
+	if err != nil {
+		s.logger.Error("Failed to look up task for signature", zap.Error(err))
+		respondError(w, http.StatusInternalServerError, "failed to look up task", "internal_error")
+		return
+	}
+
+	// Look up project name for folder slug
+	var projectName string
+	err = s.db.QueryRowContext(ctx,
+		`SELECT name FROM projects WHERE id = $1`, projectID,
+	).Scan(&projectName)
+	if err != nil {
+		s.logger.Error("Failed to look up project for signature", zap.Error(err))
+		respondError(w, http.StatusInternalServerError, "failed to look up project", "internal_error")
+		return
+	}
+
+	// Count existing attachments for this task
+	var attachmentCount int
+	err = s.db.QueryRowContext(ctx,
+		`SELECT COUNT(*) FROM task_attachments WHERE task_id = $1`, taskID,
+	).Scan(&attachmentCount)
+	if err != nil {
+		s.logger.Error("Failed to count attachments", zap.Error(err))
+		respondError(w, http.StatusInternalServerError, "failed to count attachments", "internal_error")
+		return
+	}
+
+	if attachmentCount >= 99 {
+		respondError(w, http.StatusBadRequest, "maximum 99 attachments per task", "attachment_limit_exceeded")
+		return
+	}
+
+	// Fetch Cloudinary credentials
 	var cloudName, apiKey, apiSecret string
-	err := s.db.QueryRowContext(ctx,
+	err = s.db.QueryRowContext(ctx,
 		`SELECT cloud_name, api_key, api_secret FROM cloudinary_credentials WHERE user_id = $1`, userID,
 	).Scan(&cloudName, &apiKey, &apiSecret)
 
@@ -343,8 +416,13 @@ func (s *Server) HandleGetUploadSignature(w http.ResponseWriter, r *http.Request
 		return
 	}
 
+	// Build folder and public_id
+	folder := "taskai/" + slugifyProjectName(projectName, projectID)
+	publicID := fmt.Sprintf("%d_%02d", taskID, attachmentCount+1)
+
+	// Sign with all params alphabetically: folder, public_id, timestamp
 	timestamp := time.Now().Unix()
-	signStr := fmt.Sprintf("timestamp=%d%s", timestamp, apiSecret)
+	signStr := fmt.Sprintf("folder=%s&public_id=%s&timestamp=%d%s", folder, publicID, timestamp, apiSecret)
 	h := sha1.New()
 	h.Write([]byte(signStr))
 	signature := hex.EncodeToString(h.Sum(nil))
@@ -354,6 +432,8 @@ func (s *Server) HandleGetUploadSignature(w http.ResponseWriter, r *http.Request
 		Timestamp: timestamp,
 		CloudName: cloudName,
 		APIKey:    apiKey,
+		Folder:    folder,
+		PublicID:  publicID,
 	})
 }
 
@@ -438,6 +518,21 @@ func (s *Server) HandleCreateTaskAttachment(w http.ResponseWriter, r *http.Reque
 	if err != nil {
 		s.logger.Error("Failed to look up task", zap.Error(err))
 		respondError(w, http.StatusInternalServerError, "failed to look up task", "internal_error")
+		return
+	}
+
+	// Enforce 99-attachment limit per task
+	var attachmentCount int
+	err = s.db.QueryRowContext(ctx,
+		`SELECT COUNT(*) FROM task_attachments WHERE task_id = $1`, taskID,
+	).Scan(&attachmentCount)
+	if err != nil {
+		s.logger.Error("Failed to count attachments", zap.Error(err))
+		respondError(w, http.StatusInternalServerError, "failed to count attachments", "internal_error")
+		return
+	}
+	if attachmentCount >= 99 {
+		respondError(w, http.StatusBadRequest, "maximum 99 attachments per task", "attachment_limit_exceeded")
 		return
 	}
 

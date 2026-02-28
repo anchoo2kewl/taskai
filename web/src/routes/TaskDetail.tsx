@@ -131,13 +131,15 @@ export default function TaskDetail({ isModal, onClose }: TaskDetailProps) {
   const handleConfirmUpload = async (file: File, altText: string) => {
     try {
       setUploading(true)
-      const sig = await apiClient.getUploadSignature()
+      const sig = await apiClient.getUploadSignature(task!.id!)
 
       const formData = new FormData()
       formData.append('file', file)
       formData.append('api_key', sig.api_key)
       formData.append('timestamp', String(sig.timestamp))
       formData.append('signature', sig.signature)
+      formData.append('folder', sig.folder)
+      formData.append('public_id', sig.public_id)
 
       const uploadRes = await fetch(
         `https://api.cloudinary.com/v1_1/${sig.cloud_name}/auto/upload`,
@@ -1012,13 +1014,15 @@ function ImagePickerModal({ onSelect, onClose, taskId, onUploadComplete }: {
 
     try {
       setUploading(true)
-      const sig = await apiClient.getUploadSignature()
+      const sig = await apiClient.getUploadSignature(taskId)
 
       const formData = new FormData()
       formData.append('file', pendingUploadFile)
       formData.append('api_key', sig.api_key)
       formData.append('timestamp', String(sig.timestamp))
       formData.append('signature', sig.signature)
+      formData.append('folder', sig.folder)
+      formData.append('public_id', sig.public_id)
 
       const uploadRes = await fetch(
         `https://api.cloudinary.com/v1_1/${sig.cloud_name}/auto/upload`,

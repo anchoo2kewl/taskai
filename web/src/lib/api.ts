@@ -750,8 +750,8 @@ class ApiClient {
     })
   }
 
-  async getUploadSignature(): Promise<{ signature: string; timestamp: number; cloud_name: string; api_key: string }> {
-    return this.request('/api/settings/cloudinary/signature')
+  async getUploadSignature(taskId: number): Promise<{ signature: string; timestamp: number; cloud_name: string; api_key: string; folder: string; public_id: string }> {
+    return this.request(`/api/settings/cloudinary/signature?task_id=${taskId}`)
   }
 
   // Task attachment endpoints

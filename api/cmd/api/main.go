@@ -10,6 +10,7 @@ import (
 	"time"
 
 	godraw "github.com/anchoo2kewl/go-draw"
+	godrawstore "github.com/anchoo2kewl/go-draw/store"
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
 	"github.com/go-chi/cors"
@@ -121,8 +122,12 @@ func main() {
 		fmt.Fprintf(w, `{"status":"ok","database":"connected"}`)
 	})
 
-	// go-draw canvas editor
-	drawHandler, err := godraw.New(godraw.WithBasePath("/draw"))
+	// go-draw canvas editor — use /data/draw-data for writable storage in container
+	drawStore, err := godrawstore.NewFileStore("/data/draw-data")
+	if err != nil {
+		logger.Fatal("could not initialize go-draw store", zap.Error(err))
+	}
+	drawHandler, err := godraw.New(godraw.WithBasePath("/draw"), godraw.WithStore(drawStore))
 	if err != nil {
 		logger.Fatal("could not initialize go-draw", zap.Error(err))
 	}

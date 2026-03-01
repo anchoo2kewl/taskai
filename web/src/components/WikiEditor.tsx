@@ -92,10 +92,12 @@ function initDrawEmbeds(container: HTMLElement | null) {
   if (!container) return
   const embeds = container.querySelectorAll('.godraw-embed:not(.godraw-preview-init)')
   embeds.forEach((div) => {
-    const src = div.getAttribute('data-src')
+    let src = div.getAttribute('data-src')
     const w = div.getAttribute('data-width') || '100%'
-    const h = div.getAttribute('data-height') || '400px'
+    const h = div.getAttribute('data-height') || '520px'
     if (!src) return
+    // Preview always shows read-only view — strip /edit suffix
+    src = src.replace(/\/edit$/, '')
     const iframe = document.createElement('iframe')
     iframe.src = src
     iframe.style.width = w
@@ -624,9 +626,10 @@ export default function WikiEditor({ page }: WikiEditorProps) {
     loadDrawings()
   }, [loadDrawings])
 
-  const handleDrawInsert = useCallback((id: string) => {
+  const handleDrawInsert = useCallback((id: string, size: string) => {
     const textarea = isFullscreen ? fsTextareaRef.current : textareaRef.current
-    const markup = `\n[draw:${id}:edit]\n`
+    const sizeTag = size === 'm' ? '' : ':' + size
+    const markup = `\n[draw:${id}:edit${sizeTag}]\n`
     if (textarea) {
       const start = textarea.selectionStart
       const end = textarea.selectionEnd
@@ -1176,7 +1179,7 @@ export default function WikiEditor({ page }: WikiEditorProps) {
 function DrawCard({ drawing, isUsed, onInsert, onRename, onDelete }: {
   drawing: DrawItem
   isUsed: boolean
-  onInsert: (id: string) => void
+  onInsert: (id: string, size: string) => void
   onRename: (id: string, title: string) => void
   onDelete: (id: string, title: string) => void
 }) {
@@ -1233,13 +1236,18 @@ function DrawCard({ drawing, isUsed, onInsert, onRename, onDelete }: {
         )}
       </div>
       <span className="text-xs text-dark-text-tertiary">{formattedDate}</span>
-      <div className="flex gap-1.5 mt-1">
-        <button
-          onClick={() => onInsert(drawing.id)}
-          className="px-2.5 py-1 rounded text-xs font-medium bg-primary-600 text-white hover:bg-primary-500 transition-colors"
-        >
-          Insert
-        </button>
+      <div className="flex gap-1.5 mt-1 items-center">
+        <span className="text-[11px] font-semibold text-dark-text-tertiary mr-0.5">Insert</span>
+        {(['S', 'M', 'L'] as const).map(label => (
+          <button
+            key={label}
+            onClick={() => onInsert(drawing.id, label.toLowerCase())}
+            className="w-6 h-6 rounded text-[11px] font-semibold bg-primary-600 text-white hover:bg-primary-500 transition-colors"
+            title={label === 'S' ? 'Small' : label === 'M' ? 'Medium' : 'Large'}
+          >
+            {label}
+          </button>
+        ))}
         <button
           onClick={() => window.open(`/draw/${drawing.id}/edit`, '_blank')}
           className="px-2.5 py-1 rounded text-xs font-medium bg-dark-bg-tertiary text-dark-text-secondary hover:bg-dark-bg-tertiary/80 transition-colors"
@@ -1263,7 +1271,7 @@ function DrawBrowserModal({ drawings, loading, editorContent, onInsert, onRename
   drawings: DrawItem[]
   loading: boolean
   editorContent: string
-  onInsert: (id: string) => void
+  onInsert: (id: string, size: string) => void
   onRename: (id: string, title: string) => void
   onDelete: (id: string, title: string) => void
   onDeleteUnused: (ids: string[]) => void

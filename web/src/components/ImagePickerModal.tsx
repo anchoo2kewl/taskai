@@ -2,7 +2,7 @@ import { useState, useEffect, useRef } from 'react'
 import { apiClient, type Attachment } from '../lib/api'
 
 interface ImagePickerModalProps {
-  onSelect: (alt: string, url: string, caption?: string) => void
+  onSelect: (alt: string, url: string, caption?: string, size?: string) => void
   onClose: () => void
   taskId?: number
   wikiPageId?: number
@@ -20,6 +20,8 @@ export default function ImagePickerModal({ onSelect, onClose, taskId, wikiPageId
   const [uploadAltText, setUploadAltText] = useState('')
   const [uploadCaption, setUploadCaption] = useState('')
   const [browseCaption, setBrowseCaption] = useState('')
+  const [uploadSize, setUploadSize] = useState('m')
+  const [browseSize, setBrowseSize] = useState('m')
   const [pendingBrowseImage, setPendingBrowseImage] = useState<{ alt: string; url: string } | null>(null)
 
   useEffect(() => {
@@ -108,7 +110,7 @@ export default function ImagePickerModal({ onSelect, onClose, taskId, wikiPageId
       }
 
       onUploadComplete()
-      onSelect(altName, uploadData.secure_url, uploadCaption.trim() || undefined)
+      onSelect(altName, uploadData.secure_url, uploadCaption.trim() || undefined, uploadSize)
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : 'Failed to upload')
     } finally {
@@ -116,6 +118,7 @@ export default function ImagePickerModal({ onSelect, onClose, taskId, wikiPageId
       setPendingUploadFile(null)
       setUploadAltText('')
       setUploadCaption('')
+      setUploadSize('m')
     }
   }
 
@@ -209,13 +212,29 @@ export default function ImagePickerModal({ onSelect, onClose, taskId, wikiPageId
                   className="w-full mt-1 px-2.5 py-1.5 text-sm bg-dark-bg-secondary border border-dark-border-subtle text-dark-text-primary rounded-md focus:ring-1 focus:ring-primary-500 focus:border-primary-500 outline-none placeholder-dark-text-tertiary"
                   onKeyDown={(e) => {
                     if (e.key === 'Enter' && uploadAltText.trim().length >= 3 && !uploading) handleConfirmUploadAndInsert()
-                    if (e.key === 'Escape') { setPendingUploadFile(null); setUploadAltText(''); setUploadCaption('') }
+                    if (e.key === 'Escape') { setPendingUploadFile(null); setUploadAltText(''); setUploadCaption(''); setUploadSize('m') }
                   }}
                 />
+                <div className="flex gap-1 mt-1">
+                  {([['s', 'S'], ['m', 'M'], ['l', 'L']] as const).map(([val, label]) => (
+                    <button
+                      key={val}
+                      type="button"
+                      onClick={() => setUploadSize(val)}
+                      className={`px-2 py-0.5 rounded text-xs font-medium transition-colors ${
+                        uploadSize === val
+                          ? 'bg-primary-500 text-white'
+                          : 'bg-dark-bg-tertiary text-dark-text-secondary hover:bg-dark-bg-tertiary/80'
+                      }`}
+                    >
+                      {label}
+                    </button>
+                  ))}
+                </div>
               </div>
               <div className="flex gap-1.5 flex-shrink-0">
                 <button
-                  onClick={() => { setPendingUploadFile(null); setUploadAltText(''); setUploadCaption('') }}
+                  onClick={() => { setPendingUploadFile(null); setUploadAltText(''); setUploadCaption(''); setUploadSize('m') }}
                   disabled={uploading}
                   className="px-2.5 py-1.5 text-xs font-medium text-dark-text-secondary bg-dark-bg-tertiary hover:bg-dark-bg-tertiary/80 rounded-md transition-colors disabled:opacity-50"
                 >
@@ -302,26 +321,44 @@ export default function ImagePickerModal({ onSelect, onClose, taskId, wikiPageId
                       autoFocus
                       onKeyDown={(e) => {
                         if (e.key === 'Enter') {
-                          onSelect(pendingBrowseImage.alt, pendingBrowseImage.url, browseCaption.trim() || undefined)
+                          onSelect(pendingBrowseImage.alt, pendingBrowseImage.url, browseCaption.trim() || undefined, browseSize)
                           setPendingBrowseImage(null)
                           setBrowseCaption('')
+                          setBrowseSize('m')
                         }
-                        if (e.key === 'Escape') { setPendingBrowseImage(null); setBrowseCaption('') }
+                        if (e.key === 'Escape') { setPendingBrowseImage(null); setBrowseCaption(''); setBrowseSize('m') }
                       }}
                     />
+                    <div className="flex gap-1 mt-1">
+                      {([['s', 'S'], ['m', 'M'], ['l', 'L']] as const).map(([val, label]) => (
+                        <button
+                          key={val}
+                          type="button"
+                          onClick={() => setBrowseSize(val)}
+                          className={`px-2 py-0.5 rounded text-xs font-medium transition-colors ${
+                            browseSize === val
+                              ? 'bg-primary-500 text-white'
+                              : 'bg-dark-bg-tertiary text-dark-text-secondary hover:bg-dark-bg-tertiary/80'
+                          }`}
+                        >
+                          {label}
+                        </button>
+                      ))}
+                    </div>
                   </div>
                   <div className="flex gap-1.5 flex-shrink-0">
                     <button
-                      onClick={() => { setPendingBrowseImage(null); setBrowseCaption('') }}
+                      onClick={() => { setPendingBrowseImage(null); setBrowseCaption(''); setBrowseSize('m') }}
                       className="px-2.5 py-1.5 text-xs font-medium text-dark-text-secondary bg-dark-bg-tertiary hover:bg-dark-bg-tertiary/80 rounded-md transition-colors"
                     >
                       Cancel
                     </button>
                     <button
                       onClick={() => {
-                        onSelect(pendingBrowseImage.alt, pendingBrowseImage.url, browseCaption.trim() || undefined)
+                        onSelect(pendingBrowseImage.alt, pendingBrowseImage.url, browseCaption.trim() || undefined, browseSize)
                         setPendingBrowseImage(null)
                         setBrowseCaption('')
+                        setBrowseSize('m')
                       }}
                       className="px-2.5 py-1.5 text-xs font-medium text-white bg-primary-500 hover:bg-primary-600 rounded-md transition-colors"
                     >

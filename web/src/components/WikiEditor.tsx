@@ -181,6 +181,7 @@ export default function WikiEditor({ page }: WikiEditorProps) {
   const [selectedEditImg, setSelectedEditImg] = useState<{ html: string; url: string; alt: string; caption: string; index: number } | null>(null)
   const [editAlt, setEditAlt] = useState('')
   const [editCaption, setEditCaption] = useState('')
+  const [editSize, setEditSize] = useState('m')
   const [showDrawBrowser, setShowDrawBrowser] = useState(false)
   const [drawList, setDrawList] = useState<DrawItem[]>([])
   const [drawLoading, setDrawLoading] = useState(false)
@@ -500,14 +501,21 @@ export default function WikiEditor({ page }: WikiEditorProps) {
 
   // ── Image picker ─────────────────────────────────────────────
 
-  const insertImageMarkdown = (alt: string, url: string, caption?: string) => {
+  const insertImageMarkdown = (alt: string, url: string, caption?: string, size?: string) => {
     const textarea = isFullscreen ? fsTextareaRef.current : textareaRef.current
     const escHtml = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;')
+    const sz = size || 'm'
+    const sizeStyles: Record<string, string> = {
+      s: 'max-width:50%;height:auto;',
+      m: 'max-width:75%;height:auto;',
+      l: 'width:100%;height:auto;max-width:100%;',
+    }
+    const imgStyle = sizeStyles[sz] || sizeStyles.m
     let markup: string
-    if (caption) {
-      markup = `<figure style="text-align:center;margin:1.5rem 0"><a href="${url}" data-lightbox="article-images" data-title="${escHtml(alt)}"><img src="${url}" alt="${escHtml(alt)}" style="width:66%;height:auto;max-width:100%"/></a><figcaption>${escHtml(caption)}</figcaption></figure>\n`
-    } else {
+    if (sz === 'l' && !caption) {
       markup = `![${alt}](${url})`
+    } else {
+      markup = `<figure style="text-align:center;margin:1.5rem 0"><a href="${url}" data-lightbox="article-images" data-title="${escHtml(alt)}"><img src="${url}" alt="${escHtml(alt)}" style="${imgStyle}"/></a>${caption ? `<figcaption>${escHtml(caption)}</figcaption>` : ''}</figure>\n`
     }
 
     if (textarea) {
@@ -676,20 +684,34 @@ export default function WikiEditor({ page }: WikiEditorProps) {
     setSelectedEditImg(img)
     setEditAlt(img.alt)
     setEditCaption(img.caption)
+    // Detect size from existing HTML
+    if (img.html.startsWith('<figure')) {
+      if (/max-width:\s*50%/.test(img.html)) setEditSize('s')
+      else if (/max-width:\s*75%/.test(img.html)) setEditSize('m')
+      else setEditSize('l')
+    } else {
+      setEditSize('l') // plain markdown = large
+    }
   }
 
   const saveEditImg = useCallback(() => {
     if (!selectedEditImg) return
 
     const escHtml = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;')
+    const sizeStyles: Record<string, string> = {
+      s: 'max-width:50%;height:auto;',
+      m: 'max-width:75%;height:auto;',
+      l: 'width:100%;height:auto;max-width:100%;',
+    }
+    const imgStyle = sizeStyles[editSize] || sizeStyles.m
     let newMarkup: string
 
-    if (editCaption || selectedEditImg.html.startsWith('<figure')) {
-      // Build <figure> block
-      newMarkup = `<figure style="text-align:center;margin:1.5rem 0"><a href="${selectedEditImg.url}" data-lightbox="article-images" data-title="${escHtml(editAlt)}"><img src="${selectedEditImg.url}" alt="${escHtml(editAlt)}" style="width:66%;height:auto;max-width:100%"/></a>${editCaption ? `<figcaption>${escHtml(editCaption)}</figcaption>` : ''}</figure>`
-    } else {
-      // Plain markdown image
+    if (editSize === 'l' && !editCaption) {
+      // Large + no caption → plain markdown
       newMarkup = `![${editAlt}](${selectedEditImg.url})`
+    } else {
+      // Use <figure>
+      newMarkup = `<figure style="text-align:center;margin:1.5rem 0"><a href="${selectedEditImg.url}" data-lightbox="article-images" data-title="${escHtml(editAlt)}"><img src="${selectedEditImg.url}" alt="${escHtml(editAlt)}" style="${imgStyle}"/></a>${editCaption ? `<figcaption>${escHtml(editCaption)}</figcaption>` : ''}</figure>`
     }
 
     const newContent = content.replace(selectedEditImg.html, newMarkup)
@@ -698,7 +720,7 @@ export default function WikiEditor({ page }: WikiEditorProps) {
     isDirtyRef.current = true
     setEditImgList(null)
     setSelectedEditImg(null)
-  }, [selectedEditImg, editAlt, editCaption, content, syncToYjs])
+  }, [selectedEditImg, editAlt, editCaption, editSize, content, syncToYjs])
 
   // ── Draw browser handlers ────────────────────────────────────
 
@@ -1287,6 +1309,25 @@ export default function WikiEditor({ page }: WikiEditorProps) {
                         className="w-full px-3 py-2 rounded-lg bg-dark-bg-tertiary border border-dark-border-subtle text-sm text-dark-text-primary focus:outline-none focus:border-primary-500"
                         placeholder="Optional caption..."
                       />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-medium text-dark-text-secondary mb-1">Size</label>
+                      <div className="flex gap-1.5">
+                        {([['s', 'Small'], ['m', 'Medium'], ['l', 'Large']] as const).map(([val, label]) => (
+                          <button
+                            key={val}
+                            type="button"
+                            onClick={() => setEditSize(val)}
+                            className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-colors ${
+                              editSize === val
+                                ? 'bg-primary-500 text-white'
+                                : 'bg-dark-bg-tertiary text-dark-text-secondary hover:bg-dark-bg-tertiary/80'
+                            }`}
+                          >
+                            {label}
+                          </button>
+                        ))}
+                      </div>
                     </div>
                   </div>
                 </div>

@@ -105,8 +105,8 @@ http {
             add_header Cache-Control "public, immutable";
         }
 
-        # Proxy API requests to backend
-        location /api/ {
+        # Proxy API requests to backend (^~ prevents regex override)
+        location ^~ /api/ {
             proxy_pass http://api:8080/api/;
             proxy_http_version 1.1;
             proxy_set_header Host \$host;
@@ -116,6 +116,16 @@ http {
             proxy_connect_timeout 30s;
             proxy_send_timeout 30s;
             proxy_read_timeout 30s;
+        }
+
+        # go-draw canvas editor (^~ prevents static asset regex from catching .js files)
+        location ^~ /draw/ {
+            proxy_pass http://api:8080/draw/;
+            proxy_http_version 1.1;
+            proxy_set_header Host \$host;
+            proxy_set_header X-Real-IP \$remote_addr;
+            proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+            proxy_set_header X-Forwarded-Proto \$scheme;
         }
 
         # SPA routing - serve index.html for all routes

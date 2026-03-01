@@ -11,7 +11,7 @@ on:
         default: 'main'
 
 env:
-  GO_VERSION: "1.24"
+  GO_VERSION: "1.26"
   NODE_VERSION: "20"
 
 jobs:
@@ -124,6 +124,11 @@ jobs:
 
             echo "📊 Container status:"
             docker compose ps
+
+            # Ensure nginx has the /draw/ route (proxied to API backend)
+            echo "🔧 Updating nginx config..."
+            chmod +x source/deployment/scripts/ensure-draw-route.sh
+            sudo source/deployment/scripts/ensure-draw-route.sh taskai.cc
           ENDSSH
 
       - name: Capture container logs on failure

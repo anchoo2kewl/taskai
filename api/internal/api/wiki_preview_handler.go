@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"io"
 	"net/http"
+	"regexp"
 
 	gowiki "github.com/anchoo2kewl/go-wiki"
 	"github.com/anchoo2kewl/go-wiki/render"
@@ -19,6 +20,15 @@ var wiki = gowiki.New(
 	}),
 	gowiki.WithDrawBasePath("/draw"),
 )
+
+// drawEditSrcRe matches data-src attributes ending in /edit inside godraw-embed divs.
+var drawEditSrcRe = regexp.MustCompile(`(data-src="[^"]+)/edit"`)
+
+// stripDrawEditMode removes /edit from go-draw embed URLs so that
+// rendered content always shows a read-only canvas viewer.
+func stripDrawEditMode(html string) string {
+	return drawEditSrcRe.ReplaceAllString(html, `$1"`)
+}
 
 // wikiPreviewRequest is the JSON body for the preview endpoint.
 type wikiPreviewRequest struct {
@@ -50,7 +60,7 @@ func (s *Server) HandleWikiPreview(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	html := wiki.RenderContent(req.Content)
+	html := stripDrawEditMode(wiki.RenderContent(req.Content))
 
 	respondJSON(w, http.StatusOK, wikiPreviewResponse{HTML: html})
 }

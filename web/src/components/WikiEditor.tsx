@@ -92,7 +92,55 @@ const toolbarActions: ToolbarAction[] = [
 
 // ── Draw embed init — replicate embed.js behavior for innerHTML previews ──
 
-function initDrawEmbeds(container: HTMLElement | null) {
+const drawSizeMap: Record<string, { width: string; height: string }> = {
+  s: { width: '50%', height: '300px' },
+  m: { width: '100%', height: '520px' },
+  l: { width: '100%', height: '720px' },
+}
+
+const overlayBarStyle: Record<string, string> = {
+  position: 'absolute', top: '8px', right: '8px',
+  display: 'flex', alignItems: 'center', gap: '2px',
+  padding: '3px', borderRadius: '6px',
+  background: 'rgba(0,0,0,0.6)', backdropFilter: 'blur(4px)',
+  opacity: '0', transition: 'opacity 0.2s', zIndex: '5',
+}
+
+function makeSizeBtn(sz: string, isActive: boolean): HTMLButtonElement {
+  const btn = document.createElement('button')
+  btn.type = 'button'
+  btn.textContent = sz.toUpperCase()
+  btn.setAttribute('data-size', sz)
+  Object.assign(btn.style, {
+    padding: '3px 8px', border: 'none', borderRadius: '4px',
+    background: isActive ? 'rgba(99,102,241,0.8)' : 'transparent',
+    color: isActive ? '#fff' : 'rgba(255,255,255,0.7)',
+    fontSize: '11px', fontWeight: '600', cursor: 'pointer',
+    transition: 'background 0.15s, color 0.15s',
+  })
+  btn.addEventListener('mouseenter', () => { if (!btn.classList.contains('active')) { btn.style.background = 'rgba(255,255,255,0.15)'; btn.style.color = '#fff' } })
+  btn.addEventListener('mouseleave', () => { if (!btn.classList.contains('active')) { btn.style.background = 'transparent'; btn.style.color = 'rgba(255,255,255,0.7)' } })
+  if (isActive) btn.classList.add('active')
+  return btn
+}
+
+function updateSizeBtnStates(overlay: HTMLElement, activeSize: string) {
+  overlay.querySelectorAll('button[data-size]').forEach((b) => {
+    const btn = b as HTMLButtonElement
+    const isActive = btn.getAttribute('data-size') === activeSize
+    btn.classList.toggle('active', isActive)
+    btn.style.background = isActive ? 'rgba(99,102,241,0.8)' : 'transparent'
+    btn.style.color = isActive ? '#fff' : 'rgba(255,255,255,0.7)'
+  })
+}
+
+function escapeRegExp(str: string) { return str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') }
+
+function initDrawEmbeds(
+  container: HTMLElement | null,
+  contentRef?: React.MutableRefObject<string>,
+  updateContent?: (newContent: string) => void,
+) {
   if (!container) return
   const embeds = container.querySelectorAll('.godraw-embed:not(.godraw-preview-init)')
   embeds.forEach((div) => {
@@ -102,18 +150,14 @@ function initDrawEmbeds(container: HTMLElement | null) {
     const zoom = div.getAttribute('data-zoom')
     if (!src) return
 
-    // Extract draw ID from src for the edit button
     const drawIdMatch = src.match(/\/([a-zA-Z0-9_-]+?)(?:\/edit)?$/)
     const drawId = drawIdMatch ? drawIdMatch[1] : null
 
-    // Preview always shows read-only view — strip /edit suffix
     src = src.replace(/\/edit$/, '')
-    // Append zoom query param if present
     if (zoom) {
       src += (src.includes('?') ? '&' : '?') + 'zoom=' + encodeURIComponent(zoom)
     }
 
-    // Wrap in a positioned container for the edit overlay
     const wrapper = document.createElement('div')
     wrapper.style.position = 'relative'
     wrapper.style.display = 'inline-block'
@@ -126,37 +170,166 @@ function initDrawEmbeds(container: HTMLElement | null) {
     iframe.style.border = 'none'
     iframe.style.borderRadius = '8px'
     iframe.setAttribute('loading', 'lazy')
-
     wrapper.appendChild(iframe)
 
-    // Add "Edit" overlay button if we have a draw ID
     if (drawId) {
+      // Detect current size from shortcode
+      let currentSize = 'm'
+      if (contentRef) {
+        const scRe = new RegExp('\\[draw:' + escapeRegExp(drawId) + '(?::edit)?(?::([sml]))?')
+        const scMatch = scRe.exec(contentRef.current)
+        if (scMatch?.[1]) currentSize = scMatch[1]
+      }
+
+      const overlay = document.createElement('div')
+      Object.assign(overlay.style, overlayBarStyle)
+
+      // Size buttons S/M/L
+      for (const sz of ['s', 'm', 'l']) {
+        const btn = makeSizeBtn(sz, sz === currentSize)
+        btn.addEventListener('click', (e) => {
+          e.preventDefault(); e.stopPropagation()
+          if (!contentRef || !updateContent) return
+          const re = new RegExp('\\[draw:' + escapeRegExp(drawId) + '(?::edit)?(?::[sml])?(?::z[^\\]]+)?\\]')
+          const m = re.exec(contentRef.current)
+          if (!m) return
+          const zoomMatch = m[0].match(/:z([^\]]+)/)
+          const zoomTag = zoomMatch ? ':z' + zoomMatch[1] : ''
+          const sizeTag = sz === 'm' ? '' : ':' + sz
+          const newSC = `[draw:${drawId}:edit${sizeTag}${zoomTag}]`
+          const newContent = contentRef.current.substring(0, m.index) + newSC + contentRef.current.substring(m.index + m[0].length)
+          updateContent(newContent)
+          // Update visual
+          const dims = drawSizeMap[sz] || drawSizeMap.m
+          wrapper.style.width = dims.width
+          iframe.style.height = dims.height
+          updateSizeBtnStates(overlay, sz)
+        })
+        overlay.appendChild(btn)
+      }
+
+      // Separator + Edit button
+      const sep = document.createElement('span')
+      Object.assign(sep.style, { width: '1px', height: '16px', background: 'rgba(255,255,255,0.3)', margin: '0 2px' })
+      overlay.appendChild(sep)
+
       const editBtn = document.createElement('button')
       editBtn.type = 'button'
-      editBtn.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 3a2.828 2.828 0 114 4L7.5 20.5 2 22l1.5-5.5L17 3z"/></svg> Edit'
-      // Inline styles (no CSS file in TaskAI for this)
+      editBtn.innerHTML = '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 3a2.828 2.828 0 114 4L7.5 20.5 2 22l1.5-5.5L17 3z"/></svg> Edit'
       Object.assign(editBtn.style, {
-        position: 'absolute', top: '8px', right: '8px',
-        display: 'inline-flex', alignItems: 'center', gap: '4px',
-        padding: '5px 10px', border: 'none', borderRadius: '6px',
-        background: 'rgba(0,0,0,0.6)', color: '#fff',
-        fontSize: '12px', fontWeight: '500', cursor: 'pointer',
-        opacity: '0', transition: 'opacity 0.2s', zIndex: '5',
-        backdropFilter: 'blur(4px)',
+        display: 'inline-flex', alignItems: 'center', gap: '3px',
+        padding: '3px 8px', border: 'none', borderRadius: '4px',
+        background: 'transparent', color: 'rgba(255,255,255,0.7)',
+        fontSize: '11px', fontWeight: '500', cursor: 'pointer',
+        transition: 'background 0.15s, color 0.15s',
       })
+      editBtn.addEventListener('mouseenter', () => { editBtn.style.background = 'rgba(99,102,241,0.6)'; editBtn.style.color = '#fff' })
+      editBtn.addEventListener('mouseleave', () => { editBtn.style.background = 'transparent'; editBtn.style.color = 'rgba(255,255,255,0.7)' })
       editBtn.addEventListener('click', (e) => {
-        e.preventDefault()
-        e.stopPropagation()
+        e.preventDefault(); e.stopPropagation()
         window.open(`/draw/${drawId}/edit`, '_blank')
       })
-      wrapper.addEventListener('mouseenter', () => { editBtn.style.opacity = '1' })
-      wrapper.addEventListener('mouseleave', () => { editBtn.style.opacity = '0' })
-      wrapper.appendChild(editBtn)
+      overlay.appendChild(editBtn)
+
+      wrapper.addEventListener('mouseenter', () => { overlay.style.opacity = '1' })
+      wrapper.addEventListener('mouseleave', () => { overlay.style.opacity = '0' })
+      wrapper.appendChild(overlay)
     }
 
     div.innerHTML = ''
     div.appendChild(wrapper)
     div.classList.add('godraw-preview-init')
+  })
+}
+
+// ── Image edit overlays — add S/M/L size controls to images in preview ──
+
+function buildImageMarkup(url: string, alt: string, caption: string, size: string): string {
+  const sizeStyles: Record<string, string> = {
+    s: 'max-width:50%;height:auto;',
+    m: 'max-width:75%;height:auto;',
+    l: 'width:100%;height:auto;max-width:100%;',
+  }
+  const imgStyle = sizeStyles[size] || sizeStyles.m
+  const escHtml = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;')
+
+  if (size === 'l' && !caption) {
+    return `![${alt}](${url})`
+  }
+  return `<figure style="text-align:center;margin:1.5rem 0"><a href="${url}" data-lightbox="article-images" data-title="${escHtml(alt)}"><img src="${url}" alt="${escHtml(alt)}" style="${imgStyle}"/></a>${caption ? `<figcaption>${escHtml(caption)}</figcaption>` : ''}</figure>`
+}
+
+function addImageEditOverlays(
+  container: HTMLElement | null,
+  contentRef: React.MutableRefObject<string>,
+  updateContent: (newContent: string) => void,
+) {
+  if (!container) return
+  const images = container.querySelectorAll('img:not(.gw-preview-img-init)')
+  images.forEach((imgEl) => {
+    const img = imgEl as HTMLImageElement
+    // Skip images inside draw embeds
+    if (img.closest('.godraw-embed') || img.closest('[style*="inline-block"]')) return
+    const imgUrl = img.getAttribute('src')
+    if (!imgUrl) return
+
+    // Detect current size
+    let currentSize = 'l'
+    const styleStr = img.getAttribute('style') || ''
+    if (/max-width:\s*50%/.test(styleStr)) currentSize = 's'
+    else if (/max-width:\s*75%/.test(styleStr)) currentSize = 'm'
+
+    // Wrap the image (or its <figure> parent)
+    const wrapTarget = (img.closest('figure') || img) as HTMLElement
+    const wrapper = document.createElement('div')
+    wrapper.style.position = 'relative'
+    wrapper.style.display = 'inline-block'
+    wrapTarget.parentNode?.insertBefore(wrapper, wrapTarget)
+    wrapper.appendChild(wrapTarget)
+
+    const overlay = document.createElement('div')
+    Object.assign(overlay.style, overlayBarStyle)
+
+    for (const sz of ['s', 'm', 'l']) {
+      const btn = makeSizeBtn(sz, sz === currentSize)
+      btn.addEventListener('click', (e) => {
+        e.preventDefault(); e.stopPropagation()
+        const content = contentRef.current
+
+        // Try <figure> containing this URL
+        const figRe = new RegExp('<figure[^>]*>[\\s\\S]*?' + escapeRegExp(imgUrl) + '[\\s\\S]*?<\\/figure>')
+        const figMatch = figRe.exec(content)
+        if (figMatch) {
+          const altM = figMatch[0].match(/alt="([^"]*)"/)
+          const capM = figMatch[0].match(/<figcaption>([\s\S]*?)<\/figcaption>/)
+          const alt = (altM?.[1] || '').replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"')
+          const cap = (capM?.[1] || '').replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"')
+          updateContent(content.replace(figMatch[0], buildImageMarkup(imgUrl, alt, cap, sz)))
+        } else {
+          // Try markdown ![alt](url)
+          const mdRe = new RegExp('!\\[([^\\]]*)\\]\\(' + escapeRegExp(imgUrl) + '\\)')
+          const mdMatch = mdRe.exec(content)
+          if (mdMatch) {
+            updateContent(content.replace(mdMatch[0], buildImageMarkup(imgUrl, mdMatch[1], '', sz)))
+          }
+        }
+
+        // Update visual
+        const sizeStyles: Record<string, string> = {
+          s: 'max-width:50%;height:auto;',
+          m: 'max-width:75%;height:auto;',
+          l: 'width:100%;height:auto;max-width:100%;',
+        }
+        img.setAttribute('style', sizeStyles[sz] || sizeStyles.m)
+        updateSizeBtnStates(overlay, sz)
+      })
+      overlay.appendChild(btn)
+    }
+
+    wrapper.appendChild(overlay)
+    wrapper.addEventListener('mouseenter', () => { overlay.style.opacity = '1' })
+    wrapper.addEventListener('mouseleave', () => { overlay.style.opacity = '0' })
+    img.classList.add('gw-preview-img-init')
   })
 }
 
@@ -442,20 +615,31 @@ export default function WikiEditor({ page }: WikiEditorProps) {
 
   // ── Init draw embeds in previews ──────────────────────────────
 
+  const previewUpdateContent = useCallback((newContent: string) => {
+    setContent(newContent)
+    syncToYjs(newContent)
+    isDirtyRef.current = true
+  }, [syncToYjs])
+
   useEffect(() => {
     if (isPreview && previewHTML) {
-      // Small delay to ensure innerHTML has been committed by React
-      const t = setTimeout(() => initDrawEmbeds(previewRef.current), 50)
+      const t = setTimeout(() => {
+        initDrawEmbeds(previewRef.current, contentRef, previewUpdateContent)
+        addImageEditOverlays(previewRef.current, contentRef, previewUpdateContent)
+      }, 50)
       return () => clearTimeout(t)
     }
-  }, [isPreview, previewHTML])
+  }, [isPreview, previewHTML, previewUpdateContent])
 
   useEffect(() => {
     if (isFullscreen && fsPreviewHTML) {
-      const t = setTimeout(() => initDrawEmbeds(fsPreviewRef.current), 50)
+      const t = setTimeout(() => {
+        initDrawEmbeds(fsPreviewRef.current, contentRef, previewUpdateContent)
+        addImageEditOverlays(fsPreviewRef.current, contentRef, previewUpdateContent)
+      }, 50)
       return () => clearTimeout(t)
     }
-  }, [isFullscreen, fsPreviewHTML])
+  }, [isFullscreen, fsPreviewHTML, previewUpdateContent])
 
   // ── Keyboard shortcuts ───────────────────────────────────────
 

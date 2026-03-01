@@ -563,6 +563,9 @@ export default function WikiEditor({ page }: WikiEditorProps) {
           setContent(newContent)
           syncToYjs(newContent)
         }
+        // Open the drawing editor in a new tab
+        const editUrl = data.edit_url || `/draw/${data.id}/edit`
+        window.open(editUrl, '_blank')
       }
     } catch (err) {
       console.error('Failed to create drawing:', err)

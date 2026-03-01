@@ -95,9 +95,14 @@ function initDrawEmbeds(container: HTMLElement | null) {
     let src = div.getAttribute('data-src')
     const w = div.getAttribute('data-width') || '100%'
     const h = div.getAttribute('data-height') || '520px'
+    const zoom = div.getAttribute('data-zoom')
     if (!src) return
     // Preview always shows read-only view — strip /edit suffix
     src = src.replace(/\/edit$/, '')
+    // Append zoom query param if present
+    if (zoom) {
+      src += (src.includes('?') ? '&' : '?') + 'zoom=' + encodeURIComponent(zoom)
+    }
     const iframe = document.createElement('iframe')
     iframe.src = src
     iframe.style.width = w
@@ -626,10 +631,11 @@ export default function WikiEditor({ page }: WikiEditorProps) {
     loadDrawings()
   }, [loadDrawings])
 
-  const handleDrawInsert = useCallback((id: string, size: string) => {
+  const handleDrawInsert = useCallback((id: string, size: string, zoom: string) => {
     const textarea = isFullscreen ? fsTextareaRef.current : textareaRef.current
     const sizeTag = size === 'm' ? '' : ':' + size
-    const markup = `\n[draw:${id}:edit${sizeTag}]\n`
+    const zoomTag = zoom === 'fit' ? '' : ':z' + zoom
+    const markup = `\n[draw:${id}:edit${sizeTag}${zoomTag}]\n`
     if (textarea) {
       const start = textarea.selectionStart
       const end = textarea.selectionEnd
@@ -661,8 +667,7 @@ export default function WikiEditor({ page }: WikiEditorProps) {
     }
   }, [])
 
-  const handleDrawDelete = useCallback(async (id: string, title: string) => {
-    if (!confirm(`Delete "${title || 'Untitled'}"?`)) return
+  const handleDrawDelete = useCallback(async (id: string, _title: string) => {
     try {
       await fetch(`/draw/api/${id}/delete`, { method: 'POST' })
       setDrawList(prev => prev.filter(d => d.id !== id))
@@ -686,7 +691,6 @@ export default function WikiEditor({ page }: WikiEditorProps) {
   }, [loadDrawings])
 
   const handleDrawDeleteUnused = useCallback(async (unusedIds: string[]) => {
-    if (!confirm(`Delete ${unusedIds.length} unused drawing(s)? This cannot be undone.`)) return
     try {
       await Promise.all(unusedIds.map(id => fetch(`/draw/api/${id}/delete`, { method: 'POST' })))
       loadDrawings()
@@ -1179,12 +1183,14 @@ export default function WikiEditor({ page }: WikiEditorProps) {
 function DrawCard({ drawing, isUsed, onInsert, onRename, onDelete }: {
   drawing: DrawItem
   isUsed: boolean
-  onInsert: (id: string, size: string) => void
+  onInsert: (id: string, size: string, zoom: string) => void
   onRename: (id: string, title: string) => void
   onDelete: (id: string, title: string) => void
 }) {
   const [editing, setEditing] = useState(false)
   const [title, setTitle] = useState(drawing.title || 'Untitled')
+  const [size, setSize] = useState('m')
+  const [zoom, setZoom] = useState('fit')
   const inputRef = useRef<HTMLInputElement>(null)
 
   useEffect(() => {
@@ -1207,8 +1213,19 @@ function DrawCard({ drawing, isUsed, onInsert, onRename, onDelete }: {
     } catch { return drawing.updated_at }
   })()
 
+  const handleCardClick = (e: React.MouseEvent) => {
+    const target = e.target as HTMLElement
+    const tag = target.tagName
+    if (tag === 'SELECT' || tag === 'OPTION' || tag === 'BUTTON' || tag === 'INPUT' || tag === 'SVG' || tag === 'PATH' || tag === 'POLYLINE') return
+    if (target.closest('select') || target.closest('button') || target.closest('input')) return
+    onInsert(drawing.id, size, zoom)
+  }
+
   return (
-    <div className={`border rounded-xl p-4 flex flex-col gap-1.5 hover:border-primary-500/50 transition-colors ${isUsed ? 'border-green-500/30' : 'border-dark-border-subtle'}`}>
+    <div
+      onClick={handleCardClick}
+      className={`border rounded-xl p-4 flex flex-col gap-1.5 cursor-pointer transition-colors hover:bg-dark-bg-tertiary/50 ${isUsed ? 'border-green-500/30 hover:border-green-500/50' : 'border-dark-border-subtle hover:border-primary-500/50'}`}
+    >
       <div className="flex items-center gap-1.5">
         {editing ? (
           <input
@@ -1224,7 +1241,7 @@ function DrawCard({ drawing, isUsed, onInsert, onRename, onDelete }: {
           />
         ) : (
           <button
-            onClick={() => setEditing(true)}
+            onClick={(e) => { e.stopPropagation(); setEditing(true) }}
             className="text-sm font-semibold text-dark-text-primary text-left truncate hover:text-primary-400 transition-colors flex-1 min-w-0"
             title="Click to rename"
           >
@@ -1237,28 +1254,48 @@ function DrawCard({ drawing, isUsed, onInsert, onRename, onDelete }: {
       </div>
       <span className="text-xs text-dark-text-tertiary">{formattedDate}</span>
       <div className="flex gap-1.5 mt-1 items-center">
-        <span className="text-[11px] font-semibold text-dark-text-tertiary mr-0.5">Insert</span>
-        {(['S', 'M', 'L'] as const).map(label => (
-          <button
-            key={label}
-            onClick={() => onInsert(drawing.id, label.toLowerCase())}
-            className="w-6 h-6 rounded text-[11px] font-semibold bg-primary-600 text-white hover:bg-primary-500 transition-colors"
-            title={label === 'S' ? 'Small' : label === 'M' ? 'Medium' : 'Large'}
-          >
-            {label}
-          </button>
-        ))}
-        <button
-          onClick={() => window.open(`/draw/${drawing.id}/edit`, '_blank')}
-          className="px-2.5 py-1 rounded text-xs font-medium bg-dark-bg-tertiary text-dark-text-secondary hover:bg-dark-bg-tertiary/80 transition-colors"
+        <select
+          value={size}
+          onChange={e => setSize(e.target.value)}
+          onClick={e => e.stopPropagation()}
+          className="px-1.5 py-0.5 rounded border border-dark-border-subtle bg-dark-bg-tertiary text-[11px] font-medium text-dark-text-secondary focus:outline-none focus:border-primary-500"
+          title="Size"
         >
-          Edit
+          <option value="s">S</option>
+          <option value="m">M</option>
+          <option value="l">L</option>
+        </select>
+        <select
+          value={zoom}
+          onChange={e => setZoom(e.target.value)}
+          onClick={e => e.stopPropagation()}
+          className="px-1.5 py-0.5 rounded border border-dark-border-subtle bg-dark-bg-tertiary text-[11px] font-medium text-dark-text-secondary focus:outline-none focus:border-primary-500"
+          title="Zoom"
+        >
+          <option value="fit">fit</option>
+          <option value="50%">50%</option>
+          <option value="100%">100%</option>
+          <option value="150%">150%</option>
+          <option value="200%">200%</option>
+        </select>
+        <button
+          onClick={(e) => { e.stopPropagation(); window.open(`/draw/${drawing.id}/edit`, '_blank') }}
+          className="w-[26px] h-[26px] rounded flex items-center justify-center bg-dark-bg-tertiary text-dark-text-secondary hover:bg-dark-bg-tertiary/80 hover:text-dark-text-primary transition-colors"
+          title="Edit drawing"
+        >
+          <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
+            <path d="M17 3a2.828 2.828 0 114 4L7.5 20.5 2 22l1.5-5.5L17 3z"/>
+          </svg>
         </button>
         <button
-          onClick={() => onDelete(drawing.id, drawing.title)}
-          className="px-2.5 py-1 rounded text-xs font-medium bg-red-500/15 text-red-400 hover:bg-red-500/25 transition-colors"
+          onClick={(e) => { e.stopPropagation(); onDelete(drawing.id, drawing.title) }}
+          className="w-[26px] h-[26px] rounded flex items-center justify-center bg-red-500/15 text-red-400 hover:bg-red-500/25 transition-colors"
+          title="Delete drawing"
         >
-          Delete
+          <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
+            <polyline points="3 6 5 6 21 6"/>
+            <path d="M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a2 2 0 012-2h4a2 2 0 012 2v2"/>
+          </svg>
         </button>
       </div>
     </div>
@@ -1271,18 +1308,35 @@ function DrawBrowserModal({ drawings, loading, editorContent, onInsert, onRename
   drawings: DrawItem[]
   loading: boolean
   editorContent: string
-  onInsert: (id: string, size: string) => void
+  onInsert: (id: string, size: string, zoom: string) => void
   onRename: (id: string, title: string) => void
   onDelete: (id: string, title: string) => void
   onDeleteUnused: (ids: string[]) => void
   onNew: () => void
   onClose: () => void
 }) {
+  const [confirmAction, setConfirmAction] = useState<{ message: string; onConfirm: () => void } | null>(null)
+
   const usedIds = new Set<string>()
   const re = /\[draw:([a-zA-Z0-9_-]+)/g
   let m
   while ((m = re.exec(editorContent)) !== null) usedIds.add(m[1])
   const unusedDrawings = drawings.filter(d => !usedIds.has(d.id))
+
+  const handleDelete = (id: string, title: string) => {
+    setConfirmAction({
+      message: `Delete "${title || 'Untitled'}"?`,
+      onConfirm: () => { onDelete(id, title); setConfirmAction(null) },
+    })
+  }
+
+  const handleDeleteUnused = () => {
+    const count = unusedDrawings.length
+    setConfirmAction({
+      message: `Delete ${count} unused drawing${count > 1 ? 's' : ''}? This cannot be undone.`,
+      onConfirm: () => { onDeleteUnused(unusedDrawings.map(d => d.id)); setConfirmAction(null) },
+    })
+  }
 
   return (
     <div
@@ -1290,7 +1344,7 @@ function DrawBrowserModal({ drawings, loading, editorContent, onInsert, onRename
       onClick={onClose}
     >
       <div
-        className="w-full max-w-2xl mx-4 bg-dark-bg-secondary rounded-xl border border-dark-border-subtle shadow-2xl overflow-hidden flex flex-col max-h-[80vh]"
+        className="relative w-full max-w-2xl mx-4 bg-dark-bg-secondary rounded-xl border border-dark-border-subtle shadow-2xl overflow-hidden flex flex-col max-h-[80vh]"
         onClick={e => e.stopPropagation()}
       >
         {/* Header */}
@@ -1326,7 +1380,7 @@ function DrawBrowserModal({ drawings, loading, editorContent, onInsert, onRename
                 <div className="flex items-center justify-between gap-2 mb-3 px-3 py-2.5 rounded-lg bg-red-500/10 border border-red-500/20">
                   <span className="text-xs text-red-300">{unusedDrawings.length} unused drawing{unusedDrawings.length > 1 ? 's' : ''}</span>
                   <button
-                    onClick={() => onDeleteUnused(unusedDrawings.map(d => d.id))}
+                    onClick={handleDeleteUnused}
                     className="px-2.5 py-1 rounded text-xs font-medium bg-red-500/15 text-red-400 hover:bg-red-500/25 transition-colors"
                   >
                     Delete all unused
@@ -1341,13 +1395,42 @@ function DrawBrowserModal({ drawings, loading, editorContent, onInsert, onRename
                     isUsed={usedIds.has(d.id)}
                     onInsert={onInsert}
                     onRename={onRename}
-                    onDelete={onDelete}
+                    onDelete={handleDelete}
                   />
                 ))}
               </div>
             </>
           )}
         </div>
+
+        {/* Confirmation dialog overlay */}
+        {confirmAction && (
+          <div
+            className="absolute inset-0 z-10 flex items-center justify-center bg-black/45 backdrop-blur-sm rounded-xl"
+            onClick={() => setConfirmAction(null)}
+          >
+            <div
+              className="bg-dark-bg-secondary rounded-xl border border-dark-border-subtle shadow-2xl p-6 max-w-[340px] text-center"
+              onClick={e => e.stopPropagation()}
+            >
+              <p className="text-sm font-medium text-dark-text-primary mb-4">{confirmAction.message}</p>
+              <div className="flex gap-2 justify-center">
+                <button
+                  onClick={() => setConfirmAction(null)}
+                  className="px-3 py-1.5 rounded-lg text-xs font-medium border border-dark-border-subtle text-dark-text-secondary hover:bg-dark-bg-tertiary transition-colors"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={confirmAction.onConfirm}
+                  className="px-3 py-1.5 rounded-lg text-xs font-semibold bg-red-600 text-white hover:bg-red-500 transition-colors"
+                >
+                  Delete
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
       </div>
     </div>
   )

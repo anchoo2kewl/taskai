@@ -99,6 +99,11 @@ jobs:
             docker compose up -d
             sleep 15
             docker compose ps
+
+            # Ensure nginx has the /draw/ route (proxied to API backend)
+            echo "Updating nginx config..."
+            chmod +x deployment/scripts/ensure-draw-route.sh
+            sudo ./deployment/scripts/ensure-draw-route.sh uat.taskai.cc
           ENDSSH
 
       - name: Verify deployment

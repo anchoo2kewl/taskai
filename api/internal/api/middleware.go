@@ -2,11 +2,12 @@ package api
 
 import (
 	"context"
-	"log"
 	"net/http"
 	"strings"
 	"sync"
 	"time"
+
+	"go.uber.org/zap"
 
 	"taskai/internal/auth"
 )
@@ -50,7 +51,7 @@ func (s *Server) JWTAuth(next http.Handler) http.Handler {
 			// JWT token authentication
 			claims, jwtErr := auth.ValidateToken(credential, s.config.JWTSecret)
 			if jwtErr != nil {
-				log.Printf("Token validation failed: %v", jwtErr)
+				s.logger.Warn("Token validation failed", zap.Error(jwtErr))
 				respondError(w, http.StatusUnauthorized, "invalid or expired token", "unauthorized")
 				return
 			}
@@ -61,7 +62,7 @@ func (s *Server) JWTAuth(next http.Handler) http.Handler {
 			// API key authentication
 			userID, email, err = s.db.GetUserByAPIKey(r.Context(), credential)
 			if err != nil {
-				log.Printf("API key validation failed: %v", err)
+				s.logger.Warn("API key validation failed", zap.Error(err))
 				respondError(w, http.StatusUnauthorized, "invalid or expired API key", "unauthorized")
 				return
 			}
@@ -80,24 +81,25 @@ func (s *Server) JWTAuth(next http.Handler) http.Handler {
 	})
 }
 
-// Logger middleware logs HTTP requests
-func Logger(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		start := time.Now()
+// ZapLogger returns a middleware that logs HTTP requests using the provided zap logger.
+func ZapLogger(logger *zap.Logger) func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			start := time.Now()
 
-		// Wrap response writer to capture status code
-		wrapped := &responseWriter{ResponseWriter: w, statusCode: http.StatusOK}
+			// Wrap response writer to capture status code
+			wrapped := &responseWriter{ResponseWriter: w, statusCode: http.StatusOK}
 
-		next.ServeHTTP(wrapped, r)
+			next.ServeHTTP(wrapped, r)
 
-		log.Printf(
-			"%s %s %d %s",
-			r.Method,
-			r.URL.Path,
-			wrapped.statusCode,
-			time.Since(start),
-		)
-	})
+			logger.Info("HTTP request",
+				zap.String("method", r.Method),
+				zap.String("path", r.URL.Path),
+				zap.Int("status", wrapped.statusCode),
+				zap.Duration("duration", time.Since(start)),
+			)
+		})
+	}
 }
 
 // responseWriter wraps http.ResponseWriter to capture status code

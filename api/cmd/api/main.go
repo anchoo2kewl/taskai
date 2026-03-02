@@ -64,6 +64,9 @@ func main() {
 	// Initialize Yjs processor client
 	yjsClient := yjs.NewClient(cfg.YJSProcessorURL, logger)
 
+	// Initialize package-level logger for response helpers
+	api.SetLogger(logger)
+
 	// Create server with logger
 	server := api.NewServer(database, cfg, logger)
 	server.SetAuthService(authService)
@@ -76,7 +79,7 @@ func main() {
 	// Middleware stack
 	r.Use(middleware.RequestID)
 	r.Use(middleware.RealIP)
-	r.Use(api.Logger)
+	r.Use(api.ZapLogger(logger))
 	r.Use(middleware.Recoverer)
 	r.Use(middleware.Timeout(30 * time.Second))
 

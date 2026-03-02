@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"net/http/pprof"
 	"os"
 	"os/signal"
 	"syscall"
@@ -43,6 +44,7 @@ func main() {
 		DBPath:         cfg.DBPath,
 		DSN:            cfg.DBDSN,
 		MigrationsPath: cfg.MigrationsPath,
+		EnableSQLLog:   cfg.EnableSQLLog,
 	}
 
 	database, err := db.New(dbCfg, logger)
@@ -64,6 +66,9 @@ func main() {
 	// Initialize Yjs processor client
 	yjsClient := yjs.NewClient(cfg.YJSProcessorURL, logger)
 
+	// Initialize package-level logger for response helpers
+	api.SetLogger(logger)
+
 	// Create server with logger
 	server := api.NewServer(database, cfg, logger)
 	server.SetAuthService(authService)
@@ -76,7 +81,8 @@ func main() {
 	// Middleware stack
 	r.Use(middleware.RequestID)
 	r.Use(middleware.RealIP)
-	r.Use(api.Logger)
+	r.Use(middleware.Compress(5)) // gzip response compression
+	r.Use(api.ZapLogger(logger))
 	r.Use(middleware.Recoverer)
 	r.Use(middleware.Timeout(30 * time.Second))
 
@@ -121,6 +127,24 @@ func main() {
 		w.WriteHeader(http.StatusOK)
 		fmt.Fprintf(w, `{"status":"ok","database":"connected"}`)
 	})
+
+	// pprof profiling endpoints (non-production or explicitly enabled)
+	if cfg.Env != "production" || cfg.EnablePprof {
+		r.Route("/debug/pprof", func(r chi.Router) {
+			r.HandleFunc("/", pprof.Index)
+			r.HandleFunc("/cmdline", pprof.Cmdline)
+			r.HandleFunc("/profile", pprof.Profile)
+			r.HandleFunc("/symbol", pprof.Symbol)
+			r.HandleFunc("/trace", pprof.Trace)
+			r.Handle("/allocs", pprof.Handler("allocs"))
+			r.Handle("/block", pprof.Handler("block"))
+			r.Handle("/goroutine", pprof.Handler("goroutine"))
+			r.Handle("/heap", pprof.Handler("heap"))
+			r.Handle("/mutex", pprof.Handler("mutex"))
+			r.Handle("/threadcreate", pprof.Handler("threadcreate"))
+		})
+		logger.Info("pprof endpoints enabled at /debug/pprof/")
+	}
 
 	// go-draw canvas editor — use /data/draw-data for writable storage in container
 	drawStore, err := godrawstore.NewFileStore("/data/draw-data")

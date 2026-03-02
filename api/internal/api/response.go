@@ -2,9 +2,18 @@ package api
 
 import (
 	"encoding/json"
-	"log"
 	"net/http"
+
+	"go.uber.org/zap"
 )
+
+// pkgLogger is the package-level logger for response helpers.
+var pkgLogger *zap.Logger = zap.NewNop()
+
+// SetLogger sets the package-level logger for response helpers.
+func SetLogger(l *zap.Logger) {
+	pkgLogger = l
+}
 
 // ErrorResponse represents an error response
 type ErrorResponse struct {
@@ -21,7 +30,7 @@ func respondJSON(w http.ResponseWriter, statusCode int, data interface{}) {
 		encoder := json.NewEncoder(w)
 		encoder.SetEscapeHTML(false) // Don't escape HTML characters like < and >
 		if err := encoder.Encode(data); err != nil {
-			log.Printf("Error encoding JSON response: %v", err)
+			pkgLogger.Error("Error encoding JSON response", zap.Error(err))
 		}
 	}
 }

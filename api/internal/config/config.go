@@ -3,6 +3,7 @@ package config
 import (
 	"os"
 	"strconv"
+	"strings"
 	"time"
 )
 
@@ -33,6 +34,9 @@ type Config struct {
 	LogLevel       string
 	EnableSQLLog   bool
 
+	// Profiling
+	EnablePprof    bool
+
 	// Database
 	DBQueryTimeout time.Duration
 
@@ -58,6 +62,7 @@ func Load() *Config {
 		RateLimitWindowMinutes:  getEnvAsInt("RATE_LIMIT_WINDOW_MINUTES", 15),
 		LogLevel:                getEnv("LOG_LEVEL", "info"),
 		EnableSQLLog:            getEnv("ENV", "development") == "development" || getEnv("ENABLE_SQL_LOG", "false") == "true",
+		EnablePprof:             getEnv("ENABLE_PPROF", "false") == "true",
 		DBQueryTimeout:          time.Duration(getEnvAsInt("DB_QUERY_TIMEOUT_SECONDS", 5)) * time.Second,
 		YJSProcessorURL:         getEnv("YJS_PROCESSOR_URL", "http://localhost:3001"),
 	}
@@ -106,8 +111,8 @@ func getEnvAsSlice(key string, defaultValue []string) []string {
 	}
 
 	var result []string
-	for _, v := range splitCommaSeparated(valueStr) {
-		if trimmed := trimSpace(v); trimmed != "" {
+	for _, v := range strings.Split(valueStr, ",") {
+		if trimmed := strings.TrimSpace(v); trimmed != "" {
 			result = append(result, trimmed)
 		}
 	}
@@ -116,38 +121,4 @@ func getEnvAsSlice(key string, defaultValue []string) []string {
 		return defaultValue
 	}
 	return result
-}
-
-// splitCommaSeparated splits a string by commas
-func splitCommaSeparated(s string) []string {
-	var parts []string
-	current := ""
-	for _, ch := range s {
-		if ch == ',' {
-			parts = append(parts, current)
-			current = ""
-		} else {
-			current += string(ch)
-		}
-	}
-	if current != "" {
-		parts = append(parts, current)
-	}
-	return parts
-}
-
-// trimSpace removes leading and trailing whitespace
-func trimSpace(s string) string {
-	start := 0
-	end := len(s)
-
-	for start < end && (s[start] == ' ' || s[start] == '\t' || s[start] == '\n' || s[start] == '\r') {
-		start++
-	}
-
-	for end > start && (s[end-1] == ' ' || s[end-1] == '\t' || s[end-1] == '\n' || s[end-1] == '\r') {
-		end--
-	}
-
-	return s[start:end]
 }

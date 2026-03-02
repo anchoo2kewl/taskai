@@ -7,6 +7,8 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+
+	"go.uber.org/zap"
 )
 
 func TestJWTAuthValidToken(t *testing.T) {
@@ -326,7 +328,7 @@ func TestLoggerMiddleware(t *testing.T) {
 		w.Write([]byte("logged"))
 	})
 
-	loggedHandler := Logger(handler)
+	loggedHandler := ZapLogger(zap.NewNop())(handler)
 
 	req := httptest.NewRequest(http.MethodGet, "/api/test", nil)
 	rec := httptest.NewRecorder()
@@ -350,7 +352,7 @@ func TestLoggerMiddlewareCapturesStatusCode(t *testing.T) {
 		w.Write([]byte("not found"))
 	})
 
-	loggedHandler := Logger(handler)
+	loggedHandler := ZapLogger(zap.NewNop())(handler)
 
 	req := httptest.NewRequest(http.MethodGet, "/api/missing", nil)
 	rec := httptest.NewRecorder()

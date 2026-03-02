@@ -1,3 +1,4 @@
+import { lazy, Suspense } from 'react'
 import { BrowserRouter, Routes, Route, Navigate, useLocation, useNavigate } from 'react-router-dom'
 import { AuthProvider } from './state/AuthContext'
 import { SyncProvider } from './state/SyncContext'
@@ -6,24 +7,34 @@ import Landing from './routes/Landing'
 import Login from './routes/Login'
 import Signup from './routes/Signup'
 import Dashboard from './routes/Dashboard'
-import Projects from './routes/Projects'
-import ProjectDetail from './routes/ProjectDetail'
-import ProjectSettings from './routes/ProjectSettings'
-import TaskDetail from './routes/TaskDetail'
-import Sprints from './routes/Sprints'
-import Tags from './routes/Tags'
-import Admin from './routes/Admin'
-import Settings from './routes/Settings'
-import Assets from './routes/Assets'
-import AcceptTeamInvite from './routes/AcceptTeamInvite'
-import Wiki from './routes/Wiki'
+
+// Lazy-loaded route components (code-split per route)
+const Projects = lazy(() => import('./routes/Projects'))
+const ProjectDetail = lazy(() => import('./routes/ProjectDetail'))
+const ProjectSettings = lazy(() => import('./routes/ProjectSettings'))
+const TaskDetail = lazy(() => import('./routes/TaskDetail'))
+const Sprints = lazy(() => import('./routes/Sprints'))
+const Tags = lazy(() => import('./routes/Tags'))
+const Admin = lazy(() => import('./routes/Admin'))
+const Settings = lazy(() => import('./routes/Settings'))
+const Assets = lazy(() => import('./routes/Assets'))
+const AcceptTeamInvite = lazy(() => import('./routes/AcceptTeamInvite'))
+const Wiki = lazy(() => import('./routes/Wiki'))
+
+function RouteSpinner() {
+  return (
+    <div className="flex items-center justify-center py-20">
+      <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary-400" />
+    </div>
+  )
+}
 
 function AppRoutes() {
   const location = useLocation()
   const bgLocation = (location.state as { backgroundLocation?: Location })?.backgroundLocation
 
   return (
-    <>
+    <Suspense fallback={<RouteSpinner />}>
       <Routes location={bgLocation || location}>
         {/* Public routes */}
         <Route path="/" element={<Landing />} />
@@ -65,7 +76,7 @@ function AppRoutes() {
           />
         </Routes>
       )}
-    </>
+    </Suspense>
   )
 }
 

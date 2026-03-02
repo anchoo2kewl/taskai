@@ -462,7 +462,7 @@ class ApiClient {
   }
 
   async updateProfile(data: { first_name: string; last_name: string }): Promise<GetCurrentUserResponse> {
-    return this.request<GetCurrentUserResponse>('/api/me/profile', {
+    return this.request<GetCurrentUserResponse>('/api/me', {
       method: 'PATCH',
       body: JSON.stringify(data),
     })

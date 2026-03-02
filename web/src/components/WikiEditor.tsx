@@ -19,8 +19,17 @@ import {
   buildDrawShortcode,
   insertMarkupAtCursor,
   clearSavedStatus,
+  insertAtCursorPure,
+  insertLinePure,
+  escapeRegExp,
+  fetchDrawings,
+  createDrawing,
+  renameDrawing,
+  deleteDrawing,
+  deleteDrawings,
+  fetchPreview,
 } from './WikiEditor.helpers'
-import type { ImageInfo, DrawInfo, SyncState, SaveStatus } from './WikiEditor.helpers'
+import type { ImageInfo, DrawInfo, DrawItem, SyncState, SaveStatus } from './WikiEditor.helpers'
 
 // Use relative URL in production, or VITE_API_URL for dev override
 const API_BASE = import.meta.env.VITE_API_URL || (import.meta.env.PROD ? '' : 'http://localhost:8080')
@@ -42,20 +51,17 @@ function insertAtCursor(
   syncToYjs: (c: string) => void,
   isDirtyRef?: React.MutableRefObject<boolean>,
 ) {
-  const start = textarea.selectionStart
-  const end = textarea.selectionEnd
-  const selected = content.substring(start, end)
-  const insert = before + (selected || 'text') + after
-  const newContent = content.substring(0, start) + insert + content.substring(end)
+  const { newContent, cursorStart, cursorEnd } = insertAtCursorPure(
+    content, textarea.selectionStart, textarea.selectionEnd, before, after,
+  )
   setContent(newContent)
   syncToYjs(newContent)
   if (isDirtyRef) isDirtyRef.current = true
 
-  const cursorPos = selected ? start + before.length + selected.length + after.length : start + before.length
   setTimeout(() => {
     textarea.focus()
-    textarea.selectionStart = selected ? cursorPos : start + before.length
-    textarea.selectionEnd = selected ? cursorPos : start + before.length + (selected || 'text').length
+    textarea.selectionStart = cursorStart
+    textarea.selectionEnd = cursorEnd
   }, 0)
 }
 
@@ -67,18 +73,14 @@ function insertLine(
   syncToYjs: (c: string) => void,
   isDirtyRef?: React.MutableRefObject<boolean>,
 ) {
-  const start = textarea.selectionStart
-  // Find beginning of current line
-  const lineStart = content.lastIndexOf('\n', start - 1) + 1
-  const insert = prefix
-  const newContent = content.substring(0, lineStart) + insert + content.substring(lineStart)
+  const { newContent, cursorStart } = insertLinePure(content, textarea.selectionStart, prefix)
   setContent(newContent)
   syncToYjs(newContent)
   if (isDirtyRef) isDirtyRef.current = true
 
   setTimeout(() => {
     textarea.focus()
-    textarea.selectionStart = textarea.selectionEnd = start + insert.length
+    textarea.selectionStart = textarea.selectionEnd = cursorStart
   }, 0)
 }
 
@@ -151,8 +153,6 @@ function updateSizeBtnStates(overlay: HTMLElement, activeSize: string) {
     btn.style.color = isActive ? '#fff' : 'rgba(255,255,255,0.7)'
   })
 }
-
-function escapeRegExp(str: string) { return str.replaceAll(/[.*+?^${}()|[\]\\]/g, String.raw`\$&`) }
 
 function initDrawEmbeds(
   container: HTMLElement | null,
@@ -338,69 +338,9 @@ function addImageEditOverlays(
 
 // ── Draw browser types ──────────────────────────────────────────
 
-interface DrawItem {
-  id: string
-  title: string
-  updated_at: string
-}
-
 // ── Draw API helpers ─────────────────────────────────────────
-
-async function fetchDrawings(): Promise<DrawItem[]> {
-  try {
-    const res = await fetch('/draw/api/list')
-    const data = await res.json()
-    return data.drawings || []
-  } catch {
-    return []
-  }
-}
-
-async function createDrawing(): Promise<string | null> {
-  try {
-    const res = await fetch('/draw/api/new', { method: 'POST' })
-    const data = await res.json()
-    if (data?.id) {
-      const editUrl = data.edit_url || `/draw/${data.id}/edit`
-      window.open(editUrl, '_blank')
-      return data.id
-    }
-  } catch (err) {
-    console.error('Failed to create drawing:', err)
-  }
-  return null
-}
-
-async function renameDrawing(id: string, title: string): Promise<boolean> {
-  try {
-    await fetch(`/draw/api/${id}/rename`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ title }),
-    })
-    return true
-  } catch {
-    return false
-  }
-}
-
-async function deleteDrawing(id: string): Promise<boolean> {
-  try {
-    await fetch(`/draw/api/${id}/delete`, { method: 'POST' })
-    return true
-  } catch {
-    return false
-  }
-}
-
-async function deleteDrawings(ids: string[]): Promise<boolean> {
-  try {
-    await Promise.all(ids.map(id => fetch(`/draw/api/${id}/delete`, { method: 'POST' })))
-    return true
-  } catch {
-    return false
-  }
-}
+// Moved to WikiEditor.helpers.ts: fetchDrawings, createDrawing,
+// renameDrawing, deleteDrawing, deleteDrawings
 
 async function uploadSingleFile(file: File, pageId: number): Promise<{ url: string; publicId: string; altName: string }> {
   const sig = await apiClient.getUploadSignature({ pageId })
@@ -434,22 +374,7 @@ async function uploadSingleFile(file: File, pageId: number): Promise<{ url: stri
 }
 
 // ── Server-side preview fetcher ──────────────────────────────────
-
-async function fetchPreview(markdown: string, signal?: AbortSignal): Promise<string> {
-  const token = localStorage.getItem('auth_token')
-  const resp = await fetch(PREVIEW_ENDPOINT, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      ...(token ? { Authorization: `Bearer ${token}` } : {}),
-    },
-    body: JSON.stringify({ content: markdown }),
-    signal,
-  })
-  if (!resp.ok) throw new Error(`Preview failed: ${resp.status}`)
-  const data = await resp.json()
-  return data.html
-}
+// fetchPreview moved to WikiEditor.helpers.ts
 
 async function abortAndFetchPreview(
   abortRef: React.MutableRefObject<AbortController | null>,
@@ -459,7 +384,7 @@ async function abortAndFetchPreview(
   const controller = new AbortController()
   abortRef.current = controller
   try {
-    return await fetchPreview(markdown, controller.signal)
+    return await fetchPreview(PREVIEW_ENDPOINT, markdown, controller.signal)
   } catch {
     return null
   }
@@ -752,6 +677,137 @@ function useImageEdit(opts: Pick<ContentOpts, 'content' | 'setContent' | 'syncTo
     deselectImg: useCallback(() => setSelectedEditImg(null), []),
     closeEditImg: useCallback(() => { setEditImgList(null); setSelectedEditImg(null) }, []),
   }
+}
+
+// ── Small sub-components to reduce cognitive complexity ──────────
+
+function EditImageModal({ editImgList, selectedEditImg, editAlt, editCaption, editSize, onSelectImg, onAltChange, onCaptionChange, onSizeChange, onSave, onDeselect, onClose }: Readonly<{
+  editImgList: ImageInfo[] | null
+  selectedEditImg: ImageInfo | null
+  editAlt: string
+  editCaption: string
+  editSize: string
+  onSelectImg: (img: ImageInfo) => void
+  onAltChange: (v: string) => void
+  onCaptionChange: (v: string) => void
+  onSizeChange: (v: string) => void
+  onSave: () => void
+  onDeselect: () => void
+  onClose: () => void
+}>) {
+  if (!editImgList) return null
+  return (
+    <div className="fixed inset-0 z-[60] flex items-center justify-center">
+      <button type="button" className="absolute inset-0 bg-black/60 backdrop-blur-sm border-0" onClick={onClose} aria-label="Close dialog" />
+      <dialog open className="relative z-[1] w-full max-w-2xl mx-4 m-0 p-0 bg-dark-bg-secondary rounded-xl border border-dark-border-subtle shadow-2xl overflow-hidden">
+        <div className="flex items-center justify-between px-6 py-4 border-b border-dark-border-subtle">
+          <h3 className="text-lg font-semibold text-dark-text-primary">Edit Image</h3>
+          <button onClick={onClose} className="text-dark-text-tertiary hover:text-dark-text-primary transition-colors">
+            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+            </svg>
+          </button>
+        </div>
+
+        {selectedEditImg ? (
+          <div className="p-6">
+            <div className="flex gap-4">
+              <div className="w-40 h-40 flex-shrink-0 rounded-lg overflow-hidden bg-dark-bg-tertiary border border-dark-border-subtle">
+                <img src={selectedEditImg.url} alt={editAlt} className="w-full h-full object-cover" />
+              </div>
+              <div className="flex-1 space-y-4">
+                <div>
+                  <label htmlFor="edit-img-alt" className="block text-xs font-medium text-dark-text-secondary mb-1">Alt text</label>
+                  <input id="edit-img-alt" type="text" value={editAlt} onChange={e => onAltChange(e.target.value)} className="w-full px-3 py-2 rounded-lg bg-dark-bg-tertiary border border-dark-border-subtle text-sm text-dark-text-primary focus:outline-none focus:border-primary-500" placeholder="Describe this image..." />
+                </div>
+                <div>
+                  <label htmlFor="edit-img-caption" className="block text-xs font-medium text-dark-text-secondary mb-1">Caption</label>
+                  <input id="edit-img-caption" type="text" value={editCaption} onChange={e => onCaptionChange(e.target.value)} className="w-full px-3 py-2 rounded-lg bg-dark-bg-tertiary border border-dark-border-subtle text-sm text-dark-text-primary focus:outline-none focus:border-primary-500" placeholder="Optional caption..." />
+                </div>
+                <fieldset className="border-0 p-0 m-0 min-w-0">
+                  <legend className="block text-xs font-medium text-dark-text-secondary mb-1">Size</legend>
+                  <div className="flex gap-1.5">
+                    {([['s', 'Small'], ['m', 'Medium'], ['l', 'Large']] as const).map(([val, label]) => (
+                      <button key={val} type="button" onClick={() => onSizeChange(val)} className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-colors ${editSize === val ? 'bg-primary-500 text-white' : 'bg-dark-bg-tertiary text-dark-text-secondary hover:bg-dark-bg-tertiary/80'}`}>
+                        {label}
+                      </button>
+                    ))}
+                  </div>
+                </fieldset>
+              </div>
+            </div>
+            <div className="flex items-center justify-end gap-3 mt-6">
+              <button onClick={onDeselect} className="px-4 py-2 rounded-lg text-sm font-medium text-dark-text-secondary hover:text-dark-text-primary transition-colors">Back</button>
+              <button onClick={onSave} className="px-4 py-2 rounded-lg text-sm font-medium bg-primary-600 text-white hover:bg-primary-500 transition-colors">Save</button>
+            </div>
+          </div>
+        ) : (
+          <div className="p-6">
+            <p className="text-sm text-dark-text-secondary mb-4">Select an image to edit:</p>
+            <div className="grid grid-cols-3 gap-3 max-h-80 overflow-y-auto">
+              {editImgList.map((img) => (
+                <button key={img.url} onClick={() => onSelectImg(img)} className="group relative aspect-square rounded-lg overflow-hidden border-2 border-dark-border-subtle hover:border-primary-500 transition-colors bg-dark-bg-tertiary">
+                  <img src={img.url} alt={img.alt} className="w-full h-full object-cover" onError={(e) => { (e.target as HTMLImageElement).style.display = 'none' }} />
+                  <div className="absolute inset-x-0 bottom-0 bg-black/70 px-2 py-1">
+                    <p className="text-xs text-dark-text-secondary truncate">{img.alt || 'No alt text'}</p>
+                  </div>
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
+      </dialog>
+    </div>
+  )
+}
+
+function DropOverlay({ isDragOver, isDropUploading }: Readonly<{ isDragOver: boolean; isDropUploading: boolean }>) {
+  if (!isDragOver && !isDropUploading) return null
+  return (
+    <div className="absolute inset-0 bg-primary-500/10 border-2 border-dashed border-primary-500 rounded-lg flex flex-col items-center justify-center gap-2 pointer-events-none z-10">
+      <svg className="w-12 h-12 text-primary-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
+      </svg>
+      <span className="text-sm font-semibold text-primary-400">
+        {isDropUploading ? 'Uploading...' : 'Drop images here'}
+      </span>
+    </div>
+  )
+}
+
+function PreviewContent({ previewHTML, content, previewRef }: Readonly<{
+  previewHTML: string
+  content: string
+  previewRef: React.Ref<HTMLDivElement>
+}>) {
+  if (previewHTML) {
+    return (
+      <div
+        ref={previewRef}
+        className="prose prose-invert max-w-none"
+        dangerouslySetInnerHTML={{ __html: previewHTML }}
+      />
+    )
+  }
+  if (content.trim()) {
+    return (
+      <div className="flex items-center justify-center h-full text-dark-text-tertiary">
+        <p className="text-sm">Loading preview...</p>
+      </div>
+    )
+  }
+  return (
+    <div className="flex items-center justify-center h-full text-dark-text-tertiary">
+      <div className="text-center">
+        <svg className="w-16 h-16 mx-auto mb-4 text-dark-text-tertiary/50" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1} d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
+        </svg>
+        <p className="text-lg">No content to preview</p>
+        <p className="text-sm mt-2">Switch to Edit mode to start writing</p>
+      </div>
+    </div>
+  )
 }
 
 // ── Component ────────────────────────────────────────────────────
@@ -1113,282 +1169,202 @@ export default function WikiEditor({ page }: Readonly<WikiEditorProps>) {
 
   // ── Fullscreen overlay ───────────────────────────────────────
 
-  if (isFullscreen) {
-    return (
-      <>
-        <div className="fixed inset-0 z-50 bg-dark-bg-primary flex flex-col">
-          {/* Top bar */}
-          <div className="flex items-center justify-between border-b border-dark-border-subtle bg-dark-bg-secondary px-4 py-2">
-            <div className="flex items-center gap-4">
-              <span className="text-sm font-semibold text-dark-text-primary truncate max-w-xs">
-                {page.title}
-              </span>
-              {renderToolbar(true)}
-            </div>
-            <div className="flex items-center gap-3">
-              <div className="flex items-center gap-2">
-                <div className={`w-2 h-2 rounded-full ${getSaveStatusColor(saveStatus, syncState)}`} />
-                <span className="text-xs text-dark-text-tertiary">
-                  {getSaveStatusText(saveStatus, autoSaveEnabled)}
-                </span>
-              </div>
-              <button
-                onClick={() => setAutoSaveEnabled(prev => !prev)}
-                className={`px-2 py-1 rounded text-xs font-medium transition-colors ${
-                  autoSaveEnabled
-                    ? 'bg-green-500/15 text-green-400 hover:bg-green-500/25'
-                    : 'bg-dark-bg-tertiary text-dark-text-tertiary hover:bg-dark-bg-tertiary/80'
-                }`}
-                title={autoSaveEnabled ? 'Disable autosave' : 'Enable autosave'}
-              >
-                {autoSaveEnabled ? 'Auto' : 'Manual'}
-              </button>
-              <button
-                onClick={saveNow}
-                disabled={saveStatus === 'saving'}
-                className="px-2.5 py-1 rounded text-xs font-medium transition-colors bg-primary-600 text-white hover:bg-primary-500 disabled:opacity-50"
-                title="Save now"
-              >
-                Save
-              </button>
-              <button
-                onClick={() => setIsFullscreen(false)}
-                className="px-3 py-1.5 rounded text-xs font-medium transition-colors bg-dark-bg-tertiary text-dark-text-secondary hover:bg-red-500/20 hover:text-red-400"
-                title="Exit fullscreen (Esc)"
-              >
-                Exit
-              </button>
-            </div>
-          </div>
+  // ── Fullscreen overlay ───────────────────────────────────────
 
-          {/* Split panes */}
-          <div ref={fsContainerRef} className="flex flex-1 overflow-hidden">
-            {/* Left: editor */}
-            <section
-              aria-label="Editor with drop support"
-              style={{ width: `${fsSplitPct}%` }}
-              className="flex flex-col overflow-hidden relative"
-              onDragEnter={handleDragEnter}
-              onDragOver={handleDragOver}
-              onDragLeave={handleDragLeave}
-              onDrop={handleDrop}
-            >
-              <textarea
-                ref={fsTextareaRef}
-                value={content}
-                onChange={handleTextareaChange}
-                onKeyDown={handleKeyDown}
-                onDoubleClick={handleDoubleClick}
-                className="flex-1 w-full bg-dark-bg-primary text-dark-text-primary resize-none focus:outline-none font-mono text-sm p-4"
-                spellCheck={false}
-                placeholder="Start writing in Markdown..."
-              />
-              {(isDragOver || isDropUploading) && (
-                <div className="absolute inset-0 bg-primary-500/10 border-2 border-dashed border-primary-500 rounded-lg flex flex-col items-center justify-center gap-2 pointer-events-none z-10">
-                  <svg className="w-12 h-12 text-primary-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
-                  </svg>
-                  <span className="text-sm font-semibold text-primary-400">
-                    {isDropUploading ? 'Uploading...' : 'Drop images here'}
-                  </span>
-                </div>
-              )}
-            </section>
-
-            {/* Divider */}
-            <button
-              type="button"
-              ref={dividerRef}
-              onMouseDown={handleDividerMouseDown}
-              className="w-1.5 bg-dark-border-subtle hover:bg-dark-accent-primary/50 cursor-col-resize transition-colors flex-shrink-0 border-0 p-0"
-              aria-label="Resize panels"
-            />
-
-            {/* Right: live preview */}
-            <div style={{ width: `${100 - fsSplitPct}%` }} className="overflow-y-auto p-4">
-              {fsPreviewHTML ? (
-                <div
-                  ref={fsPreviewRef}
-                  className="prose prose-invert max-w-none"
-                  dangerouslySetInnerHTML={{ __html: fsPreviewHTML }}
-                />
-              ) : (
-                <div className="flex items-center justify-center h-full text-dark-text-tertiary">
-                  <p className="text-sm">Preview will appear here...</p>
-                </div>
-              )}
-            </div>
-          </div>
+  const fullscreenContent = isFullscreen && (
+    <div className="fixed inset-0 z-50 bg-dark-bg-primary flex flex-col">
+      {/* Top bar */}
+      <div className="flex items-center justify-between border-b border-dark-border-subtle bg-dark-bg-secondary px-4 py-2">
+        <div className="flex items-center gap-4">
+          <span className="text-sm font-semibold text-dark-text-primary truncate max-w-xs">
+            {page.title}
+          </span>
+          {renderToolbar(true)}
         </div>
-
-        {/* Image picker in fullscreen */}
-        {showImagePicker && (
-          <ImagePickerModal
-            onSelect={insertImageMarkdown}
-            onClose={() => setShowImagePicker(false)}
-            wikiPageId={page.id}
-            onUploadComplete={() => {}}
-          />
-        )}
-
-        {/* Draw browser in fullscreen */}
-        {showDrawBrowser && (
-          <DrawBrowserModal
-            drawings={drawList}
-            loading={drawLoading}
-            editorContent={content}
-            onInsert={handleDrawInsert}
-            onRename={handleDrawRename}
-            onDelete={handleDrawDelete}
-            onDeleteUnused={handleDrawDeleteUnused}
-            onNew={handleDrawNew}
-            onClose={closeDrawBrowser}
-          />
-        )}
-
-        {/* Edit Draw modal in fullscreen */}
-        {editDrawList && (
-          <EditDrawModal
-            draws={editDrawList}
-            selectedDraw={selectedEditDraw}
-            editSize={editDrawSize}
-            editZoom={editDrawZoom}
-            onSelect={selectDrawForEdit}
-            onSizeChange={setEditDrawSize}
-            onZoomChange={setEditDrawZoom}
-            onSave={saveEditDraw}
-            onClose={closeEditDraw}
-          />
-        )}
-      </>
-    )
-  }
-
-  // ── Normal (non-fullscreen) view ─────────────────────────────
-
-  return (
-    <div className="flex flex-col h-full">
-      {/* Header */}
-      <div className="border-b border-dark-border-subtle bg-dark-bg-secondary px-6 py-4">
-        <div className="flex items-center justify-between">
-          <div>
-            <h1 className="text-2xl font-semibold text-dark-text-primary">{page.title}</h1>
-            <div className="flex items-center gap-3 mt-2">
-              <div className="flex items-center gap-2">
-                <div className={`w-2 h-2 rounded-full ${getSaveStatusColor(saveStatus, syncState)}`} />
-                <span className="text-sm text-dark-text-tertiary">
-                  {getSaveStatusText(saveStatus, autoSaveEnabled)}
-                </span>
-              </div>
-              <button
-                onClick={() => setAutoSaveEnabled(prev => !prev)}
-                className={`px-2 py-0.5 rounded text-xs font-medium transition-colors ${
-                  autoSaveEnabled
-                    ? 'bg-green-500/15 text-green-400 hover:bg-green-500/25'
-                    : 'bg-dark-bg-tertiary text-dark-text-tertiary hover:bg-dark-bg-tertiary/80'
-                }`}
-                title={autoSaveEnabled ? 'Disable autosave' : 'Enable autosave'}
-              >
-                {autoSaveEnabled ? 'Auto' : 'Manual'}
-              </button>
-              <button
-                onClick={saveNow}
-                disabled={saveStatus === 'saving'}
-                className="px-2.5 py-0.5 rounded text-xs font-medium transition-colors bg-primary-600 text-white hover:bg-primary-500 disabled:opacity-50"
-                title="Save now"
-              >
-                Save
-              </button>
-            </div>
-          </div>
-
+        <div className="flex items-center gap-3">
           <div className="flex items-center gap-2">
-            <button
-              onClick={() => setIsPreview(false)}
-              className={`px-4 py-2 rounded text-sm font-medium transition-colors ${
-                !isPreview
-                  ? 'bg-dark-accent-primary text-white'
-                  : 'bg-dark-bg-tertiary text-dark-text-secondary hover:bg-dark-bg-tertiary/80'
-              }`}
-            >
-              Edit
-            </button>
-            <button
-              onClick={() => setIsPreview(true)}
-              className={`px-4 py-2 rounded text-sm font-medium transition-colors ${
-                isPreview
-                  ? 'bg-dark-accent-primary text-white'
-                  : 'bg-dark-bg-tertiary text-dark-text-secondary hover:bg-dark-bg-tertiary/80'
-              }`}
-            >
-              Preview
-            </button>
-            <button
-              onClick={() => setIsFullscreen(true)}
-              className="px-3 py-2 rounded text-sm font-medium transition-colors bg-dark-bg-tertiary text-dark-text-secondary hover:bg-dark-bg-tertiary/80"
-              title="Fullscreen editor (F11)"
-            >
-              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 8V4m0 0h4M4 4l5 5m11-1V4m0 0h-4m4 0l-5 5M4 16v4m0 0h4m-4 0l5-5m11 5l-5-5m5 5v-4m0 4h-4" />
-              </svg>
-            </button>
+            <div className={`w-2 h-2 rounded-full ${getSaveStatusColor(saveStatus, syncState)}`} />
+            <span className="text-xs text-dark-text-tertiary">
+              {getSaveStatusText(saveStatus, autoSaveEnabled)}
+            </span>
           </div>
+          <button
+            onClick={() => setAutoSaveEnabled(prev => !prev)}
+            className={`px-2 py-1 rounded text-xs font-medium transition-colors ${
+              autoSaveEnabled
+                ? 'bg-green-500/15 text-green-400 hover:bg-green-500/25'
+                : 'bg-dark-bg-tertiary text-dark-text-tertiary hover:bg-dark-bg-tertiary/80'
+            }`}
+            title={autoSaveEnabled ? 'Disable autosave' : 'Enable autosave'}
+          >
+            {autoSaveEnabled ? 'Auto' : 'Manual'}
+          </button>
+          <button
+            onClick={saveNow}
+            disabled={saveStatus === 'saving'}
+            className="px-2.5 py-1 rounded text-xs font-medium transition-colors bg-primary-600 text-white hover:bg-primary-500 disabled:opacity-50"
+            title="Save now"
+          >
+            Save
+          </button>
+          <button
+            onClick={() => setIsFullscreen(false)}
+            className="px-3 py-1.5 rounded text-xs font-medium transition-colors bg-dark-bg-tertiary text-dark-text-secondary hover:bg-red-500/20 hover:text-red-400"
+            title="Exit fullscreen (Esc)"
+          >
+            Exit
+          </button>
         </div>
       </div>
 
-      {/* Toolbar (edit mode only) */}
-      {!isPreview && (
-        <div className="border-b border-dark-border-subtle bg-dark-bg-secondary px-6 py-2">
-          {renderToolbar()}
-        </div>
-      )}
+      {/* Split panes */}
+      <div ref={fsContainerRef} className="flex flex-1 overflow-hidden">
+        {/* Left: editor */}
+        <section
+          aria-label="Editor with drop support"
+          style={{ width: `${fsSplitPct}%` }}
+          className="flex flex-col overflow-hidden relative"
+          onDragEnter={handleDragEnter}
+          onDragOver={handleDragOver}
+          onDragLeave={handleDragLeave}
+          onDrop={handleDrop}
+        >
+          <textarea
+            ref={fsTextareaRef}
+            value={content}
+            onChange={handleTextareaChange}
+            onKeyDown={handleKeyDown}
+            onDoubleClick={handleDoubleClick}
+            className="flex-1 w-full bg-dark-bg-primary text-dark-text-primary resize-none focus:outline-none font-mono text-sm p-4"
+            spellCheck={false}
+            placeholder="Start writing in Markdown..."
+          />
+          <DropOverlay isDragOver={isDragOver} isDropUploading={isDropUploading} />
+        </section>
 
-      {/* Content */}
-      <div className="flex-1 overflow-hidden flex flex-col">
-        {isPreview ? (
-          <div className="h-full overflow-y-auto px-6 py-4">
-            {previewHTML && (
-              <div
-                ref={previewRef}
-                className="prose prose-invert max-w-none"
-                dangerouslySetInnerHTML={{ __html: previewHTML }}
-              />
-            )}
-            {!previewHTML && content.trim() && (
-              <div className="flex items-center justify-center h-full text-dark-text-tertiary">
-                <p className="text-sm">Loading preview...</p>
-              </div>
-            )}
-            {!previewHTML && !content.trim() && (
-              <div className="flex items-center justify-center h-full text-dark-text-tertiary">
-                <div className="text-center">
-                  <svg className="w-16 h-16 mx-auto mb-4 text-dark-text-tertiary/50" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1} d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
-                  </svg>
-                  <p className="text-lg">No content to preview</p>
-                  <p className="text-sm mt-2">Switch to Edit mode to start writing</p>
+        {/* Divider */}
+        <button
+          type="button"
+          ref={dividerRef}
+          onMouseDown={handleDividerMouseDown}
+          className="w-1.5 bg-dark-border-subtle hover:bg-dark-accent-primary/50 cursor-col-resize transition-colors flex-shrink-0 border-0 p-0"
+          aria-label="Resize panels"
+        />
+
+        {/* Right: live preview */}
+        <div style={{ width: `${100 - fsSplitPct}%` }} className="overflow-y-auto p-4">
+          <PreviewContent previewHTML={fsPreviewHTML} content={content} previewRef={fsPreviewRef} />
+        </div>
+      </div>
+    </div>
+  )
+
+  // ── Render ───────────────────────────────────────────────────
+
+  return (
+    <>
+      {fullscreenContent}
+
+      {!isFullscreen && (
+        <div className="flex flex-col h-full">
+          {/* Header */}
+          <div className="border-b border-dark-border-subtle bg-dark-bg-secondary px-6 py-4">
+            <div className="flex items-center justify-between">
+              <div>
+                <h1 className="text-2xl font-semibold text-dark-text-primary">{page.title}</h1>
+                <div className="flex items-center gap-3 mt-2">
+                  <div className="flex items-center gap-2">
+                    <div className={`w-2 h-2 rounded-full ${getSaveStatusColor(saveStatus, syncState)}`} />
+                    <span className="text-sm text-dark-text-tertiary">
+                      {getSaveStatusText(saveStatus, autoSaveEnabled)}
+                    </span>
+                  </div>
+                  <button
+                    onClick={() => setAutoSaveEnabled(prev => !prev)}
+                    className={`px-2 py-0.5 rounded text-xs font-medium transition-colors ${
+                      autoSaveEnabled
+                        ? 'bg-green-500/15 text-green-400 hover:bg-green-500/25'
+                        : 'bg-dark-bg-tertiary text-dark-text-tertiary hover:bg-dark-bg-tertiary/80'
+                    }`}
+                    title={autoSaveEnabled ? 'Disable autosave' : 'Enable autosave'}
+                  >
+                    {autoSaveEnabled ? 'Auto' : 'Manual'}
+                  </button>
+                  <button
+                    onClick={saveNow}
+                    disabled={saveStatus === 'saving'}
+                    className="px-2.5 py-0.5 rounded text-xs font-medium transition-colors bg-primary-600 text-white hover:bg-primary-500 disabled:opacity-50"
+                    title="Save now"
+                  >
+                    Save
+                  </button>
                 </div>
               </div>
-            )}
+
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => setIsPreview(false)}
+                  className={`px-4 py-2 rounded text-sm font-medium transition-colors ${
+                    !isPreview
+                      ? 'bg-dark-accent-primary text-white'
+                      : 'bg-dark-bg-tertiary text-dark-text-secondary hover:bg-dark-bg-tertiary/80'
+                  }`}
+                >
+                  Edit
+                </button>
+                <button
+                  onClick={() => setIsPreview(true)}
+                  className={`px-4 py-2 rounded text-sm font-medium transition-colors ${
+                    isPreview
+                      ? 'bg-dark-accent-primary text-white'
+                      : 'bg-dark-bg-tertiary text-dark-text-secondary hover:bg-dark-bg-tertiary/80'
+                  }`}
+                >
+                  Preview
+                </button>
+                <button
+                  onClick={() => setIsFullscreen(true)}
+                  className="px-3 py-2 rounded text-sm font-medium transition-colors bg-dark-bg-tertiary text-dark-text-secondary hover:bg-dark-bg-tertiary/80"
+                  title="Fullscreen editor (F11)"
+                >
+                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 8V4m0 0h4M4 4l5 5m11-1V4m0 0h-4m4 0l-5 5M4 16v4m0 0h4m-4 0l5-5m11 5l-5-5m5 5v-4m0 4h-4" />
+                  </svg>
+                </button>
+              </div>
+            </div>
           </div>
-        ) : (
-          <>
-            <section
-              aria-label="Editor with drop support"
-              className="relative flex-1 min-h-0"
-              onDragEnter={handleDragEnter}
-              onDragOver={handleDragOver}
-              onDragLeave={handleDragLeave}
-              onDrop={handleDrop}
-            >
-              <textarea
-                ref={textareaRef}
-                value={content}
-                onChange={handleTextareaChange}
-                onKeyDown={handleKeyDown}
-                onDoubleClick={handleDoubleClick}
-                placeholder="Start writing in Markdown...
+
+          {/* Toolbar (edit mode only) */}
+          {!isPreview && (
+            <div className="border-b border-dark-border-subtle bg-dark-bg-secondary px-6 py-2">
+              {renderToolbar()}
+            </div>
+          )}
+
+          {/* Content */}
+          <div className="flex-1 overflow-hidden flex flex-col">
+            {isPreview ? (
+              <div className="h-full overflow-y-auto px-6 py-4">
+                <PreviewContent previewHTML={previewHTML} content={content} previewRef={previewRef} />
+              </div>
+            ) : (
+              <>
+                <section
+                  aria-label="Editor with drop support"
+                  className="relative flex-1 min-h-0"
+                  onDragEnter={handleDragEnter}
+                  onDragOver={handleDragOver}
+                  onDragLeave={handleDragLeave}
+                  onDrop={handleDrop}
+                >
+                  <textarea
+                    ref={textareaRef}
+                    value={content}
+                    onChange={handleTextareaChange}
+                    onKeyDown={handleKeyDown}
+                    onDoubleClick={handleDoubleClick}
+                    placeholder="Start writing in Markdown...
 
 # Heading 1
 ## Heading 2
@@ -1401,71 +1377,64 @@ export default function WikiEditor({ page }: Readonly<WikiEditorProps>) {
 [Link text](https://example.com)
 
 ```code block```"
-                className="w-full h-full px-6 py-4 bg-dark-bg-primary text-dark-text-primary resize-none focus:outline-none font-mono text-sm placeholder-dark-text-tertiary/50"
-                spellCheck={false}
-              />
-              {(isDragOver || isDropUploading) && (
-                <div className="absolute inset-0 bg-primary-500/10 border-2 border-dashed border-primary-500 rounded-lg flex flex-col items-center justify-center gap-2 pointer-events-none z-10">
-                  <svg className="w-12 h-12 text-primary-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
+                    className="w-full h-full px-6 py-4 bg-dark-bg-primary text-dark-text-primary resize-none focus:outline-none font-mono text-sm placeholder-dark-text-tertiary/50"
+                    spellCheck={false}
+                  />
+                  <DropOverlay isDragOver={isDragOver} isDropUploading={isDropUploading} />
+                </section>
+                {/* Visible drop zone */}
+                <section
+                  aria-label="Drop zone for images"
+                  className={`mx-6 mb-4 mt-2 border-2 border-dashed rounded-lg p-4 flex items-center justify-center gap-3 transition-colors ${
+                    isDragOver
+                      ? 'border-primary-500 bg-primary-500/5'
+                      : 'border-dark-border-subtle hover:border-primary-500/50'
+                  }`}
+                  onDragEnter={handleDragEnter}
+                  onDragOver={handleDragOver}
+                  onDragLeave={handleDragLeave}
+                  onDrop={handleDrop}
+                >
+                  <svg className="w-8 h-8 text-dark-text-tertiary" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
                   </svg>
-                  <span className="text-sm font-semibold text-primary-400">
-                    {isDropUploading ? 'Uploading...' : 'Drop images here'}
-                  </span>
-                </div>
-              )}
-            </section>
-            {/* Visible drop zone */}
-            <section
-              aria-label="Drop zone for images"
-              className={`mx-6 mb-4 mt-2 border-2 border-dashed rounded-lg p-4 flex items-center justify-center gap-3 transition-colors ${
-                isDragOver
-                  ? 'border-primary-500 bg-primary-500/5'
-                  : 'border-dark-border-subtle hover:border-primary-500/50'
-              }`}
-              onDragEnter={handleDragEnter}
-              onDragOver={handleDragOver}
-              onDragLeave={handleDragLeave}
-              onDrop={handleDrop}
-            >
-              <svg className="w-8 h-8 text-dark-text-tertiary" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
-              </svg>
-              <div>
-                <div className="text-sm text-dark-text-secondary">
-                  Drop images here or{' '}
-                  <button
-                    onClick={() => setShowImagePicker(true)}
-                    className="text-primary-400 hover:underline font-medium"
-                  >
-                    browse
-                  </button>
-                </div>
-                <div className="text-xs text-dark-text-tertiary">Supports JPG, PNG, GIF</div>
-              </div>
-            </section>
-          </>
-        )}
-      </div>
-
-      {/* Footer helper */}
-      {!isPreview && (
-        <div className="border-t border-dark-border-subtle bg-dark-bg-secondary px-6 py-2">
-          <div className="flex items-center gap-4 text-xs text-dark-text-tertiary">
-            <span>Markdown supported</span>
-            <span>&bull;</span>
-            <span className={getSaveStatusTextColor(saveStatus)}>
-              {getSaveStatusText(saveStatus, autoSaveEnabled)}
-            </span>
-            <span>&bull;</span>
-            <span>Tab to indent</span>
-            <span>&bull;</span>
-            <span>F11 fullscreen</span>
+                  <div>
+                    <div className="text-sm text-dark-text-secondary">
+                      Drop images here or{' '}
+                      <button
+                        onClick={() => setShowImagePicker(true)}
+                        className="text-primary-400 hover:underline font-medium"
+                      >
+                        browse
+                      </button>
+                    </div>
+                    <div className="text-xs text-dark-text-tertiary">Supports JPG, PNG, GIF</div>
+                  </div>
+                </section>
+              </>
+            )}
           </div>
+
+          {/* Footer helper */}
+          {!isPreview && (
+            <div className="border-t border-dark-border-subtle bg-dark-bg-secondary px-6 py-2">
+              <div className="flex items-center gap-4 text-xs text-dark-text-tertiary">
+                <span>Markdown supported</span>
+                <span>&bull;</span>
+                <span className={getSaveStatusTextColor(saveStatus)}>
+                  {getSaveStatusText(saveStatus, autoSaveEnabled)}
+                </span>
+                <span>&bull;</span>
+                <span>Tab to indent</span>
+                <span>&bull;</span>
+                <span>F11 fullscreen</span>
+              </div>
+            </div>
+          )}
         </div>
       )}
 
-      {/* Image Picker Modal */}
+      {/* Shared modals — rendered once regardless of fullscreen state */}
       {showImagePicker && (
         <ImagePickerModal
           onSelect={insertImageMarkdown}
@@ -1475,138 +1444,21 @@ export default function WikiEditor({ page }: Readonly<WikiEditorProps>) {
         />
       )}
 
-      {/* Edit Image Modal */}
-      {editImgList && (
-        <div className="fixed inset-0 z-[60] flex items-center justify-center">
-          <button
-            type="button"
-            className="absolute inset-0 bg-black/60 backdrop-blur-sm border-0"
-            onClick={closeEditImg}
-            aria-label="Close dialog"
-          />
-          <dialog
-            open
-            className="relative z-[1] w-full max-w-2xl mx-4 m-0 p-0 bg-dark-bg-secondary rounded-xl border border-dark-border-subtle shadow-2xl overflow-hidden"
-          >
-            {/* Header */}
-            <div className="flex items-center justify-between px-6 py-4 border-b border-dark-border-subtle">
-              <h3 className="text-lg font-semibold text-dark-text-primary">Edit Image</h3>
-              <button
-                onClick={closeEditImg}
-                className="text-dark-text-tertiary hover:text-dark-text-primary transition-colors"
-              >
-                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                </svg>
-              </button>
-            </div>
+      <EditImageModal
+        editImgList={editImgList}
+        selectedEditImg={selectedEditImg}
+        editAlt={editAlt}
+        editCaption={editCaption}
+        editSize={editSize}
+        onSelectImg={selectImgForEdit}
+        onAltChange={setEditAlt}
+        onCaptionChange={setEditCaption}
+        onSizeChange={setEditSize}
+        onSave={saveEditImg}
+        onDeselect={deselectImg}
+        onClose={closeEditImg}
+      />
 
-            {selectedEditImg ? null : (
-              /* Image grid picker */
-              <div className="p-6">
-                <p className="text-sm text-dark-text-secondary mb-4">Select an image to edit:</p>
-                <div className="grid grid-cols-3 gap-3 max-h-80 overflow-y-auto">
-                  {editImgList.map((img) => (
-                    <button
-                      key={img.url}
-                      onClick={() => selectImgForEdit(img)}
-                      className="group relative aspect-square rounded-lg overflow-hidden border-2 border-dark-border-subtle hover:border-primary-500 transition-colors bg-dark-bg-tertiary"
-                    >
-                      <img
-                        src={img.url}
-                        alt={img.alt}
-                        className="w-full h-full object-cover"
-                        onError={(e) => {
-                          (e.target as HTMLImageElement).style.display = 'none'
-                        }}
-                      />
-                      <div className="absolute inset-x-0 bottom-0 bg-black/70 px-2 py-1">
-                        <p className="text-xs text-dark-text-secondary truncate">{img.alt || 'No alt text'}</p>
-                      </div>
-                    </button>
-                  ))}
-                </div>
-              </div>
-            )}
-            {selectedEditImg && (
-              /* Edit form */
-              <div className="p-6">
-                <div className="flex gap-4">
-                  {/* Preview */}
-                  <div className="w-40 h-40 flex-shrink-0 rounded-lg overflow-hidden bg-dark-bg-tertiary border border-dark-border-subtle">
-                    <img
-                      src={selectedEditImg.url}
-                      alt={editAlt}
-                      className="w-full h-full object-cover"
-                    />
-                  </div>
-                  {/* Fields */}
-                  <div className="flex-1 space-y-4">
-                    <div>
-                      <label htmlFor="edit-img-alt" className="block text-xs font-medium text-dark-text-secondary mb-1">Alt text</label>
-                      <input
-                        id="edit-img-alt"
-                        type="text"
-                        value={editAlt}
-                        onChange={e => setEditAlt(e.target.value)}
-                        className="w-full px-3 py-2 rounded-lg bg-dark-bg-tertiary border border-dark-border-subtle text-sm text-dark-text-primary focus:outline-none focus:border-primary-500"
-                        placeholder="Describe this image..."
-                      />
-                    </div>
-                    <div>
-                      <label htmlFor="edit-img-caption" className="block text-xs font-medium text-dark-text-secondary mb-1">Caption</label>
-                      <input
-                        id="edit-img-caption"
-                        type="text"
-                        value={editCaption}
-                        onChange={e => setEditCaption(e.target.value)}
-                        className="w-full px-3 py-2 rounded-lg bg-dark-bg-tertiary border border-dark-border-subtle text-sm text-dark-text-primary focus:outline-none focus:border-primary-500"
-                        placeholder="Optional caption..."
-                      />
-                    </div>
-                    <fieldset className="border-0 p-0 m-0 min-w-0">
-                      <legend className="block text-xs font-medium text-dark-text-secondary mb-1">Size</legend>
-                      <div className="flex gap-1.5">
-                        {([['s', 'Small'], ['m', 'Medium'], ['l', 'Large']] as const).map(([val, label]) => (
-                          <button
-                            key={val}
-                            type="button"
-                            onClick={() => setEditSize(val)}
-                            className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-colors ${
-                              editSize === val
-                                ? 'bg-primary-500 text-white'
-                                : 'bg-dark-bg-tertiary text-dark-text-secondary hover:bg-dark-bg-tertiary/80'
-                            }`}
-                          >
-                            {label}
-                          </button>
-                        ))}
-                      </div>
-                    </fieldset>
-                  </div>
-                </div>
-                {/* Actions */}
-                <div className="flex items-center justify-end gap-3 mt-6">
-                  <button
-                    onClick={deselectImg}
-                    className="px-4 py-2 rounded-lg text-sm font-medium text-dark-text-secondary hover:text-dark-text-primary transition-colors"
-                  >
-                    Back
-                  </button>
-                  <button
-                    onClick={saveEditImg}
-                    className="px-4 py-2 rounded-lg text-sm font-medium bg-primary-600 text-white hover:bg-primary-500 transition-colors"
-                  >
-                    Save
-                  </button>
-                </div>
-              </div>
-            )}
-          </dialog>
-        </div>
-      )}
-
-      {/* Draw Browser Modal */}
       {showDrawBrowser && (
         <DrawBrowserModal
           drawings={drawList}
@@ -1621,7 +1473,6 @@ export default function WikiEditor({ page }: Readonly<WikiEditorProps>) {
         />
       )}
 
-      {/* Edit Draw Modal */}
       {editDrawList && (
         <EditDrawModal
           draws={editDrawList}
@@ -1635,7 +1486,7 @@ export default function WikiEditor({ page }: Readonly<WikiEditorProps>) {
           onClose={closeEditDraw}
         />
       )}
-    </div>
+    </>
   )
 }
 

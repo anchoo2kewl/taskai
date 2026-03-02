@@ -15,6 +15,15 @@ import {
   buildDrawShortcode,
   insertMarkupAtCursor,
   clearSavedStatus,
+  insertAtCursorPure,
+  insertLinePure,
+  escapeRegExp,
+  fetchDrawings,
+  createDrawing,
+  renameDrawing,
+  deleteDrawing,
+  deleteDrawings,
+  fetchPreview,
 } from './WikiEditor.helpers'
 
 describe('WikiEditor helpers', () => {
@@ -423,6 +432,441 @@ describe('WikiEditor helpers', () => {
 
     it('keeps idle as idle', () => {
       expect(clearSavedStatus('idle')).toBe('idle')
+    })
+  })
+
+  // ── insertAtCursorPure ──────────────────────────────────────
+
+  describe('insertAtCursorPure', () => {
+    it('wraps selected text with before/after', () => {
+      const result = insertAtCursorPure('Hello world', 6, 11, '**', '**')
+      expect(result.newContent).toBe('Hello **world**')
+      expect(result.cursorStart).toBe(15)
+      expect(result.cursorEnd).toBe(15)
+    })
+
+    it('inserts placeholder "text" when nothing is selected', () => {
+      const result = insertAtCursorPure('Hello world', 5, 5, '**', '**')
+      // selected = '' (empty), insert = '**' + 'text' + '**' = '**text**'
+      // newContent = 'Hello' + '**text**' + ' world' = 'Hello**text** world'
+      expect(result.newContent).toBe('Hello**text** world')
+      // cursorStart = 5 + 2 = 7, cursorEnd = 5 + 2 + 4 = 11
+      expect(result.cursorStart).toBe(7)
+      expect(result.cursorEnd).toBe(11)
+    })
+
+    it('replaces selection range with wrapped text', () => {
+      const result = insertAtCursorPure('abcdef', 2, 4, '[', '](url)')
+      // selected = 'cd', insert = '[cd](url)'
+      // newContent = 'ab' + '[cd](url)' + 'ef' = 'ab[cd](url)ef'
+      expect(result.newContent).toBe('ab[cd](url)ef')
+      // cursorPos = 2 + 1 + 2 + 6 = 11
+      expect(result.cursorStart).toBe(11)
+      expect(result.cursorEnd).toBe(11)
+    })
+
+    it('handles cursor at start of content', () => {
+      const result = insertAtCursorPure('Hello', 0, 0, '*', '*')
+      expect(result.newContent).toBe('*text*Hello')
+      expect(result.cursorStart).toBe(1)
+      expect(result.cursorEnd).toBe(5)
+    })
+
+    it('handles cursor at end of content', () => {
+      const result = insertAtCursorPure('Hello', 5, 5, '`', '`')
+      expect(result.newContent).toBe('Hello`text`')
+      expect(result.cursorStart).toBe(6)
+      expect(result.cursorEnd).toBe(10)
+    })
+
+    it('wraps entire content when all selected', () => {
+      const result = insertAtCursorPure('abc', 0, 3, '**', '**')
+      expect(result.newContent).toBe('**abc**')
+      expect(result.cursorStart).toBe(7)
+      expect(result.cursorEnd).toBe(7)
+    })
+
+    it('handles empty content with no selection', () => {
+      const result = insertAtCursorPure('', 0, 0, '> ', '')
+      expect(result.newContent).toBe('> text')
+      expect(result.cursorStart).toBe(2)
+      expect(result.cursorEnd).toBe(6)
+    })
+  })
+
+  // ── insertLinePure ──────────────────────────────────────────
+
+  describe('insertLinePure', () => {
+    it('prepends prefix to line at cursor', () => {
+      const result = insertLinePure('Hello world', 6, '## ')
+      // lineStart = lastIndexOf('\n', 5) + 1 = -1 + 1 = 0
+      // newContent = '' + '## ' + 'Hello world' = '## Hello world'
+      expect(result.newContent).toBe('## Hello world')
+      expect(result.cursorStart).toBe(9) // 6 + 3
+      expect(result.cursorEnd).toBe(9)
+    })
+
+    it('prepends prefix to the correct line in multi-line content', () => {
+      const content = 'Line one\nLine two\nLine three'
+      // Cursor at position 12 = in 'Line two' (after 'Lin')
+      const result = insertLinePure(content, 12, '- ')
+      // lineStart = lastIndexOf('\n', 11) + 1 = 8 + 1 = 9
+      // newContent = 'Line one\n' + '- ' + 'Line two\nLine three'
+      expect(result.newContent).toBe('Line one\n- Line two\nLine three')
+      expect(result.cursorStart).toBe(14) // 12 + 2
+    })
+
+    it('prepends prefix to first line', () => {
+      const content = 'Hello\nWorld'
+      const result = insertLinePure(content, 3, '> ')
+      expect(result.newContent).toBe('> Hello\nWorld')
+      expect(result.cursorStart).toBe(5) // 3 + 2
+    })
+
+    it('handles cursor at the start of a line', () => {
+      const content = 'Line one\nLine two'
+      const result = insertLinePure(content, 9, '1. ')
+      // lineStart = lastIndexOf('\n', 8) + 1 = 8 + 1 = 9
+      expect(result.newContent).toBe('Line one\n1. Line two')
+      expect(result.cursorStart).toBe(12)
+    })
+
+    it('handles empty content', () => {
+      const result = insertLinePure('', 0, '## ')
+      expect(result.newContent).toBe('## ')
+      expect(result.cursorStart).toBe(3)
+    })
+
+    it('handles cursor at end of last line', () => {
+      const content = 'First\nSecond'
+      const result = insertLinePure(content, 12, '- ')
+      expect(result.newContent).toBe('First\n- Second')
+      expect(result.cursorStart).toBe(14)
+    })
+  })
+
+  // ── escapeRegExp ────────────────────────────────────────────
+
+  describe('escapeRegExp', () => {
+    it('escapes dots', () => {
+      expect(escapeRegExp('a.b')).toBe('a\\.b')
+    })
+
+    it('escapes asterisks', () => {
+      expect(escapeRegExp('a*b')).toBe('a\\*b')
+    })
+
+    it('escapes plus signs', () => {
+      expect(escapeRegExp('a+b')).toBe('a\\+b')
+    })
+
+    it('escapes question marks', () => {
+      expect(escapeRegExp('a?b')).toBe('a\\?b')
+    })
+
+    it('escapes caret and dollar', () => {
+      expect(escapeRegExp('^a$')).toBe('\\^a\\$')
+    })
+
+    it('escapes curly braces', () => {
+      expect(escapeRegExp('a{2}')).toBe('a\\{2\\}')
+    })
+
+    it('escapes parentheses', () => {
+      expect(escapeRegExp('(a|b)')).toBe('\\(a\\|b\\)')
+    })
+
+    it('escapes square brackets', () => {
+      expect(escapeRegExp('[abc]')).toBe('\\[abc\\]')
+    })
+
+    it('escapes backslashes', () => {
+      expect(escapeRegExp('a\\b')).toBe('a\\\\b')
+    })
+
+    it('returns plain text unchanged', () => {
+      expect(escapeRegExp('hello world')).toBe('hello world')
+    })
+
+    it('escapes multiple special chars together', () => {
+      expect(escapeRegExp('[draw:abc]')).toBe('\\[draw:abc\\]')
+    })
+
+    it('produces a valid regex from escaped string', () => {
+      const input = 'file.name (copy) [v2].txt'
+      const re = new RegExp(escapeRegExp(input))
+      expect(re.test(input)).toBe(true)
+      expect(re.test('filexname')).toBe(false)
+    })
+  })
+
+  // ── fetchPreview ────────────────────────────────────────────
+
+  describe('fetchPreview', () => {
+    const originalFetch = globalThis.fetch
+    const originalLocalStorage = globalThis.localStorage
+
+    beforeEach(() => {
+      // Mock localStorage
+      Object.defineProperty(globalThis, 'localStorage', {
+        value: {
+          getItem: vi.fn().mockReturnValue('test-token'),
+          setItem: vi.fn(),
+          removeItem: vi.fn(),
+        },
+        writable: true,
+        configurable: true,
+      })
+    })
+
+    afterEach(() => {
+      globalThis.fetch = originalFetch
+      Object.defineProperty(globalThis, 'localStorage', {
+        value: originalLocalStorage,
+        writable: true,
+        configurable: true,
+      })
+    })
+
+    it('sends POST with correct headers and body', async () => {
+      const mockFetch = vi.fn().mockResolvedValue({
+        ok: true,
+        json: () => Promise.resolve({ html: '<p>Hello</p>' }),
+      })
+      globalThis.fetch = mockFetch
+
+      await fetchPreview('/api/wiki/preview', '# Hello')
+
+      expect(mockFetch).toHaveBeenCalledWith('/api/wiki/preview', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: 'Bearer test-token',
+        },
+        body: JSON.stringify({ content: '# Hello' }),
+        signal: undefined,
+      })
+    })
+
+    it('returns HTML from response', async () => {
+      globalThis.fetch = vi.fn().mockResolvedValue({
+        ok: true,
+        json: () => Promise.resolve({ html: '<p>Result</p>' }),
+      })
+
+      const result = await fetchPreview('/api/wiki/preview', '# Test')
+      expect(result).toBe('<p>Result</p>')
+    })
+
+    it('throws on non-ok response', async () => {
+      globalThis.fetch = vi.fn().mockResolvedValue({
+        ok: false,
+        status: 500,
+      })
+
+      await expect(fetchPreview('/api/wiki/preview', 'test')).rejects.toThrow('Preview failed: 500')
+    })
+
+    it('omits Authorization header when no token', async () => {
+      (localStorage.getItem as ReturnType<typeof vi.fn>).mockReturnValue(null)
+      const mockFetch = vi.fn().mockResolvedValue({
+        ok: true,
+        json: () => Promise.resolve({ html: '' }),
+      })
+      globalThis.fetch = mockFetch
+
+      await fetchPreview('/api/wiki/preview', 'test')
+
+      const headers = mockFetch.mock.calls[0][1].headers
+      expect(headers).not.toHaveProperty('Authorization')
+    })
+
+    it('passes abort signal through', async () => {
+      const mockFetch = vi.fn().mockResolvedValue({
+        ok: true,
+        json: () => Promise.resolve({ html: '' }),
+      })
+      globalThis.fetch = mockFetch
+      const controller = new AbortController()
+
+      await fetchPreview('/api/wiki/preview', 'test', controller.signal)
+
+      expect(mockFetch.mock.calls[0][1].signal).toBe(controller.signal)
+    })
+  })
+
+  // ── Draw API helpers ────────────────────────────────────────
+
+  describe('fetchDrawings', () => {
+    const originalFetch = globalThis.fetch
+
+    afterEach(() => {
+      globalThis.fetch = originalFetch
+    })
+
+    it('returns drawings from API', async () => {
+      const drawings = [{ id: 'abc', title: 'Test', updated_at: '2024-01-01' }]
+      globalThis.fetch = vi.fn().mockResolvedValue({
+        json: () => Promise.resolve({ drawings }),
+      })
+
+      const result = await fetchDrawings()
+      expect(result).toEqual(drawings)
+      expect(globalThis.fetch).toHaveBeenCalledWith('/draw/api/list')
+    })
+
+    it('returns empty array when API returns no drawings field', async () => {
+      globalThis.fetch = vi.fn().mockResolvedValue({
+        json: () => Promise.resolve({}),
+      })
+
+      const result = await fetchDrawings()
+      expect(result).toEqual([])
+    })
+
+    it('returns empty array on fetch error', async () => {
+      globalThis.fetch = vi.fn().mockRejectedValue(new Error('Network error'))
+
+      const result = await fetchDrawings()
+      expect(result).toEqual([])
+    })
+  })
+
+  describe('createDrawing', () => {
+    const originalFetch = globalThis.fetch
+    const originalOpen = globalThis.open
+
+    beforeEach(() => {
+      globalThis.open = vi.fn()
+    })
+
+    afterEach(() => {
+      globalThis.fetch = originalFetch
+      globalThis.open = originalOpen
+    })
+
+    it('creates a drawing and opens edit URL', async () => {
+      globalThis.fetch = vi.fn().mockResolvedValue({
+        json: () => Promise.resolve({ id: 'new123', edit_url: '/draw/new123/edit' }),
+      })
+
+      const result = await createDrawing()
+      expect(result).toBe('new123')
+      expect(globalThis.open).toHaveBeenCalledWith('/draw/new123/edit', '_blank')
+    })
+
+    it('falls back to default edit URL when edit_url not provided', async () => {
+      globalThis.fetch = vi.fn().mockResolvedValue({
+        json: () => Promise.resolve({ id: 'xyz' }),
+      })
+
+      const result = await createDrawing()
+      expect(result).toBe('xyz')
+      expect(globalThis.open).toHaveBeenCalledWith('/draw/xyz/edit', '_blank')
+    })
+
+    it('returns null on fetch error', async () => {
+      globalThis.fetch = vi.fn().mockRejectedValue(new Error('Network error'))
+
+      const result = await createDrawing()
+      expect(result).toBeNull()
+    })
+
+    it('returns null when response has no id', async () => {
+      globalThis.fetch = vi.fn().mockResolvedValue({
+        json: () => Promise.resolve({}),
+      })
+
+      const result = await createDrawing()
+      expect(result).toBeNull()
+    })
+  })
+
+  describe('renameDrawing', () => {
+    const originalFetch = globalThis.fetch
+
+    afterEach(() => {
+      globalThis.fetch = originalFetch
+    })
+
+    it('sends rename request and returns true', async () => {
+      const mockFetch = vi.fn().mockResolvedValue({})
+      globalThis.fetch = mockFetch
+
+      const result = await renameDrawing('abc', 'New Title')
+      expect(result).toBe(true)
+      expect(mockFetch).toHaveBeenCalledWith('/draw/api/abc/rename', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ title: 'New Title' }),
+      })
+    })
+
+    it('returns false on error', async () => {
+      globalThis.fetch = vi.fn().mockRejectedValue(new Error('fail'))
+
+      const result = await renameDrawing('abc', 'title')
+      expect(result).toBe(false)
+    })
+  })
+
+  describe('deleteDrawing', () => {
+    const originalFetch = globalThis.fetch
+
+    afterEach(() => {
+      globalThis.fetch = originalFetch
+    })
+
+    it('sends delete request and returns true', async () => {
+      const mockFetch = vi.fn().mockResolvedValue({})
+      globalThis.fetch = mockFetch
+
+      const result = await deleteDrawing('abc')
+      expect(result).toBe(true)
+      expect(mockFetch).toHaveBeenCalledWith('/draw/api/abc/delete', { method: 'POST' })
+    })
+
+    it('returns false on error', async () => {
+      globalThis.fetch = vi.fn().mockRejectedValue(new Error('fail'))
+
+      const result = await deleteDrawing('abc')
+      expect(result).toBe(false)
+    })
+  })
+
+  describe('deleteDrawings', () => {
+    const originalFetch = globalThis.fetch
+
+    afterEach(() => {
+      globalThis.fetch = originalFetch
+    })
+
+    it('deletes multiple drawings in parallel', async () => {
+      const mockFetch = vi.fn().mockResolvedValue({})
+      globalThis.fetch = mockFetch
+
+      const result = await deleteDrawings(['a', 'b', 'c'])
+      expect(result).toBe(true)
+      expect(mockFetch).toHaveBeenCalledTimes(3)
+      expect(mockFetch).toHaveBeenCalledWith('/draw/api/a/delete', { method: 'POST' })
+      expect(mockFetch).toHaveBeenCalledWith('/draw/api/b/delete', { method: 'POST' })
+      expect(mockFetch).toHaveBeenCalledWith('/draw/api/c/delete', { method: 'POST' })
+    })
+
+    it('returns false if any delete fails', async () => {
+      globalThis.fetch = vi.fn().mockRejectedValue(new Error('fail'))
+
+      const result = await deleteDrawings(['a', 'b'])
+      expect(result).toBe(false)
+    })
+
+    it('handles empty array', async () => {
+      const mockFetch = vi.fn().mockResolvedValue({})
+      globalThis.fetch = mockFetch
+
+      const result = await deleteDrawings([])
+      expect(result).toBe(true)
+      expect(mockFetch).not.toHaveBeenCalled()
     })
   })
 })

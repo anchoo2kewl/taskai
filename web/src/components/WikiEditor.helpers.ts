@@ -184,3 +184,144 @@ export function insertMarkupAtCursor(
 export function clearSavedStatus(prev: SaveStatus): SaveStatus {
   return prev === 'saved' ? 'idle' : prev
 }
+
+// ── Pure cursor-insertion helpers ────────────────────────────────────
+
+export interface CursorResult {
+  newContent: string
+  cursorStart: number
+  cursorEnd: number
+}
+
+/**
+ * Pure version of insertAtCursor — wraps selection (or placeholder "text")
+ * with before/after strings and returns new content + cursor positions.
+ */
+export function insertAtCursorPure(
+  content: string,
+  selectionStart: number,
+  selectionEnd: number,
+  before: string,
+  after: string,
+): CursorResult {
+  const selected = content.substring(selectionStart, selectionEnd)
+  const insert = before + (selected || 'text') + after
+  const newContent = content.substring(0, selectionStart) + insert + content.substring(selectionEnd)
+
+  if (selected) {
+    const cursorPos = selectionStart + before.length + selected.length + after.length
+    return { newContent, cursorStart: cursorPos, cursorEnd: cursorPos }
+  }
+  return {
+    newContent,
+    cursorStart: selectionStart + before.length,
+    cursorEnd: selectionStart + before.length + 'text'.length,
+  }
+}
+
+/**
+ * Pure version of insertLine — prepends prefix to the current line
+ * and returns new content + cursor position.
+ */
+export function insertLinePure(
+  content: string,
+  cursorPosition: number,
+  prefix: string,
+): CursorResult {
+  const lineStart = content.lastIndexOf('\n', cursorPosition - 1) + 1
+  const newContent = content.substring(0, lineStart) + prefix + content.substring(lineStart)
+  const newCursor = cursorPosition + prefix.length
+  return { newContent, cursorStart: newCursor, cursorEnd: newCursor }
+}
+
+// ── Regex escape helper ─────────────────────────────────────────────
+
+export function escapeRegExp(str: string): string {
+  return str.replaceAll(/[.*+?^${}()|[\]\\]/g, String.raw`\$&`)
+}
+
+// ── Draw API types & helpers ────────────────────────────────────────
+
+export interface DrawItem {
+  id: string
+  title: string
+  updated_at: string
+}
+
+export async function fetchDrawings(): Promise<DrawItem[]> {
+  try {
+    const res = await fetch('/draw/api/list')
+    const data = await res.json()
+    return data.drawings || []
+  } catch {
+    return []
+  }
+}
+
+export async function createDrawing(): Promise<string | null> {
+  try {
+    const res = await fetch('/draw/api/new', { method: 'POST' })
+    const data = await res.json()
+    if (data?.id) {
+      const editUrl = data.edit_url || `/draw/${data.id}/edit`
+      window.open(editUrl, '_blank')
+      return data.id
+    }
+  } catch (err) {
+    console.error('Failed to create drawing:', err)
+  }
+  return null
+}
+
+export async function renameDrawing(id: string, title: string): Promise<boolean> {
+  try {
+    await fetch(`/draw/api/${id}/rename`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ title }),
+    })
+    return true
+  } catch {
+    return false
+  }
+}
+
+export async function deleteDrawing(id: string): Promise<boolean> {
+  try {
+    await fetch(`/draw/api/${id}/delete`, { method: 'POST' })
+    return true
+  } catch {
+    return false
+  }
+}
+
+export async function deleteDrawings(ids: string[]): Promise<boolean> {
+  try {
+    await Promise.all(ids.map(id => fetch(`/draw/api/${id}/delete`, { method: 'POST' })))
+    return true
+  } catch {
+    return false
+  }
+}
+
+// ── Server-side preview fetcher ─────────────────────────────────────
+
+export async function fetchPreview(
+  previewEndpoint: string,
+  markdown: string,
+  signal?: AbortSignal,
+): Promise<string> {
+  const token = localStorage.getItem('auth_token')
+  const resp = await fetch(previewEndpoint, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    },
+    body: JSON.stringify({ content: markdown }),
+    signal,
+  })
+  if (!resp.ok) throw new Error(`Preview failed: ${resp.status}`)
+  const data = await resp.json()
+  return data.html
+}

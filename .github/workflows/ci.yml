@@ -179,6 +179,12 @@ jobs:
           name: web-coverage
           path: web/coverage/
 
+      - name: Fix Go coverage paths for SonarQube
+        run: |
+          # Go coverage.out uses module paths (taskai/...) but SonarQube needs
+          # filesystem paths (api/...). Rewrite the prefix so coverage maps correctly.
+          sed -i 's|^taskai/|api/|' api/coverage.out
+
       - name: SonarQube Scan
         uses: SonarSource/sonarqube-scan-action@v4
         env:

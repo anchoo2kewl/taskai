@@ -47,7 +47,7 @@ export default function Sprints() {
       const data = await apiClient.getSprints()
       setSprints(data)
     } catch (error: unknown) {
-      // non-critical load failure
+      console.error('Failed to load sprints:', error)
     }
   }
 

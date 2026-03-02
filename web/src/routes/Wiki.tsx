@@ -30,7 +30,7 @@ export default function Wiki() {
       const proj = await api.getProject(Number(projectId))
       setProject(proj)
     } catch (err) {
-      // non-critical load failure
+      console.error('Failed to load project:', err)
     }
   }
 

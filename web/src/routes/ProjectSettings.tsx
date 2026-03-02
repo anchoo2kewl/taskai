@@ -93,7 +93,7 @@ export default function ProjectSettings() {
       const proj = await apiClient.getProject(projectId)
       setProject(proj)
     } catch (error: unknown) {
-      // non-critical load failure
+      console.error('Failed to load data:', error)
     }
   }
 
@@ -102,7 +102,7 @@ export default function ProjectSettings() {
       const data = await apiClient.getProjectMembers(projectId)
       setMembers(data)
     } catch (error: unknown) {
-      // non-critical load failure
+      console.error('Failed to load data:', error)
     }
   }
 
@@ -111,7 +111,7 @@ export default function ProjectSettings() {
       const data = await apiClient.getTeamMembers()
       setTeamMembers(data)
     } catch (error: unknown) {
-      // non-critical load failure
+      console.error('Failed to load data:', error)
     }
   }
 
@@ -120,7 +120,7 @@ export default function ProjectSettings() {
       const data = await apiClient.getProjectGitHub(projectId)
       setGithubSettings(data)
     } catch (error: unknown) {
-      // non-critical load failure
+      console.error('Failed to load data:', error)
     }
   }
 
@@ -129,7 +129,7 @@ export default function ProjectSettings() {
       const data = await apiClient.getSwimLanes(projectId)
       setSwimLanes(data)
     } catch (error: unknown) {
-      // non-critical load failure
+      console.error('Failed to load data:', error)
     }
   }
 
@@ -139,7 +139,7 @@ export default function ProjectSettings() {
       const data = await apiClient.getStorageUsage(projectId)
       setStorageUsage(data || [])
     } catch (error) {
-      // non-critical load failure
+      console.error('Failed to load storage usage:', error)
     } finally {
       setLoadingStorage(false)
     }

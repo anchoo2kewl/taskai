@@ -126,7 +126,7 @@ export default function Settings() {
       const status = await apiClient.get2FAStatus()
       setTwoFAEnabled(status.enabled)
     } catch (error) {
-      // non-critical load failure
+      console.error('Failed to load data:', error)
     }
   }
 
@@ -276,7 +276,7 @@ export default function Settings() {
         }
       }
     } catch (error) {
-      // non-critical load failure
+      console.error('Failed to load data:', error)
     }
   }
 
@@ -369,7 +369,7 @@ export default function Settings() {
       setMyInviteCount(data.invite_count)
       setIsUserAdmin(data.is_admin)
     } catch (error) {
-      // non-critical load failure
+      console.error('Failed to load data:', error)
     }
   }
 
@@ -408,7 +408,7 @@ export default function Settings() {
       const keys = await apiClient.getAPIKeys()
       setApiKeys(keys)
     } catch (error) {
-      // non-critical load failure
+      console.error('Failed to load data:', error)
     }
   }
 
@@ -482,7 +482,7 @@ export default function Settings() {
       setTeamMembers(membersData)
       setInvitations(invitationsData)
     } catch (error) {
-      // non-critical load failure
+      console.error('Failed to load data:', error)
     }
   }
 
@@ -1021,7 +1021,7 @@ export default function Settings() {
                     </label>
                     <SearchSelect
                       value={String(cloudMaxSize)}
-                      onChange={(v) => setCloudMaxSize(parseInt(v))}
+                      onChange={(v) => setCloudMaxSize(Number.parseInt(v))}
                       options={[
                         { value: '5', label: '5 MB' },
                         { value: '10', label: '10 MB' },
@@ -1128,8 +1128,8 @@ export default function Settings() {
                       Expiration
                     </label>
                     <SearchSelect
-                      value={newKeyExpires !== undefined ? String(newKeyExpires) : ''}
-                      onChange={(v) => setNewKeyExpires(v ? parseInt(v) : undefined)}
+                      value={newKeyExpires === undefined ? '' : String(newKeyExpires)}
+                      onChange={(v) => setNewKeyExpires(v ? Number.parseInt(v) : undefined)}
                       options={[
                         { value: '30', label: '30 days' },
                         { value: '90', label: '90 days' },

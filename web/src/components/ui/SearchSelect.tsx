@@ -23,7 +23,7 @@ export default function SearchSelect({
   placeholder = 'Select...',
   disabled = false,
   variant = 'form',
-}: SearchSelectProps) {
+}: Readonly<SearchSelectProps>) {
   const [query, setQuery] = useState('')
 
   const filtered = useMemo(() => {
@@ -85,7 +85,7 @@ export default function SearchSelect({
                   }`
                 }
               >
-                {({ selected: isSelected }: { selected: boolean }) => (
+                {({ selected: isSelected }) => (
                   <div className="flex items-center justify-between">
                     <div className="min-w-0">
                       <span className={`block truncate ${isSelected ? 'font-medium text-dark-text-primary' : ''}`}>

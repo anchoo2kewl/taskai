@@ -4,6 +4,32 @@ import SearchSelect from './ui/SearchSelect'
 import ImagePickerModal from './ImagePickerModal'
 import * as Y from 'yjs'
 import { WebsocketProvider } from 'y-websocket'
+import {
+  unescapeHtml,
+  buildImageMarkup,
+  findImagesInContent,
+  detectImageSize,
+  findDrawsInContent,
+  mapYjsStatus,
+  findDrawShortcodeAtPosition,
+  shouldSaveContent,
+  getSaveStatusColor,
+  getSaveStatusText,
+  getSaveStatusTextColor,
+  buildDrawShortcode,
+  insertMarkupAtCursor,
+  clearSavedStatus,
+  insertAtCursorPure,
+  insertLinePure,
+  escapeRegExp,
+  fetchDrawings,
+  createDrawing,
+  renameDrawing,
+  deleteDrawing,
+  deleteDrawings,
+  fetchPreview,
+} from './WikiEditor.helpers'
+import type { ImageInfo, DrawInfo, DrawItem, SyncState, SaveStatus } from './WikiEditor.helpers'
 
 // Use relative URL in production, or VITE_API_URL for dev override
 const API_BASE = import.meta.env.VITE_API_URL || (import.meta.env.PROD ? '' : 'http://localhost:8080')
@@ -25,20 +51,17 @@ function insertAtCursor(
   syncToYjs: (c: string) => void,
   isDirtyRef?: React.MutableRefObject<boolean>,
 ) {
-  const start = textarea.selectionStart
-  const end = textarea.selectionEnd
-  const selected = content.substring(start, end)
-  const insert = before + (selected || 'text') + after
-  const newContent = content.substring(0, start) + insert + content.substring(end)
+  const { newContent, cursorStart, cursorEnd } = insertAtCursorPure(
+    content, textarea.selectionStart, textarea.selectionEnd, before, after,
+  )
   setContent(newContent)
   syncToYjs(newContent)
   if (isDirtyRef) isDirtyRef.current = true
 
-  const cursorPos = selected ? start + before.length + selected.length + after.length : start + before.length
   setTimeout(() => {
     textarea.focus()
-    textarea.selectionStart = selected ? cursorPos : start + before.length
-    textarea.selectionEnd = selected ? cursorPos : start + before.length + (selected || 'text').length
+    textarea.selectionStart = cursorStart
+    textarea.selectionEnd = cursorEnd
   }, 0)
 }
 
@@ -50,18 +73,14 @@ function insertLine(
   syncToYjs: (c: string) => void,
   isDirtyRef?: React.MutableRefObject<boolean>,
 ) {
-  const start = textarea.selectionStart
-  // Find beginning of current line
-  const lineStart = content.lastIndexOf('\n', start - 1) + 1
-  const insert = prefix
-  const newContent = content.substring(0, lineStart) + insert + content.substring(lineStart)
+  const { newContent, cursorStart } = insertLinePure(content, textarea.selectionStart, prefix)
   setContent(newContent)
   syncToYjs(newContent)
   if (isDirtyRef) isDirtyRef.current = true
 
   setTimeout(() => {
     textarea.focus()
-    textarea.selectionStart = textarea.selectionEnd = start + insert.length
+    textarea.selectionStart = textarea.selectionEnd = cursorStart
   }, 0)
 }
 
@@ -111,7 +130,7 @@ function makeSizeBtn(sz: string, isActive: boolean): HTMLButtonElement {
   const btn = document.createElement('button')
   btn.type = 'button'
   btn.textContent = sz.toUpperCase()
-  btn.setAttribute('data-size', sz)
+  btn.dataset.size = sz
   Object.assign(btn.style, {
     padding: '3px 8px', border: 'none', borderRadius: '4px',
     background: isActive ? 'rgba(99,102,241,0.8)' : 'transparent',
@@ -128,14 +147,12 @@ function makeSizeBtn(sz: string, isActive: boolean): HTMLButtonElement {
 function updateSizeBtnStates(overlay: HTMLElement, activeSize: string) {
   overlay.querySelectorAll('button[data-size]').forEach((b) => {
     const btn = b as HTMLButtonElement
-    const isActive = btn.getAttribute('data-size') === activeSize
+    const isActive = btn.dataset.size === activeSize
     btn.classList.toggle('active', isActive)
     btn.style.background = isActive ? 'rgba(99,102,241,0.8)' : 'transparent'
     btn.style.color = isActive ? '#fff' : 'rgba(255,255,255,0.7)'
   })
 }
-
-function escapeRegExp(str: string) { return str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') }
 
 function initDrawEmbeds(
   container: HTMLElement | null,
@@ -145,13 +162,13 @@ function initDrawEmbeds(
   if (!container) return
   const embeds = container.querySelectorAll('.godraw-embed:not(.godraw-preview-init)')
   embeds.forEach((div) => {
-    let src = div.getAttribute('data-src')
-    const w = div.getAttribute('data-width') || '100%'
-    const h = div.getAttribute('data-height') || '520px'
-    const zoom = div.getAttribute('data-zoom')
+    let src = (div as HTMLElement).dataset.src
+    const w = (div as HTMLElement).dataset.width || '100%'
+    const h = (div as HTMLElement).dataset.height || '520px'
+    const zoom = (div as HTMLElement).dataset.zoom
     if (!src) return
 
-    const drawIdMatch = src.match(/\/([a-zA-Z0-9_-]+?)(?:\/edit)?$/)
+    const drawIdMatch = /\/([a-zA-Z0-9_-]+?)(?:\/edit)?$/.exec(src)
     const drawId = drawIdMatch ? drawIdMatch[1] : null
 
     src = src.replace(/\/edit$/, '')
@@ -177,7 +194,7 @@ function initDrawEmbeds(
       // Detect current size from shortcode
       let currentSize = 'm'
       if (contentRef) {
-        const scRe = new RegExp('\\[draw:' + escapeRegExp(drawId) + '(?::edit)?(?::([sml]))?')
+        const scRe = new RegExp(String.raw`\[draw:` + escapeRegExp(drawId) + '(?::edit)?(?::([sml]))?')
         const scMatch = scRe.exec(contentRef.current)
         if (scMatch?.[1]) currentSize = scMatch[1]
       }
@@ -191,10 +208,10 @@ function initDrawEmbeds(
         btn.addEventListener('click', (e) => {
           e.preventDefault(); e.stopPropagation()
           if (!contentRef || !updateContent) return
-          const re = new RegExp('\\[draw:' + escapeRegExp(drawId) + '(?::edit)?(?::[sml])?(?::z[^\\]]+)?\\]')
+          const re = new RegExp(String.raw`\[draw:` + escapeRegExp(drawId) + String.raw`(?::edit)?(?::[sml])?(?::z[^\]]+)?\]`)
           const m = re.exec(contentRef.current)
           if (!m) return
-          const zoomMatch = m[0].match(/:z([^\]]+)/)
+          const zoomMatch = /:z([^\]]+)/.exec(m[0])
           const zoomTag = zoomMatch ? ':z' + zoomMatch[1] : ''
           const sizeTag = sz === 'm' ? '' : ':' + sz
           const newSC = `[draw:${drawId}:edit${sizeTag}${zoomTag}]`
@@ -245,21 +262,6 @@ function initDrawEmbeds(
 
 // ── Image edit overlays — add S/M/L size controls to images in preview ──
 
-function buildImageMarkup(url: string, alt: string, caption: string, size: string): string {
-  const sizeStyles: Record<string, string> = {
-    s: 'max-width:50%;height:auto;',
-    m: 'max-width:75%;height:auto;',
-    l: 'width:100%;height:auto;max-width:100%;',
-  }
-  const imgStyle = sizeStyles[size] || sizeStyles.m
-  const escHtml = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;')
-
-  if (size === 'l' && !caption) {
-    return `![${alt}](${url})`
-  }
-  return `<figure style="text-align:center;margin:1.5rem 0"><a href="${url}" data-lightbox="article-images" data-title="${escHtml(alt)}"><img src="${url}" alt="${escHtml(alt)}" style="${imgStyle}"/></a>${caption ? `<figcaption>${escHtml(caption)}</figcaption>` : ''}</figure>`
-}
-
 function addImageEditOverlays(
   container: HTMLElement | null,
   contentRef: React.MutableRefObject<string>,
@@ -281,7 +283,7 @@ function addImageEditOverlays(
     else if (/max-width:\s*75%/.test(styleStr)) currentSize = 'm'
 
     // Wrap the image (or its <figure> parent)
-    const wrapTarget = (img.closest('figure') || img) as HTMLElement
+    const wrapTarget = img.closest<HTMLElement>('figure') || img
     const wrapper = document.createElement('div')
     wrapper.style.position = 'relative'
     wrapper.style.display = 'inline-block'
@@ -298,17 +300,17 @@ function addImageEditOverlays(
         const content = contentRef.current
 
         // Try <figure> containing this URL
-        const figRe = new RegExp('<figure[^>]*>[\\s\\S]*?' + escapeRegExp(imgUrl) + '[\\s\\S]*?<\\/figure>')
+        const figRe = new RegExp(String.raw`<figure[^>]*>[\s\S]*?` + escapeRegExp(imgUrl) + String.raw`[\s\S]*?</figure>`)
         const figMatch = figRe.exec(content)
         if (figMatch) {
-          const altM = figMatch[0].match(/alt="([^"]*)"/)
-          const capM = figMatch[0].match(/<figcaption>([\s\S]*?)<\/figcaption>/)
-          const alt = (altM?.[1] || '').replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"')
-          const cap = (capM?.[1] || '').replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"')
+          const altM = /alt="([^"]*)"/.exec(figMatch[0])
+          const capM = /<figcaption>([\s\S]*?)<\/figcaption>/.exec(figMatch[0])
+          const alt = unescapeHtml(altM?.[1] || '')
+          const cap = unescapeHtml(capM?.[1] || '')
           updateContent(content.replace(figMatch[0], buildImageMarkup(imgUrl, alt, cap, sz)))
         } else {
           // Try markdown ![alt](url)
-          const mdRe = new RegExp('!\\[([^\\]]*)\\]\\(' + escapeRegExp(imgUrl) + '\\)')
+          const mdRe = new RegExp(String.raw`!\[([^\]]*)\]\(` + escapeRegExp(imgUrl) + String.raw`\)`)
           const mdMatch = mdRe.exec(content)
           if (mdMatch) {
             updateContent(content.replace(mdMatch[0], buildImageMarkup(imgUrl, mdMatch[1], '', sz)))
@@ -336,39 +338,487 @@ function addImageEditOverlays(
 
 // ── Draw browser types ──────────────────────────────────────────
 
-interface DrawItem {
-  id: string
-  title: string
-  updated_at: string
+// ── Draw API helpers ─────────────────────────────────────────
+// Moved to WikiEditor.helpers.ts: fetchDrawings, createDrawing,
+// renameDrawing, deleteDrawing, deleteDrawings
+
+async function uploadSingleFile(file: File, pageId: number): Promise<{ url: string; publicId: string; altName: string }> {
+  const sig = await apiClient.getUploadSignature({ pageId })
+  const formData = new FormData()
+  formData.append('file', file)
+  formData.append('api_key', sig.api_key)
+  formData.append('timestamp', String(sig.timestamp))
+  formData.append('signature', sig.signature)
+  formData.append('folder', sig.folder)
+  formData.append('public_id', sig.public_id)
+
+  const uploadRes = await fetch(
+    `https://api.cloudinary.com/v1_1/${sig.cloud_name}/auto/upload`,
+    { method: 'POST', body: formData }
+  )
+  if (!uploadRes.ok) throw new Error('Upload failed')
+  const uploadData = await uploadRes.json()
+  const altName = file.name.replace(/\.[^.]+$/, '').replaceAll(/[-_]/g, ' ')
+
+  await apiClient.createWikiPageAttachment(pageId, {
+    filename: file.name,
+    alt_name: altName,
+    file_type: 'image',
+    content_type: file.type,
+    file_size: file.size,
+    cloudinary_url: uploadData.secure_url,
+    cloudinary_public_id: uploadData.public_id,
+  })
+
+  return { url: uploadData.secure_url, publicId: uploadData.public_id, altName }
 }
 
 // ── Server-side preview fetcher ──────────────────────────────────
+// fetchPreview moved to WikiEditor.helpers.ts
 
-async function fetchPreview(markdown: string, signal?: AbortSignal): Promise<string> {
-  const token = localStorage.getItem('auth_token')
-  const resp = await fetch(PREVIEW_ENDPOINT, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      ...(token ? { Authorization: `Bearer ${token}` } : {}),
-    },
-    body: JSON.stringify({ content: markdown }),
-    signal,
-  })
-  if (!resp.ok) throw new Error(`Preview failed: ${resp.status}`)
-  const data = await resp.json()
-  return data.html
+async function abortAndFetchPreview(
+  abortRef: React.MutableRefObject<AbortController | null>,
+  markdown: string,
+): Promise<string | null> {
+  if (abortRef.current) abortRef.current.abort()
+  const controller = new AbortController()
+  abortRef.current = controller
+  try {
+    return await fetchPreview(PREVIEW_ENDPOINT, markdown, controller.signal)
+  } catch {
+    return null
+  }
+}
+
+// ── Custom hooks (extract complexity from component) ──────────────
+
+function useGlobalKeyboard(isFullscreen: boolean, setIsFullscreen: React.Dispatch<React.SetStateAction<boolean>>) {
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if (e.key === 'F11') {
+        e.preventDefault()
+        setIsFullscreen(prev => !prev)
+      }
+      if (e.key === 'Escape' && isFullscreen) {
+        e.preventDefault()
+        setIsFullscreen(false)
+      }
+    }
+    globalThis.addEventListener('keydown', handler)
+    return () => globalThis.removeEventListener('keydown', handler)
+  }, [isFullscreen, setIsFullscreen])
+}
+
+function useAutoSave(
+  pageId: number,
+  autoSaveEnabled: boolean,
+  saveNow: () => Promise<void>,
+  isDirtyRef: React.MutableRefObject<boolean>,
+  contentRef: React.MutableRefObject<string>,
+  lastSavedContentRef: React.MutableRefObject<string>,
+) {
+  // Autosave interval (10 seconds)
+  useEffect(() => {
+    if (!autoSaveEnabled) return
+
+    const saveToServer = async () => {
+      if (!shouldSaveContent(isDirtyRef.current, contentRef.current, lastSavedContentRef.current)) return
+      await saveNow()
+    }
+
+    const interval = setInterval(saveToServer, 10_000)
+
+    // Save on unmount — refs are stable objects, safe to read .current in cleanup
+    return () => {
+      clearInterval(interval)
+      // eslint-disable-next-line react-hooks/exhaustive-deps
+      if (shouldSaveContent(isDirtyRef.current, contentRef.current, lastSavedContentRef.current)) {
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+        apiClient.updateWikiPageContent(pageId, contentRef.current).catch(() => {})
+      }
+    }
+  }, [pageId, autoSaveEnabled, saveNow, isDirtyRef, contentRef, lastSavedContentRef])
+
+  // Save on beforeunload
+  useEffect(() => {
+    const handler = () => {
+      if (!shouldSaveContent(isDirtyRef.current, contentRef.current, lastSavedContentRef.current)) return
+      const blob = new Blob([JSON.stringify({ content: contentRef.current })], { type: 'application/json' })
+      const API_BASE_FOR_SAVE = import.meta.env.VITE_API_URL || (import.meta.env.PROD ? '' : 'http://localhost:8080')
+      navigator.sendBeacon(
+        `${API_BASE_FOR_SAVE}/api/wiki/pages/${pageId}/content`,
+        blob
+      )
+    }
+    globalThis.addEventListener('beforeunload', handler)
+    return () => globalThis.removeEventListener('beforeunload', handler)
+  }, [pageId, isDirtyRef, contentRef, lastSavedContentRef])
+}
+
+interface ImageDropOpts {
+  pageId: number
+  isFullscreen: boolean
+  content: string
+  setContent: (c: string) => void
+  syncToYjs: (c: string) => void
+  isDirtyRef: React.MutableRefObject<boolean>
+  textareaRef: React.RefObject<HTMLTextAreaElement | null>
+  fsTextareaRef: React.RefObject<HTMLTextAreaElement | null>
+}
+
+function useImageDrop(opts: ImageDropOpts) {
+  const { pageId, isFullscreen, content, setContent, syncToYjs, isDirtyRef, textareaRef, fsTextareaRef } = opts
+  const dragCounterRef = useRef(0)
+  const [isDragOver, setIsDragOver] = useState(false)
+  const [isDropUploading, setIsDropUploading] = useState(false)
+
+  const handleDragEnter = useCallback((e: React.DragEvent) => {
+    e.preventDefault()
+    dragCounterRef.current++
+    if (e.dataTransfer.types.includes('Files')) setIsDragOver(true)
+  }, [])
+
+  const handleDragOver = useCallback((e: React.DragEvent) => {
+    e.preventDefault()
+    if (e.dataTransfer) e.dataTransfer.dropEffect = 'copy'
+  }, [])
+
+  const handleDragLeave = useCallback((e: React.DragEvent) => {
+    e.preventDefault()
+    dragCounterRef.current--
+    if (dragCounterRef.current <= 0) {
+      dragCounterRef.current = 0
+      setIsDragOver(false)
+    }
+  }, [])
+
+  const handleDrop = useCallback(async (e: React.DragEvent) => {
+    e.preventDefault()
+    dragCounterRef.current = 0
+    setIsDragOver(false)
+
+    const files = Array.from(e.dataTransfer.files).filter(f => f.type.startsWith('image/'))
+    if (files.length === 0) return
+
+    setIsDropUploading(true)
+    const textarea = isFullscreen ? fsTextareaRef.current : textareaRef.current
+
+    try {
+      for (const file of files) {
+        const { url, altName } = await uploadSingleFile(file, pageId)
+        const markup = `![${altName}](${url})`
+        const start = textarea?.selectionStart ?? content.length
+        const end = textarea?.selectionEnd ?? content.length
+        const newContent = content.substring(0, start) + markup + '\n' + content.substring(end)
+        setContent(newContent)
+        syncToYjs(newContent)
+        isDirtyRef.current = true
+      }
+    } catch (err) {
+      console.error('Drop upload failed:', err)
+    } finally {
+      setIsDropUploading(false)
+    }
+  }, [isFullscreen, content, setContent, syncToYjs, pageId, isDirtyRef, textareaRef, fsTextareaRef])
+
+  return { isDragOver, isDropUploading, handleDragEnter, handleDragOver, handleDragLeave, handleDrop }
+}
+
+// ── Draw browser hook ─────────────────────────────────────────────
+
+interface ContentOpts {
+  content: string
+  setContent: (c: string) => void
+  syncToYjs: (c: string) => void
+  isDirtyRef: React.MutableRefObject<boolean>
+  isFullscreen: boolean
+  textareaRef: React.RefObject<HTMLTextAreaElement | null>
+  fsTextareaRef: React.RefObject<HTMLTextAreaElement | null>
+}
+
+function useDrawBrowser(opts: ContentOpts) {
+  const { content, setContent, syncToYjs, isDirtyRef, isFullscreen, textareaRef, fsTextareaRef } = opts
+
+  const [showDrawBrowser, setShowDrawBrowser] = useState(false)
+  const [drawList, setDrawList] = useState<DrawItem[]>([])
+  const [drawLoading, setDrawLoading] = useState(false)
+  const [editDrawList, setEditDrawList] = useState<DrawInfo[] | null>(null)
+  const [selectedEditDraw, setSelectedEditDraw] = useState<DrawInfo | null>(null)
+  const [editDrawSize, setEditDrawSize] = useState('m')
+  const [editDrawZoom, setEditDrawZoom] = useState('fit')
+
+  const loadDrawings = useCallback(async () => {
+    setDrawLoading(true)
+    const drawings = await fetchDrawings()
+    setDrawList(drawings)
+    setDrawLoading(false)
+  }, [])
+
+  const handleDraw = useCallback(() => {
+    setShowDrawBrowser(true)
+    loadDrawings()
+  }, [loadDrawings])
+
+  const handleDrawInsert = useCallback((id: string, size: string, zoom: string) => {
+    const textarea = isFullscreen ? fsTextareaRef.current : textareaRef.current
+    const markup = '\n' + buildDrawShortcode(id, size, zoom) + '\n'
+    const { newContent, focusPos } = insertMarkupAtCursor(textarea, content, markup)
+    setContent(newContent)
+    syncToYjs(newContent)
+    isDirtyRef.current = true
+    if (focusPos !== null && textarea) {
+      setTimeout(() => { textarea.focus(); textarea.selectionStart = textarea.selectionEnd = focusPos }, 0)
+    }
+    setShowDrawBrowser(false)
+  }, [isFullscreen, content, setContent, syncToYjs, isDirtyRef, textareaRef, fsTextareaRef])
+
+  const handleDrawRename = useCallback(async (id: string, title: string) => {
+    const ok = await renameDrawing(id, title)
+    if (ok) setDrawList(prev => prev.map(d => d.id === id ? { ...d, title } : d))
+  }, [])
+
+  const handleDrawDelete = useCallback(async (id: string) => {
+    const ok = await deleteDrawing(id)
+    if (!ok) { alert('Failed to delete drawing'); return }
+    setDrawList(prev => prev.filter(d => d.id !== id))
+  }, [])
+
+  const handleDrawNew = useCallback(async () => {
+    const created = await createDrawing()
+    if (created) loadDrawings()
+  }, [loadDrawings])
+
+  const handleDrawDeleteUnused = useCallback(async (unusedIds: string[]) => {
+    await deleteDrawings(unusedIds)
+    loadDrawings()
+  }, [loadDrawings])
+
+  const handleEditDraw = useCallback(() => {
+    const draws = findDrawsInContent(content)
+    if (draws.length === 0) {
+      alert('No draw shortcodes found in content')
+      return
+    }
+    setEditDrawList(draws)
+    setSelectedEditDraw(null)
+  }, [content])
+
+  const selectDrawForEdit = (draw: DrawInfo) => {
+    setSelectedEditDraw(draw)
+    setEditDrawSize(draw.size)
+    setEditDrawZoom(draw.zoom)
+  }
+
+  const saveEditDraw = useCallback(() => {
+    if (!selectedEditDraw) return
+    const newShortcode = buildDrawShortcode(selectedEditDraw.id, editDrawSize, editDrawZoom)
+    const newContent = content.replace(selectedEditDraw.shortcode, newShortcode)
+    setContent(newContent)
+    syncToYjs(newContent)
+    isDirtyRef.current = true
+    setEditDrawList(null)
+    setSelectedEditDraw(null)
+  }, [selectedEditDraw, editDrawSize, editDrawZoom, content, setContent, syncToYjs, isDirtyRef])
+
+  return {
+    showDrawBrowser, drawList, drawLoading,
+    editDrawList, selectedEditDraw, editDrawSize, editDrawZoom,
+    handleDraw, handleDrawInsert, handleDrawRename, handleDrawDelete,
+    handleDrawNew, handleDrawDeleteUnused, handleEditDraw, selectDrawForEdit, saveEditDraw,
+    setEditDrawSize, setEditDrawZoom,
+    closeDrawBrowser: useCallback(() => setShowDrawBrowser(false), []),
+    closeEditDraw: useCallback(() => { setEditDrawList(null); setSelectedEditDraw(null) }, []),
+  }
+}
+
+// ── Image edit hook ──────────────────────────────────────────────
+
+function useImageEdit(opts: Pick<ContentOpts, 'content' | 'setContent' | 'syncToYjs' | 'isDirtyRef'>) {
+  const { content, setContent, syncToYjs, isDirtyRef } = opts
+
+  const [editImgList, setEditImgList] = useState<ImageInfo[] | null>(null)
+  const [selectedEditImg, setSelectedEditImg] = useState<ImageInfo | null>(null)
+  const [editAlt, setEditAlt] = useState('')
+  const [editCaption, setEditCaption] = useState('')
+  const [editSize, setEditSize] = useState('m')
+
+  const handleEditImg = useCallback(() => {
+    const images = findImagesInContent(content)
+    if (images.length === 0) {
+      alert('No images found in content')
+      return
+    }
+    setEditImgList(images)
+    setSelectedEditImg(null)
+  }, [content])
+
+  const selectImgForEdit = (img: ImageInfo) => {
+    setSelectedEditImg(img)
+    setEditAlt(img.alt)
+    setEditCaption(img.caption)
+    setEditSize(detectImageSize(img.html))
+  }
+
+  const saveEditImg = useCallback(() => {
+    if (!selectedEditImg) return
+    const newMarkup = buildImageMarkup(selectedEditImg.url, editAlt, editCaption, editSize)
+    const newContent = content.replace(selectedEditImg.html, newMarkup)
+    setContent(newContent)
+    syncToYjs(newContent)
+    isDirtyRef.current = true
+    setEditImgList(null)
+    setSelectedEditImg(null)
+  }, [selectedEditImg, editAlt, editCaption, editSize, content, setContent, syncToYjs, isDirtyRef])
+
+  return {
+    editImgList, selectedEditImg, editAlt, editCaption, editSize,
+    handleEditImg, selectImgForEdit, saveEditImg,
+    setEditAlt, setEditCaption, setEditSize,
+    deselectImg: useCallback(() => setSelectedEditImg(null), []),
+    closeEditImg: useCallback(() => { setEditImgList(null); setSelectedEditImg(null) }, []),
+  }
+}
+
+// ── Small sub-components to reduce cognitive complexity ──────────
+
+function EditImageModal({ editImgList, selectedEditImg, editAlt, editCaption, editSize, onSelectImg, onAltChange, onCaptionChange, onSizeChange, onSave, onDeselect, onClose }: Readonly<{
+  editImgList: ImageInfo[] | null
+  selectedEditImg: ImageInfo | null
+  editAlt: string
+  editCaption: string
+  editSize: string
+  onSelectImg: (img: ImageInfo) => void
+  onAltChange: (v: string) => void
+  onCaptionChange: (v: string) => void
+  onSizeChange: (v: string) => void
+  onSave: () => void
+  onDeselect: () => void
+  onClose: () => void
+}>) {
+  if (!editImgList) return null
+  return (
+    <div className="fixed inset-0 z-[60] flex items-center justify-center">
+      <button type="button" className="absolute inset-0 bg-black/60 backdrop-blur-sm border-0" onClick={onClose} aria-label="Close dialog" />
+      <dialog open className="relative z-[1] w-full max-w-2xl mx-4 m-0 p-0 bg-dark-bg-secondary rounded-xl border border-dark-border-subtle shadow-2xl overflow-hidden">
+        <div className="flex items-center justify-between px-6 py-4 border-b border-dark-border-subtle">
+          <h3 className="text-lg font-semibold text-dark-text-primary">Edit Image</h3>
+          <button onClick={onClose} className="text-dark-text-tertiary hover:text-dark-text-primary transition-colors">
+            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+            </svg>
+          </button>
+        </div>
+
+        {selectedEditImg ? (
+          <div className="p-6">
+            <div className="flex gap-4">
+              <div className="w-40 h-40 flex-shrink-0 rounded-lg overflow-hidden bg-dark-bg-tertiary border border-dark-border-subtle">
+                <img src={selectedEditImg.url} alt={editAlt} className="w-full h-full object-cover" />
+              </div>
+              <div className="flex-1 space-y-4">
+                <div>
+                  <label htmlFor="edit-img-alt" className="block text-xs font-medium text-dark-text-secondary mb-1">Alt text</label>
+                  <input id="edit-img-alt" type="text" value={editAlt} onChange={e => onAltChange(e.target.value)} className="w-full px-3 py-2 rounded-lg bg-dark-bg-tertiary border border-dark-border-subtle text-sm text-dark-text-primary focus:outline-none focus:border-primary-500" placeholder="Describe this image..." />
+                </div>
+                <div>
+                  <label htmlFor="edit-img-caption" className="block text-xs font-medium text-dark-text-secondary mb-1">Caption</label>
+                  <input id="edit-img-caption" type="text" value={editCaption} onChange={e => onCaptionChange(e.target.value)} className="w-full px-3 py-2 rounded-lg bg-dark-bg-tertiary border border-dark-border-subtle text-sm text-dark-text-primary focus:outline-none focus:border-primary-500" placeholder="Optional caption..." />
+                </div>
+                <fieldset className="border-0 p-0 m-0 min-w-0">
+                  <legend className="block text-xs font-medium text-dark-text-secondary mb-1">Size</legend>
+                  <div className="flex gap-1.5">
+                    {([['s', 'Small'], ['m', 'Medium'], ['l', 'Large']] as const).map(([val, label]) => (
+                      <button key={val} type="button" onClick={() => onSizeChange(val)} className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-colors ${editSize === val ? 'bg-primary-500 text-white' : 'bg-dark-bg-tertiary text-dark-text-secondary hover:bg-dark-bg-tertiary/80'}`}>
+                        {label}
+                      </button>
+                    ))}
+                  </div>
+                </fieldset>
+              </div>
+            </div>
+            <div className="flex items-center justify-end gap-3 mt-6">
+              <button onClick={onDeselect} className="px-4 py-2 rounded-lg text-sm font-medium text-dark-text-secondary hover:text-dark-text-primary transition-colors">Back</button>
+              <button onClick={onSave} className="px-4 py-2 rounded-lg text-sm font-medium bg-primary-600 text-white hover:bg-primary-500 transition-colors">Save</button>
+            </div>
+          </div>
+        ) : (
+          <div className="p-6">
+            <p className="text-sm text-dark-text-secondary mb-4">Select an image to edit:</p>
+            <div className="grid grid-cols-3 gap-3 max-h-80 overflow-y-auto">
+              {editImgList.map((img) => (
+                <button key={img.url} onClick={() => onSelectImg(img)} className="group relative aspect-square rounded-lg overflow-hidden border-2 border-dark-border-subtle hover:border-primary-500 transition-colors bg-dark-bg-tertiary">
+                  <img src={img.url} alt={img.alt} className="w-full h-full object-cover" onError={(e) => { (e.target as HTMLImageElement).style.display = 'none' }} />
+                  <div className="absolute inset-x-0 bottom-0 bg-black/70 px-2 py-1">
+                    <p className="text-xs text-dark-text-secondary truncate">{img.alt || 'No alt text'}</p>
+                  </div>
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
+      </dialog>
+    </div>
+  )
+}
+
+function DropOverlay({ isDragOver, isDropUploading }: Readonly<{ isDragOver: boolean; isDropUploading: boolean }>) {
+  if (!isDragOver && !isDropUploading) return null
+  return (
+    <div className="absolute inset-0 bg-primary-500/10 border-2 border-dashed border-primary-500 rounded-lg flex flex-col items-center justify-center gap-2 pointer-events-none z-10">
+      <svg className="w-12 h-12 text-primary-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
+      </svg>
+      <span className="text-sm font-semibold text-primary-400">
+        {isDropUploading ? 'Uploading...' : 'Drop images here'}
+      </span>
+    </div>
+  )
+}
+
+function PreviewContent({ previewHTML, content, previewRef }: Readonly<{
+  previewHTML: string
+  content: string
+  previewRef: React.Ref<HTMLDivElement>
+}>) {
+  if (previewHTML) {
+    return (
+      <div
+        ref={previewRef}
+        className="prose prose-invert max-w-none"
+        dangerouslySetInnerHTML={{ __html: previewHTML }}
+      />
+    )
+  }
+  if (content.trim()) {
+    return (
+      <div className="flex items-center justify-center h-full text-dark-text-tertiary">
+        <p className="text-sm">Loading preview...</p>
+      </div>
+    )
+  }
+  return (
+    <div className="flex items-center justify-center h-full text-dark-text-tertiary">
+      <div className="text-center">
+        <svg className="w-16 h-16 mx-auto mb-4 text-dark-text-tertiary/50" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1} d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
+        </svg>
+        <p className="text-lg">No content to preview</p>
+        <p className="text-sm mt-2">Switch to Edit mode to start writing</p>
+      </div>
+    </div>
+  )
 }
 
 // ── Component ────────────────────────────────────────────────────
 
-export default function WikiEditor({ page }: WikiEditorProps) {
+export default function WikiEditor({ page }: Readonly<WikiEditorProps>) {
   const [content, setContent] = useState('')
   const [isPreview, setIsPreview] = useState(true)
   const [previewHTML, setPreviewHTML] = useState('')
-  const [syncState, setSyncState] = useState<'connecting' | 'connected' | 'disconnected'>('connecting')
+  const [syncState, setSyncState] = useState<SyncState>('connecting')
   const [showImagePicker, setShowImagePicker] = useState(false)
-  const [saveStatus, setSaveStatus] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle')
+  const [saveStatus, setSaveStatus] = useState<SaveStatus>('idle')
   const [autoSaveEnabled, setAutoSaveEnabled] = useState(true)
   const isDirtyRef = useRef(false)
   const contentRef = useRef('')
@@ -383,26 +833,11 @@ export default function WikiEditor({ page }: WikiEditorProps) {
   const fsTextareaRef = useRef<HTMLTextAreaElement>(null)
   const previewTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const abortRef = useRef<AbortController | null>(null)
-  const dividerRef = useRef<HTMLDivElement>(null)
+  const dividerRef = useRef<HTMLButtonElement>(null)
   const fsContainerRef = useRef<HTMLDivElement>(null)
   const previewRef = useRef<HTMLDivElement>(null)
   const fsPreviewRef = useRef<HTMLDivElement>(null)
   const [fsSplitPct, setFsSplitPct] = useState(50)
-  const [isDragOver, setIsDragOver] = useState(false)
-  const [isDropUploading, setIsDropUploading] = useState(false)
-  const dragCounterRef = useRef(0)
-  const [editImgList, setEditImgList] = useState<Array<{ html: string; url: string; alt: string; caption: string; index: number }> | null>(null)
-  const [selectedEditImg, setSelectedEditImg] = useState<{ html: string; url: string; alt: string; caption: string; index: number } | null>(null)
-  const [editAlt, setEditAlt] = useState('')
-  const [editCaption, setEditCaption] = useState('')
-  const [editSize, setEditSize] = useState('m')
-  const [showDrawBrowser, setShowDrawBrowser] = useState(false)
-  const [drawList, setDrawList] = useState<DrawItem[]>([])
-  const [drawLoading, setDrawLoading] = useState(false)
-  const [editDrawList, setEditDrawList] = useState<Array<{ shortcode: string; id: string; size: string; zoom: string; index: number }> | null>(null)
-  const [selectedEditDraw, setSelectedEditDraw] = useState<{ shortcode: string; id: string; size: string; zoom: string; index: number } | null>(null)
-  const [editDrawSize, setEditDrawSize] = useState('m')
-  const [editDrawZoom, setEditDrawZoom] = useState('fit')
 
   // ── Keep contentRef in sync ──────────────────────────────────
   useEffect(() => { contentRef.current = content }, [content])
@@ -434,7 +869,7 @@ export default function WikiEditor({ page }: WikiEditorProps) {
       lastSavedContentRef.current = current
       isDirtyRef.current = false
       setSaveStatus('saved')
-      setTimeout(() => setSaveStatus(prev => prev === 'saved' ? 'idle' : prev), 3000)
+      setTimeout(() => setSaveStatus(clearSavedStatus), 3000)
     } catch {
       setSaveStatus('error')
     } finally {
@@ -442,48 +877,7 @@ export default function WikiEditor({ page }: WikiEditorProps) {
     }
   }, [page.id])
 
-  // ── Autosave interval (10 seconds) ─────────────────────────
-  useEffect(() => {
-    if (!autoSaveEnabled) return
-
-    const saveToServer = async () => {
-      const current = contentRef.current
-      if (!isDirtyRef.current || current === lastSavedContentRef.current) return
-      await saveNow()
-    }
-
-    const interval = setInterval(saveToServer, 10_000)
-
-    // Save on unmount
-    return () => {
-      clearInterval(interval)
-      const current = contentRef.current
-      if (isDirtyRef.current && current !== lastSavedContentRef.current) {
-        apiClient.updateWikiPageContent(page.id, current).catch(() => {})
-      }
-    }
-  }, [page.id, autoSaveEnabled, saveNow])
-
-  // ── Save on beforeunload ───────────────────────────────────
-  useEffect(() => {
-    const handler = () => {
-      const current = contentRef.current
-      if (isDirtyRef.current && current !== lastSavedContentRef.current) {
-        const blob = new Blob([JSON.stringify({ content: current })], { type: 'application/json' })
-        const token = localStorage.getItem('auth_token')
-        const API_BASE_FOR_SAVE = import.meta.env.VITE_API_URL || (import.meta.env.PROD ? '' : 'http://localhost:8080')
-        navigator.sendBeacon(
-          `${API_BASE_FOR_SAVE}/api/wiki/pages/${page.id}/content`,
-          blob
-        )
-        // Note: sendBeacon doesn't support custom headers (no auth), so this is best-effort.
-        // The interval save is the primary mechanism.
-        void token // suppress unused warning
-      }
-    }
-    window.addEventListener('beforeunload', handler)
-    return () => window.removeEventListener('beforeunload', handler)
-  }, [page.id])
+  useAutoSave(page.id, autoSaveEnabled, saveNow, isDirtyRef, contentRef, lastSavedContentRef)
 
   // ── Yjs setup ────────────────────────────────────────────────
 
@@ -510,13 +904,7 @@ export default function WikiEditor({ page }: WikiEditorProps) {
     providerRef.current = provider
 
     provider.on('status', ({ status }: { status: string }) => {
-      if (status === 'connected') {
-        setSyncState('connected')
-      } else if (status === 'disconnected') {
-        setSyncState('disconnected')
-      } else {
-        setSyncState('connecting')
-      }
+      setSyncState(mapYjsStatus(status))
     })
 
     const updateContent = () => setContent(ytext.toString())
@@ -557,35 +945,33 @@ export default function WikiEditor({ page }: WikiEditorProps) {
     const textarea = isFullscreen ? fsTextareaRef.current : textareaRef.current
     if (!textarea) return
 
-    if (action.action === 'wrap') {
-      insertAtCursor(textarea, action.before!, action.after!, content, setContent, syncToYjs, isDirtyRef)
-    } else if (action.action === 'line') {
-      insertLine(textarea, action.prefix!, content, setContent, syncToYjs, isDirtyRef)
-    } else if (action.action === 'insert') {
-      const start = textarea.selectionStart
-      const newContent = content.substring(0, start) + action.text! + content.substring(start)
-      setContent(newContent)
-      syncToYjs(newContent)
-      isDirtyRef.current = true
-      setTimeout(() => {
-        textarea.focus()
-        textarea.selectionStart = textarea.selectionEnd = start + action.text!.length
-      }, 0)
+    switch (action.action) {
+      case 'wrap':
+        insertAtCursor(textarea, action.before!, action.after!, content, setContent, syncToYjs, isDirtyRef)
+        break
+      case 'line':
+        insertLine(textarea, action.prefix!, content, setContent, syncToYjs, isDirtyRef)
+        break
+      case 'insert': {
+        const start = textarea.selectionStart
+        const newContent = content.substring(0, start) + action.text! + content.substring(start)
+        setContent(newContent)
+        syncToYjs(newContent)
+        isDirtyRef.current = true
+        setTimeout(() => {
+          textarea.focus()
+          textarea.selectionStart = textarea.selectionEnd = start + action.text!.length
+        }, 0)
+        break
+      }
     }
   }, [content, syncToYjs, isFullscreen])
 
   // ── Server-side preview (inline mode) ────────────────────────
 
   const loadPreview = useCallback(async (markdown: string) => {
-    if (abortRef.current) abortRef.current.abort()
-    const controller = new AbortController()
-    abortRef.current = controller
-    try {
-      const html = await fetchPreview(markdown, controller.signal)
-      setPreviewHTML(html)
-    } catch {
-      // aborted or network error — ignore
-    }
+    const html = await abortAndFetchPreview(abortRef, markdown)
+    if (html !== null) setPreviewHTML(html)
   }, [])
 
   useEffect(() => {
@@ -597,15 +983,8 @@ export default function WikiEditor({ page }: WikiEditorProps) {
   const scheduleFsPreview = useCallback((markdown: string) => {
     if (previewTimerRef.current) clearTimeout(previewTimerRef.current)
     previewTimerRef.current = setTimeout(async () => {
-      if (abortRef.current) abortRef.current.abort()
-      const controller = new AbortController()
-      abortRef.current = controller
-      try {
-        const html = await fetchPreview(markdown, controller.signal)
-        setFsPreviewHTML(html)
-      } catch {
-        // ignore
-      }
+      const html = await abortAndFetchPreview(abortRef, markdown)
+      if (html !== null) setFsPreviewHTML(html)
     }, PREVIEW_DEBOUNCE_MS)
   }, [])
 
@@ -645,111 +1024,37 @@ export default function WikiEditor({ page }: WikiEditorProps) {
   // ── Keyboard shortcuts ───────────────────────────────────────
 
   const handleKeyDown = useCallback((e: React.KeyboardEvent<HTMLTextAreaElement>) => {
-    // Tab → 2-space indent
-    if (e.key === 'Tab') {
-      e.preventDefault()
-      const textarea = e.currentTarget
-      const start = textarea.selectionStart
-      const end = textarea.selectionEnd
-      const newContent = content.substring(0, start) + '  ' + content.substring(end)
-      setContent(newContent)
-      syncToYjs(newContent)
-      isDirtyRef.current = true
-      setTimeout(() => {
-        textarea.selectionStart = textarea.selectionEnd = start + 2
-      }, 0)
-      return
-    }
-
-    // F11 → toggle fullscreen
-    if (e.key === 'F11') {
-      e.preventDefault()
-      setIsFullscreen(prev => !prev)
-      return
-    }
-
-    // Escape → exit fullscreen
-    if (e.key === 'Escape' && isFullscreen) {
-      e.preventDefault()
-      setIsFullscreen(false)
-      return
+    switch (e.key) {
+      case 'Tab': {
+        e.preventDefault()
+        const textarea = e.currentTarget
+        const start = textarea.selectionStart
+        const end = textarea.selectionEnd
+        const newContent = content.substring(0, start) + '  ' + content.substring(end)
+        setContent(newContent)
+        syncToYjs(newContent)
+        isDirtyRef.current = true
+        setTimeout(() => { textarea.selectionStart = textarea.selectionEnd = start + 2 }, 0)
+        break
+      }
+      case 'F11':
+        e.preventDefault()
+        setIsFullscreen(prev => !prev)
+        break
+      case 'Escape':
+        if (isFullscreen) { e.preventDefault(); setIsFullscreen(false) }
+        break
     }
   }, [content, syncToYjs, isFullscreen])
 
   // ── Double-click draw shortcode → open editor ─────────────
 
   const handleDoubleClick = useCallback((e: React.MouseEvent<HTMLTextAreaElement>) => {
-    const textarea = e.currentTarget
-    const pos = textarea.selectionStart
-    const val = textarea.value
-    const re = /\[draw:([a-zA-Z0-9_-]+)(?::edit)?\]/g
-    let match
-    while ((match = re.exec(val)) !== null) {
-      if (pos >= match.index && pos <= match.index + match[0].length) {
-        window.open(`/draw/${match[1]}/edit`, '_blank')
-        return
-      }
-    }
+    const drawId = findDrawShortcodeAtPosition(e.currentTarget.value, e.currentTarget.selectionStart)
+    if (drawId) window.open(`/draw/${drawId}/edit`, '_blank')
   }, [])
 
-  // ── Edit existing draw shortcode ─────────────────────────────
-
-  const handleEditDraw = useCallback(() => {
-    const draws: Array<{ shortcode: string; id: string; size: string; zoom: string; index: number }> = []
-    const re = /\[draw:([a-zA-Z0-9_-]+)(?::edit)?(?::([sml]))?(?::z([^\]]+))?\]/g
-    let match
-    while ((match = re.exec(content)) !== null) {
-      draws.push({
-        shortcode: match[0],
-        id: match[1],
-        size: match[2] || 'm',
-        zoom: match[3] || 'fit',
-        index: match.index,
-      })
-    }
-    if (draws.length === 0) {
-      alert('No draw shortcodes found in content')
-      return
-    }
-    draws.sort((a, b) => a.index - b.index)
-    setEditDrawList(draws)
-    setSelectedEditDraw(null)
-  }, [content])
-
-  const selectDrawForEdit = (draw: typeof editDrawList extends Array<infer T> | null ? T : never) => {
-    setSelectedEditDraw(draw)
-    setEditDrawSize(draw.size)
-    setEditDrawZoom(draw.zoom)
-  }
-
-  const saveEditDraw = useCallback(() => {
-    if (!selectedEditDraw) return
-    const sizeTag = editDrawSize === 'm' ? '' : ':' + editDrawSize
-    const zoomTag = editDrawZoom === 'fit' ? '' : ':z' + editDrawZoom
-    const newShortcode = `[draw:${selectedEditDraw.id}:edit${sizeTag}${zoomTag}]`
-    const newContent = content.replace(selectedEditDraw.shortcode, newShortcode)
-    setContent(newContent)
-    syncToYjs(newContent)
-    isDirtyRef.current = true
-    setEditDrawList(null)
-    setSelectedEditDraw(null)
-  }, [selectedEditDraw, editDrawSize, editDrawZoom, content, syncToYjs])
-
-  // Global F11 listener (when focus is not on textarea)
-  useEffect(() => {
-    const handler = (e: KeyboardEvent) => {
-      if (e.key === 'F11') {
-        e.preventDefault()
-        setIsFullscreen(prev => !prev)
-      }
-      if (e.key === 'Escape' && isFullscreen) {
-        e.preventDefault()
-        setIsFullscreen(false)
-      }
-    }
-    window.addEventListener('keydown', handler)
-    return () => window.removeEventListener('keydown', handler)
-  }, [isFullscreen])
+  useGlobalKeyboard(isFullscreen, setIsFullscreen)
 
   // ── Fullscreen divider resize ────────────────────────────────
 
@@ -774,320 +1079,38 @@ export default function WikiEditor({ page }: WikiEditorProps) {
   // ── Image picker ─────────────────────────────────────────────
 
   const insertImageMarkdown = (alt: string, url: string, caption?: string, size?: string) => {
+    const markup = buildImageMarkup(url, alt, caption || '', size || 'm')
     const textarea = isFullscreen ? fsTextareaRef.current : textareaRef.current
-    const escHtml = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;')
-    const sz = size || 'm'
-    const sizeStyles: Record<string, string> = {
-      s: 'max-width:50%;height:auto;',
-      m: 'max-width:75%;height:auto;',
-      l: 'width:100%;height:auto;max-width:100%;',
-    }
-    const imgStyle = sizeStyles[sz] || sizeStyles.m
-    let markup: string
-    if (sz === 'l' && !caption) {
-      markup = `![${alt}](${url})`
-    } else {
-      markup = `<figure style="text-align:center;margin:1.5rem 0"><a href="${url}" data-lightbox="article-images" data-title="${escHtml(alt)}"><img src="${url}" alt="${escHtml(alt)}" style="${imgStyle}"/></a>${caption ? `<figcaption>${escHtml(caption)}</figcaption>` : ''}</figure>\n`
-    }
-
-    if (textarea) {
-      const start = textarea.selectionStart
-      const end = textarea.selectionEnd
-      const newContent = content.substring(0, start) + markup + content.substring(end)
-      setContent(newContent)
-      syncToYjs(newContent)
-      isDirtyRef.current = true
-      setTimeout(() => {
-        textarea.selectionStart = textarea.selectionEnd = start + markup.length
-        textarea.focus()
-      }, 0)
-    } else {
-      const newContent = content + (content.endsWith('\n') ? '' : '\n') + markup + '\n'
-      setContent(newContent)
-      syncToYjs(newContent)
-      isDirtyRef.current = true
+    const { newContent, focusPos } = insertMarkupAtCursor(textarea, content, markup)
+    setContent(newContent)
+    syncToYjs(newContent)
+    isDirtyRef.current = true
+    if (focusPos !== null && textarea) {
+      setTimeout(() => { textarea.selectionStart = textarea.selectionEnd = focusPos; textarea.focus() }, 0)
     }
     setShowImagePicker(false)
   }
 
-  // ── Drag & drop image upload ─────────────────────────────────
+  const { isDragOver, isDropUploading, handleDragEnter, handleDragOver, handleDragLeave, handleDrop } =
+    useImageDrop({ pageId: page.id, isFullscreen, content, setContent, syncToYjs, isDirtyRef, textareaRef, fsTextareaRef })
 
-  const handleDragEnter = useCallback((e: React.DragEvent) => {
-    e.preventDefault()
-    dragCounterRef.current++
-    if (e.dataTransfer.types.includes('Files')) setIsDragOver(true)
-  }, [])
+  const {
+    editImgList, selectedEditImg, editAlt, editCaption, editSize,
+    handleEditImg, selectImgForEdit, saveEditImg,
+    setEditAlt, setEditCaption, setEditSize, deselectImg, closeEditImg,
+  } = useImageEdit({ content, setContent, syncToYjs, isDirtyRef })
 
-  const handleDragOver = useCallback((e: React.DragEvent) => {
-    e.preventDefault()
-    if (e.dataTransfer) e.dataTransfer.dropEffect = 'copy'
-  }, [])
-
-  const handleDragLeave = useCallback((e: React.DragEvent) => {
-    e.preventDefault()
-    dragCounterRef.current--
-    if (dragCounterRef.current <= 0) {
-      dragCounterRef.current = 0
-      setIsDragOver(false)
-    }
-  }, [])
-
-  const handleDrop = useCallback(async (e: React.DragEvent) => {
-    e.preventDefault()
-    dragCounterRef.current = 0
-    setIsDragOver(false)
-
-    const files = Array.from(e.dataTransfer.files).filter(f => f.type.startsWith('image/'))
-    if (files.length === 0) return
-
-    setIsDropUploading(true)
-    const textarea = isFullscreen ? fsTextareaRef.current : textareaRef.current
-
-    try {
-      for (const file of files) {
-        const sig = await apiClient.getUploadSignature({ pageId: page.id })
-
-        const formData = new FormData()
-        formData.append('file', file)
-        formData.append('api_key', sig.api_key)
-        formData.append('timestamp', String(sig.timestamp))
-        formData.append('signature', sig.signature)
-        formData.append('folder', sig.folder)
-        formData.append('public_id', sig.public_id)
-
-        const uploadRes = await fetch(
-          `https://api.cloudinary.com/v1_1/${sig.cloud_name}/auto/upload`,
-          { method: 'POST', body: formData }
-        )
-        if (!uploadRes.ok) throw new Error('Upload failed')
-        const uploadData = await uploadRes.json()
-
-        const altName = file.name.replace(/\.[^.]+$/, '').replace(/[-_]/g, ' ')
-
-        await apiClient.createWikiPageAttachment(page.id, {
-          filename: file.name,
-          alt_name: altName,
-          file_type: 'image',
-          content_type: file.type,
-          file_size: file.size,
-          cloudinary_url: uploadData.secure_url,
-          cloudinary_public_id: uploadData.public_id,
-        })
-
-        // Insert into editor
-        const markup = `![${altName}](${uploadData.secure_url})`
-        const start = textarea?.selectionStart ?? content.length
-        const end = textarea?.selectionEnd ?? content.length
-        const newContent = content.substring(0, start) + markup + '\n' + content.substring(end)
-        setContent(newContent)
-        syncToYjs(newContent)
-        isDirtyRef.current = true
-      }
-    } catch (err) {
-      // drop upload failed — error state handled by UI
-    } finally {
-      setIsDropUploading(false)
-    }
-  }, [isFullscreen, content, syncToYjs, page.id])
-
-  // ── Status helpers ───────────────────────────────────────────
-
-  const getSyncStatusColor = () => {
-    switch (syncState) {
-      case 'connected': return 'bg-green-500'
-      case 'connecting': return 'bg-yellow-500'
-      case 'disconnected': return 'bg-red-500'
-    }
-  }
-
-  // ── Edit existing image ─────────────────────────────────────
-
-  const handleEditImg = useCallback(() => {
-    const images: Array<{ html: string; url: string; alt: string; caption: string; index: number }> = []
-
-    // Match <figure> blocks with <img>
-    const figureRegex = /<figure[^>]*>[\s\S]*?<img\s[^>]*src="([^"]+)"[^>]*?(?:alt="([^"]*)")?[\s\S]*?(?:<figcaption>([\s\S]*?)<\/figcaption>)?[\s\S]*?<\/figure>/g
-    let match
-    while ((match = figureRegex.exec(content)) !== null) {
-      // Also try to extract alt from img if it wasn't in the first capture
-      let alt = match[2] || ''
-      if (!alt) {
-        const altMatch = match[0].match(/alt="([^"]*)"/)
-        if (altMatch) alt = altMatch[1]
-      }
-      images.push({
-        html: match[0],
-        url: match[1],
-        alt: alt.replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"'),
-        caption: (match[3] || '').replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"'),
-        index: match.index,
-      })
-    }
-
-    // Match markdown images ![alt](url)
-    const mdRegex = /!\[([^\]]*)\]\(([^)]+)\)/g
-    while ((match = mdRegex.exec(content)) !== null) {
-      // Skip if this position is already inside a <figure> we found
-      const pos = match.index
-      const insideFigure = images.some(img => pos >= img.index && pos < img.index + img.html.length)
-      if (insideFigure) continue
-
-      images.push({
-        html: match[0],
-        url: match[2],
-        alt: match[1],
-        caption: '',
-        index: match.index,
-      })
-    }
-
-    if (images.length === 0) {
-      alert('No images found in content')
-      return
-    }
-
-    // Sort by position in content
-    images.sort((a, b) => a.index - b.index)
-    setEditImgList(images)
-    setSelectedEditImg(null)
-  }, [content])
-
-  const selectImgForEdit = (img: typeof editImgList extends Array<infer T> | null ? T : never) => {
-    setSelectedEditImg(img)
-    setEditAlt(img.alt)
-    setEditCaption(img.caption)
-    // Detect size from existing HTML
-    if (img.html.startsWith('<figure')) {
-      if (/max-width:\s*50%/.test(img.html)) setEditSize('s')
-      else if (/max-width:\s*75%/.test(img.html)) setEditSize('m')
-      else setEditSize('l')
-    } else {
-      setEditSize('l') // plain markdown = large
-    }
-  }
-
-  const saveEditImg = useCallback(() => {
-    if (!selectedEditImg) return
-
-    const escHtml = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;')
-    const sizeStyles: Record<string, string> = {
-      s: 'max-width:50%;height:auto;',
-      m: 'max-width:75%;height:auto;',
-      l: 'width:100%;height:auto;max-width:100%;',
-    }
-    const imgStyle = sizeStyles[editSize] || sizeStyles.m
-    let newMarkup: string
-
-    if (editSize === 'l' && !editCaption) {
-      // Large + no caption → plain markdown
-      newMarkup = `![${editAlt}](${selectedEditImg.url})`
-    } else {
-      // Use <figure>
-      newMarkup = `<figure style="text-align:center;margin:1.5rem 0"><a href="${selectedEditImg.url}" data-lightbox="article-images" data-title="${escHtml(editAlt)}"><img src="${selectedEditImg.url}" alt="${escHtml(editAlt)}" style="${imgStyle}"/></a>${editCaption ? `<figcaption>${escHtml(editCaption)}</figcaption>` : ''}</figure>`
-    }
-
-    const newContent = content.replace(selectedEditImg.html, newMarkup)
-    setContent(newContent)
-    syncToYjs(newContent)
-    isDirtyRef.current = true
-    setEditImgList(null)
-    setSelectedEditImg(null)
-  }, [selectedEditImg, editAlt, editCaption, editSize, content, syncToYjs])
-
-  // ── Draw browser handlers ────────────────────────────────────
-
-  const loadDrawings = useCallback(async () => {
-    setDrawLoading(true)
-    try {
-      const res = await fetch('/draw/api/list')
-      const data = await res.json()
-      setDrawList(data.drawings || [])
-    } catch {
-      setDrawList([])
-    } finally {
-      setDrawLoading(false)
-    }
-  }, [])
-
-  const handleDraw = useCallback(() => {
-    setShowDrawBrowser(true)
-    loadDrawings()
-  }, [loadDrawings])
-
-  const handleDrawInsert = useCallback((id: string, size: string, zoom: string) => {
-    const textarea = isFullscreen ? fsTextareaRef.current : textareaRef.current
-    const sizeTag = size === 'm' ? '' : ':' + size
-    const zoomTag = zoom === 'fit' ? '' : ':z' + zoom
-    const markup = `\n[draw:${id}:edit${sizeTag}${zoomTag}]\n`
-    if (textarea) {
-      const start = textarea.selectionStart
-      const end = textarea.selectionEnd
-      const newContent = content.substring(0, start) + markup + content.substring(end)
-      setContent(newContent)
-      syncToYjs(newContent)
-      isDirtyRef.current = true
-      setTimeout(() => {
-        textarea.focus()
-        textarea.selectionStart = textarea.selectionEnd = start + markup.length
-      }, 0)
-    } else {
-      const newContent = content + markup
-      setContent(newContent)
-      syncToYjs(newContent)
-      isDirtyRef.current = true
-    }
-    setShowDrawBrowser(false)
-  }, [isFullscreen, content, syncToYjs])
-
-  const handleDrawRename = useCallback(async (id: string, title: string) => {
-    try {
-      await fetch(`/draw/api/${id}/rename`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ title }),
-      })
-      setDrawList(prev => prev.map(d => d.id === id ? { ...d, title } : d))
-    } catch {
-      // ignore
-    }
-  }, [])
-
-  const handleDrawDelete = useCallback(async (id: string) => {
-    try {
-      await fetch(`/draw/api/${id}/delete`, { method: 'POST' })
-      setDrawList(prev => prev.filter(d => d.id !== id))
-    } catch {
-      alert('Failed to delete drawing')
-    }
-  }, [])
-
-  const handleDrawNew = useCallback(async () => {
-    try {
-      const res = await fetch('/draw/api/new', { method: 'POST' })
-      const data = await res.json()
-      if (data && data.id) {
-        const editUrl = data.edit_url || `/draw/${data.id}/edit`
-        window.open(editUrl, '_blank')
-        loadDrawings()
-      }
-    } catch (err) {
-      // drawing creation failed — silently swallowed
-    }
-  }, [loadDrawings])
-
-  const handleDrawDeleteUnused = useCallback(async (unusedIds: string[]) => {
-    try {
-      await Promise.all(unusedIds.map(id => fetch(`/draw/api/${id}/delete`, { method: 'POST' })))
-      loadDrawings()
-    } catch {
-      alert('Some deletions failed')
-      loadDrawings()
-    }
-  }, [loadDrawings])
+  const {
+    showDrawBrowser, drawList, drawLoading,
+    editDrawList, selectedEditDraw, editDrawSize, editDrawZoom,
+    handleDraw, handleDrawInsert, handleDrawRename, handleDrawDelete,
+    handleDrawNew, handleDrawDeleteUnused, handleEditDraw, selectDrawForEdit, saveEditDraw,
+    setEditDrawSize, setEditDrawZoom, closeDrawBrowser, closeEditDraw,
+  } = useDrawBrowser({ content, setContent, syncToYjs, isDirtyRef, isFullscreen, textareaRef, fsTextareaRef })
 
   // ── Toolbar JSX ──────────────────────────────────────────────
 
-  const Toolbar = ({ compact }: { compact?: boolean }) => (
+  const renderToolbar = (compact?: boolean) => (
     <div className={`flex items-center gap-1 ${compact ? '' : 'flex-wrap'}`}>
       {toolbarActions.map((action) => (
         <button
@@ -1146,292 +1169,202 @@ export default function WikiEditor({ page }: WikiEditorProps) {
 
   // ── Fullscreen overlay ───────────────────────────────────────
 
-  if (isFullscreen) {
-    return (
-      <>
-        <div className="fixed inset-0 z-50 bg-dark-bg-primary flex flex-col">
-          {/* Top bar */}
-          <div className="flex items-center justify-between border-b border-dark-border-subtle bg-dark-bg-secondary px-4 py-2">
-            <div className="flex items-center gap-4">
-              <span className="text-sm font-semibold text-dark-text-primary truncate max-w-xs">
-                {page.title}
-              </span>
-              <Toolbar compact />
-            </div>
-            <div className="flex items-center gap-3">
-              <div className="flex items-center gap-2">
-                <div className={`w-2 h-2 rounded-full ${
-                  saveStatus === 'saving' ? 'bg-yellow-500' :
-                  saveStatus === 'saved' ? 'bg-green-500' :
-                  saveStatus === 'error' ? 'bg-red-500' :
-                  getSyncStatusColor()
-                }`} />
-                <span className="text-xs text-dark-text-tertiary">
-                  {saveStatus === 'saving' ? 'Saving...' :
-                   saveStatus === 'saved' ? 'Saved' :
-                   saveStatus === 'error' ? 'Save failed' :
-                   autoSaveEnabled ? 'Autosave on' : 'Autosave off'}
-                </span>
-              </div>
-              <button
-                onClick={() => setAutoSaveEnabled(prev => !prev)}
-                className={`px-2 py-1 rounded text-xs font-medium transition-colors ${
-                  autoSaveEnabled
-                    ? 'bg-green-500/15 text-green-400 hover:bg-green-500/25'
-                    : 'bg-dark-bg-tertiary text-dark-text-tertiary hover:bg-dark-bg-tertiary/80'
-                }`}
-                title={autoSaveEnabled ? 'Disable autosave' : 'Enable autosave'}
-              >
-                {autoSaveEnabled ? 'Auto' : 'Manual'}
-              </button>
-              <button
-                onClick={saveNow}
-                disabled={saveStatus === 'saving'}
-                className="px-2.5 py-1 rounded text-xs font-medium transition-colors bg-primary-600 text-white hover:bg-primary-500 disabled:opacity-50"
-                title="Save now"
-              >
-                Save
-              </button>
-              <button
-                onClick={() => setIsFullscreen(false)}
-                className="px-3 py-1.5 rounded text-xs font-medium transition-colors bg-dark-bg-tertiary text-dark-text-secondary hover:bg-red-500/20 hover:text-red-400"
-                title="Exit fullscreen (Esc)"
-              >
-                Exit
-              </button>
-            </div>
-          </div>
+  // ── Fullscreen overlay ───────────────────────────────────────
 
-          {/* Split panes */}
-          <div ref={fsContainerRef} className="flex flex-1 overflow-hidden">
-            {/* Left: editor */}
-            <div
-              style={{ width: `${fsSplitPct}%` }}
-              className="flex flex-col overflow-hidden relative"
-              onDragEnter={handleDragEnter}
-              onDragOver={handleDragOver}
-              onDragLeave={handleDragLeave}
-              onDrop={handleDrop}
-            >
-              <textarea
-                ref={fsTextareaRef}
-                value={content}
-                onChange={handleTextareaChange}
-                onKeyDown={handleKeyDown}
-                onDoubleClick={handleDoubleClick}
-                className="flex-1 w-full bg-dark-bg-primary text-dark-text-primary resize-none focus:outline-none font-mono text-sm p-4"
-                spellCheck={false}
-                placeholder="Start writing in Markdown..."
-              />
-              {(isDragOver || isDropUploading) && (
-                <div className="absolute inset-0 bg-primary-500/10 border-2 border-dashed border-primary-500 rounded-lg flex flex-col items-center justify-center gap-2 pointer-events-none z-10">
-                  <svg className="w-12 h-12 text-primary-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
-                  </svg>
-                  <span className="text-sm font-semibold text-primary-400">
-                    {isDropUploading ? 'Uploading...' : 'Drop images here'}
-                  </span>
-                </div>
-              )}
-            </div>
-
-            {/* Divider */}
-            <div
-              ref={dividerRef}
-              onMouseDown={handleDividerMouseDown}
-              className="w-1.5 bg-dark-border-subtle hover:bg-dark-accent-primary/50 cursor-col-resize transition-colors flex-shrink-0"
-            />
-
-            {/* Right: live preview */}
-            <div style={{ width: `${100 - fsSplitPct}%` }} className="overflow-y-auto p-4">
-              {fsPreviewHTML ? (
-                <div
-                  ref={fsPreviewRef}
-                  className="prose prose-invert max-w-none"
-                  dangerouslySetInnerHTML={{ __html: fsPreviewHTML }}
-                />
-              ) : (
-                <div className="flex items-center justify-center h-full text-dark-text-tertiary">
-                  <p className="text-sm">Preview will appear here...</p>
-                </div>
-              )}
-            </div>
-          </div>
+  const fullscreenContent = isFullscreen && (
+    <div className="fixed inset-0 z-50 bg-dark-bg-primary flex flex-col">
+      {/* Top bar */}
+      <div className="flex items-center justify-between border-b border-dark-border-subtle bg-dark-bg-secondary px-4 py-2">
+        <div className="flex items-center gap-4">
+          <span className="text-sm font-semibold text-dark-text-primary truncate max-w-xs">
+            {page.title}
+          </span>
+          {renderToolbar(true)}
         </div>
-
-        {/* Image picker in fullscreen */}
-        {showImagePicker && (
-          <ImagePickerModal
-            onSelect={insertImageMarkdown}
-            onClose={() => setShowImagePicker(false)}
-            wikiPageId={page.id}
-            onUploadComplete={() => {}}
-          />
-        )}
-
-        {/* Draw browser in fullscreen */}
-        {showDrawBrowser && (
-          <DrawBrowserModal
-            drawings={drawList}
-            loading={drawLoading}
-            editorContent={content}
-            onInsert={handleDrawInsert}
-            onRename={handleDrawRename}
-            onDelete={handleDrawDelete}
-            onDeleteUnused={handleDrawDeleteUnused}
-            onNew={handleDrawNew}
-            onClose={() => setShowDrawBrowser(false)}
-          />
-        )}
-
-        {/* Edit Draw modal in fullscreen */}
-        {editDrawList && (
-          <EditDrawModal
-            draws={editDrawList}
-            selectedDraw={selectedEditDraw}
-            editSize={editDrawSize}
-            editZoom={editDrawZoom}
-            onSelect={selectDrawForEdit}
-            onSizeChange={setEditDrawSize}
-            onZoomChange={setEditDrawZoom}
-            onSave={saveEditDraw}
-            onClose={() => { setEditDrawList(null); setSelectedEditDraw(null) }}
-          />
-        )}
-      </>
-    )
-  }
-
-  // ── Normal (non-fullscreen) view ─────────────────────────────
-
-  return (
-    <div className="flex flex-col h-full">
-      {/* Header */}
-      <div className="border-b border-dark-border-subtle bg-dark-bg-secondary px-6 py-4">
-        <div className="flex items-center justify-between">
-          <div>
-            <h1 className="text-2xl font-semibold text-dark-text-primary">{page.title}</h1>
-            <div className="flex items-center gap-3 mt-2">
-              <div className="flex items-center gap-2">
-                <div className={`w-2 h-2 rounded-full ${
-                  saveStatus === 'saving' ? 'bg-yellow-500' :
-                  saveStatus === 'saved' ? 'bg-green-500' :
-                  saveStatus === 'error' ? 'bg-red-500' :
-                  getSyncStatusColor()
-                }`} />
-                <span className="text-sm text-dark-text-tertiary">
-                  {saveStatus === 'saving' ? 'Saving...' :
-                   saveStatus === 'saved' ? 'Saved' :
-                   saveStatus === 'error' ? 'Save failed' :
-                   autoSaveEnabled ? 'Autosave on' : 'Autosave off'}
-                </span>
-              </div>
-              <button
-                onClick={() => setAutoSaveEnabled(prev => !prev)}
-                className={`px-2 py-0.5 rounded text-xs font-medium transition-colors ${
-                  autoSaveEnabled
-                    ? 'bg-green-500/15 text-green-400 hover:bg-green-500/25'
-                    : 'bg-dark-bg-tertiary text-dark-text-tertiary hover:bg-dark-bg-tertiary/80'
-                }`}
-                title={autoSaveEnabled ? 'Disable autosave' : 'Enable autosave'}
-              >
-                {autoSaveEnabled ? 'Auto' : 'Manual'}
-              </button>
-              <button
-                onClick={saveNow}
-                disabled={saveStatus === 'saving'}
-                className="px-2.5 py-0.5 rounded text-xs font-medium transition-colors bg-primary-600 text-white hover:bg-primary-500 disabled:opacity-50"
-                title="Save now"
-              >
-                Save
-              </button>
-            </div>
-          </div>
-
+        <div className="flex items-center gap-3">
           <div className="flex items-center gap-2">
-            <button
-              onClick={() => setIsPreview(false)}
-              className={`px-4 py-2 rounded text-sm font-medium transition-colors ${
-                !isPreview
-                  ? 'bg-dark-accent-primary text-white'
-                  : 'bg-dark-bg-tertiary text-dark-text-secondary hover:bg-dark-bg-tertiary/80'
-              }`}
-            >
-              Edit
-            </button>
-            <button
-              onClick={() => setIsPreview(true)}
-              className={`px-4 py-2 rounded text-sm font-medium transition-colors ${
-                isPreview
-                  ? 'bg-dark-accent-primary text-white'
-                  : 'bg-dark-bg-tertiary text-dark-text-secondary hover:bg-dark-bg-tertiary/80'
-              }`}
-            >
-              Preview
-            </button>
-            <button
-              onClick={() => setIsFullscreen(true)}
-              className="px-3 py-2 rounded text-sm font-medium transition-colors bg-dark-bg-tertiary text-dark-text-secondary hover:bg-dark-bg-tertiary/80"
-              title="Fullscreen editor (F11)"
-            >
-              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 8V4m0 0h4M4 4l5 5m11-1V4m0 0h-4m4 0l-5 5M4 16v4m0 0h4m-4 0l5-5m11 5l-5-5m5 5v-4m0 4h-4" />
-              </svg>
-            </button>
+            <div className={`w-2 h-2 rounded-full ${getSaveStatusColor(saveStatus, syncState)}`} />
+            <span className="text-xs text-dark-text-tertiary">
+              {getSaveStatusText(saveStatus, autoSaveEnabled)}
+            </span>
           </div>
+          <button
+            onClick={() => setAutoSaveEnabled(prev => !prev)}
+            className={`px-2 py-1 rounded text-xs font-medium transition-colors ${
+              autoSaveEnabled
+                ? 'bg-green-500/15 text-green-400 hover:bg-green-500/25'
+                : 'bg-dark-bg-tertiary text-dark-text-tertiary hover:bg-dark-bg-tertiary/80'
+            }`}
+            title={autoSaveEnabled ? 'Disable autosave' : 'Enable autosave'}
+          >
+            {autoSaveEnabled ? 'Auto' : 'Manual'}
+          </button>
+          <button
+            onClick={saveNow}
+            disabled={saveStatus === 'saving'}
+            className="px-2.5 py-1 rounded text-xs font-medium transition-colors bg-primary-600 text-white hover:bg-primary-500 disabled:opacity-50"
+            title="Save now"
+          >
+            Save
+          </button>
+          <button
+            onClick={() => setIsFullscreen(false)}
+            className="px-3 py-1.5 rounded text-xs font-medium transition-colors bg-dark-bg-tertiary text-dark-text-secondary hover:bg-red-500/20 hover:text-red-400"
+            title="Exit fullscreen (Esc)"
+          >
+            Exit
+          </button>
         </div>
       </div>
 
-      {/* Toolbar (edit mode only) */}
-      {!isPreview && (
-        <div className="border-b border-dark-border-subtle bg-dark-bg-secondary px-6 py-2">
-          <Toolbar />
-        </div>
-      )}
+      {/* Split panes */}
+      <div ref={fsContainerRef} className="flex flex-1 overflow-hidden">
+        {/* Left: editor */}
+        <section
+          aria-label="Editor with drop support"
+          style={{ width: `${fsSplitPct}%` }}
+          className="flex flex-col overflow-hidden relative"
+          onDragEnter={handleDragEnter}
+          onDragOver={handleDragOver}
+          onDragLeave={handleDragLeave}
+          onDrop={handleDrop}
+        >
+          <textarea
+            ref={fsTextareaRef}
+            value={content}
+            onChange={handleTextareaChange}
+            onKeyDown={handleKeyDown}
+            onDoubleClick={handleDoubleClick}
+            className="flex-1 w-full bg-dark-bg-primary text-dark-text-primary resize-none focus:outline-none font-mono text-sm p-4"
+            spellCheck={false}
+            placeholder="Start writing in Markdown..."
+          />
+          <DropOverlay isDragOver={isDragOver} isDropUploading={isDropUploading} />
+        </section>
 
-      {/* Content */}
-      <div className="flex-1 overflow-hidden flex flex-col">
-        {isPreview ? (
-          <div className="h-full overflow-y-auto px-6 py-4">
-            {previewHTML ? (
-              <div
-                ref={previewRef}
-                className="prose prose-invert max-w-none"
-                dangerouslySetInnerHTML={{ __html: previewHTML }}
-              />
-            ) : content.trim() ? (
-              <div className="flex items-center justify-center h-full text-dark-text-tertiary">
-                <p className="text-sm">Loading preview...</p>
-              </div>
-            ) : (
-              <div className="flex items-center justify-center h-full text-dark-text-tertiary">
-                <div className="text-center">
-                  <svg className="w-16 h-16 mx-auto mb-4 text-dark-text-tertiary/50" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1} d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
-                  </svg>
-                  <p className="text-lg">No content to preview</p>
-                  <p className="text-sm mt-2">Switch to Edit mode to start writing</p>
+        {/* Divider */}
+        <button
+          type="button"
+          ref={dividerRef}
+          onMouseDown={handleDividerMouseDown}
+          className="w-1.5 bg-dark-border-subtle hover:bg-dark-accent-primary/50 cursor-col-resize transition-colors flex-shrink-0 border-0 p-0"
+          aria-label="Resize panels"
+        />
+
+        {/* Right: live preview */}
+        <div style={{ width: `${100 - fsSplitPct}%` }} className="overflow-y-auto p-4">
+          <PreviewContent previewHTML={fsPreviewHTML} content={content} previewRef={fsPreviewRef} />
+        </div>
+      </div>
+    </div>
+  )
+
+  // ── Render ───────────────────────────────────────────────────
+
+  return (
+    <>
+      {fullscreenContent}
+
+      {!isFullscreen && (
+        <div className="flex flex-col h-full">
+          {/* Header */}
+          <div className="border-b border-dark-border-subtle bg-dark-bg-secondary px-6 py-4">
+            <div className="flex items-center justify-between">
+              <div>
+                <h1 className="text-2xl font-semibold text-dark-text-primary">{page.title}</h1>
+                <div className="flex items-center gap-3 mt-2">
+                  <div className="flex items-center gap-2">
+                    <div className={`w-2 h-2 rounded-full ${getSaveStatusColor(saveStatus, syncState)}`} />
+                    <span className="text-sm text-dark-text-tertiary">
+                      {getSaveStatusText(saveStatus, autoSaveEnabled)}
+                    </span>
+                  </div>
+                  <button
+                    onClick={() => setAutoSaveEnabled(prev => !prev)}
+                    className={`px-2 py-0.5 rounded text-xs font-medium transition-colors ${
+                      autoSaveEnabled
+                        ? 'bg-green-500/15 text-green-400 hover:bg-green-500/25'
+                        : 'bg-dark-bg-tertiary text-dark-text-tertiary hover:bg-dark-bg-tertiary/80'
+                    }`}
+                    title={autoSaveEnabled ? 'Disable autosave' : 'Enable autosave'}
+                  >
+                    {autoSaveEnabled ? 'Auto' : 'Manual'}
+                  </button>
+                  <button
+                    onClick={saveNow}
+                    disabled={saveStatus === 'saving'}
+                    className="px-2.5 py-0.5 rounded text-xs font-medium transition-colors bg-primary-600 text-white hover:bg-primary-500 disabled:opacity-50"
+                    title="Save now"
+                  >
+                    Save
+                  </button>
                 </div>
               </div>
-            )}
+
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => setIsPreview(false)}
+                  className={`px-4 py-2 rounded text-sm font-medium transition-colors ${
+                    !isPreview
+                      ? 'bg-dark-accent-primary text-white'
+                      : 'bg-dark-bg-tertiary text-dark-text-secondary hover:bg-dark-bg-tertiary/80'
+                  }`}
+                >
+                  Edit
+                </button>
+                <button
+                  onClick={() => setIsPreview(true)}
+                  className={`px-4 py-2 rounded text-sm font-medium transition-colors ${
+                    isPreview
+                      ? 'bg-dark-accent-primary text-white'
+                      : 'bg-dark-bg-tertiary text-dark-text-secondary hover:bg-dark-bg-tertiary/80'
+                  }`}
+                >
+                  Preview
+                </button>
+                <button
+                  onClick={() => setIsFullscreen(true)}
+                  className="px-3 py-2 rounded text-sm font-medium transition-colors bg-dark-bg-tertiary text-dark-text-secondary hover:bg-dark-bg-tertiary/80"
+                  title="Fullscreen editor (F11)"
+                >
+                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 8V4m0 0h4M4 4l5 5m11-1V4m0 0h-4m4 0l-5 5M4 16v4m0 0h4m-4 0l5-5m11 5l-5-5m5 5v-4m0 4h-4" />
+                  </svg>
+                </button>
+              </div>
+            </div>
           </div>
-        ) : (
-          <>
-            <div
-              className="relative flex-1 min-h-0"
-              onDragEnter={handleDragEnter}
-              onDragOver={handleDragOver}
-              onDragLeave={handleDragLeave}
-              onDrop={handleDrop}
-            >
-              <textarea
-                ref={textareaRef}
-                value={content}
-                onChange={handleTextareaChange}
-                onKeyDown={handleKeyDown}
-                onDoubleClick={handleDoubleClick}
-                placeholder="Start writing in Markdown...
+
+          {/* Toolbar (edit mode only) */}
+          {!isPreview && (
+            <div className="border-b border-dark-border-subtle bg-dark-bg-secondary px-6 py-2">
+              {renderToolbar()}
+            </div>
+          )}
+
+          {/* Content */}
+          <div className="flex-1 overflow-hidden flex flex-col">
+            {isPreview ? (
+              <div className="h-full overflow-y-auto px-6 py-4">
+                <PreviewContent previewHTML={previewHTML} content={content} previewRef={previewRef} />
+              </div>
+            ) : (
+              <>
+                <section
+                  aria-label="Editor with drop support"
+                  className="relative flex-1 min-h-0"
+                  onDragEnter={handleDragEnter}
+                  onDragOver={handleDragOver}
+                  onDragLeave={handleDragLeave}
+                  onDrop={handleDrop}
+                >
+                  <textarea
+                    ref={textareaRef}
+                    value={content}
+                    onChange={handleTextareaChange}
+                    onKeyDown={handleKeyDown}
+                    onDoubleClick={handleDoubleClick}
+                    placeholder="Start writing in Markdown...
 
 # Heading 1
 ## Heading 2
@@ -1444,78 +1377,64 @@ export default function WikiEditor({ page }: WikiEditorProps) {
 [Link text](https://example.com)
 
 ```code block```"
-                className="w-full h-full px-6 py-4 bg-dark-bg-primary text-dark-text-primary resize-none focus:outline-none font-mono text-sm placeholder-dark-text-tertiary/50"
-                spellCheck={false}
-              />
-              {(isDragOver || isDropUploading) && (
-                <div className="absolute inset-0 bg-primary-500/10 border-2 border-dashed border-primary-500 rounded-lg flex flex-col items-center justify-center gap-2 pointer-events-none z-10">
-                  <svg className="w-12 h-12 text-primary-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
+                    className="w-full h-full px-6 py-4 bg-dark-bg-primary text-dark-text-primary resize-none focus:outline-none font-mono text-sm placeholder-dark-text-tertiary/50"
+                    spellCheck={false}
+                  />
+                  <DropOverlay isDragOver={isDragOver} isDropUploading={isDropUploading} />
+                </section>
+                {/* Visible drop zone */}
+                <section
+                  aria-label="Drop zone for images"
+                  className={`mx-6 mb-4 mt-2 border-2 border-dashed rounded-lg p-4 flex items-center justify-center gap-3 transition-colors ${
+                    isDragOver
+                      ? 'border-primary-500 bg-primary-500/5'
+                      : 'border-dark-border-subtle hover:border-primary-500/50'
+                  }`}
+                  onDragEnter={handleDragEnter}
+                  onDragOver={handleDragOver}
+                  onDragLeave={handleDragLeave}
+                  onDrop={handleDrop}
+                >
+                  <svg className="w-8 h-8 text-dark-text-tertiary" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
                   </svg>
-                  <span className="text-sm font-semibold text-primary-400">
-                    {isDropUploading ? 'Uploading...' : 'Drop images here'}
-                  </span>
-                </div>
-              )}
-            </div>
-            {/* Visible drop zone */}
-            <div
-              className={`mx-6 mb-4 mt-2 border-2 border-dashed rounded-lg p-4 flex items-center justify-center gap-3 transition-colors ${
-                isDragOver
-                  ? 'border-primary-500 bg-primary-500/5'
-                  : 'border-dark-border-subtle hover:border-primary-500/50'
-              }`}
-              onDragEnter={handleDragEnter}
-              onDragOver={handleDragOver}
-              onDragLeave={handleDragLeave}
-              onDrop={handleDrop}
-            >
-              <svg className="w-8 h-8 text-dark-text-tertiary" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
-              </svg>
-              <div>
-                <div className="text-sm text-dark-text-secondary">
-                  Drop images here or{' '}
-                  <button
-                    onClick={() => setShowImagePicker(true)}
-                    className="text-primary-400 hover:underline font-medium"
-                  >
-                    browse
-                  </button>
-                </div>
-                <div className="text-xs text-dark-text-tertiary">Supports JPG, PNG, GIF</div>
+                  <div>
+                    <div className="text-sm text-dark-text-secondary">
+                      Drop images here or{' '}
+                      <button
+                        onClick={() => setShowImagePicker(true)}
+                        className="text-primary-400 hover:underline font-medium"
+                      >
+                        browse
+                      </button>
+                    </div>
+                    <div className="text-xs text-dark-text-tertiary">Supports JPG, PNG, GIF</div>
+                  </div>
+                </section>
+              </>
+            )}
+          </div>
+
+          {/* Footer helper */}
+          {!isPreview && (
+            <div className="border-t border-dark-border-subtle bg-dark-bg-secondary px-6 py-2">
+              <div className="flex items-center gap-4 text-xs text-dark-text-tertiary">
+                <span>Markdown supported</span>
+                <span>&bull;</span>
+                <span className={getSaveStatusTextColor(saveStatus)}>
+                  {getSaveStatusText(saveStatus, autoSaveEnabled)}
+                </span>
+                <span>&bull;</span>
+                <span>Tab to indent</span>
+                <span>&bull;</span>
+                <span>F11 fullscreen</span>
               </div>
             </div>
-          </>
-        )}
-      </div>
-
-      {/* Footer helper */}
-      {!isPreview && (
-        <div className="border-t border-dark-border-subtle bg-dark-bg-secondary px-6 py-2">
-          <div className="flex items-center gap-4 text-xs text-dark-text-tertiary">
-            <span>Markdown supported</span>
-            <span>&bull;</span>
-            <span className={
-              saveStatus === 'saving' ? 'text-yellow-400' :
-              saveStatus === 'saved' ? 'text-green-400' :
-              saveStatus === 'error' ? 'text-red-400' :
-              ''
-            }>
-              {saveStatus === 'saving' ? 'Saving...' :
-               saveStatus === 'saved' ? 'Saved' :
-               saveStatus === 'error' ? 'Save failed' :
-               autoSaveEnabled ? 'Autosave on' : 'Autosave off'}
-            </span>
-            <span>&bull;</span>
-            <span>Tab to indent</span>
-            <span>&bull;</span>
-            <span>F11 fullscreen</span>
-          </div>
+          )}
         </div>
       )}
 
-      {/* Image Picker Modal */}
+      {/* Shared modals — rendered once regardless of fullscreen state */}
       {showImagePicker && (
         <ImagePickerModal
           onSelect={insertImageMarkdown}
@@ -1525,132 +1444,21 @@ export default function WikiEditor({ page }: WikiEditorProps) {
         />
       )}
 
-      {/* Edit Image Modal */}
-      {editImgList && (
-        <div
-          className="fixed inset-0 z-[60] flex items-center justify-center bg-black/60 backdrop-blur-sm"
-          onClick={() => { setEditImgList(null); setSelectedEditImg(null) }}
-        >
-          <div
-            className="w-full max-w-2xl mx-4 bg-dark-bg-secondary rounded-xl border border-dark-border-subtle shadow-2xl overflow-hidden"
-            onClick={e => e.stopPropagation()}
-          >
-            {/* Header */}
-            <div className="flex items-center justify-between px-6 py-4 border-b border-dark-border-subtle">
-              <h3 className="text-lg font-semibold text-dark-text-primary">Edit Image</h3>
-              <button
-                onClick={() => { setEditImgList(null); setSelectedEditImg(null) }}
-                className="text-dark-text-tertiary hover:text-dark-text-primary transition-colors"
-              >
-                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                </svg>
-              </button>
-            </div>
+      <EditImageModal
+        editImgList={editImgList}
+        selectedEditImg={selectedEditImg}
+        editAlt={editAlt}
+        editCaption={editCaption}
+        editSize={editSize}
+        onSelectImg={selectImgForEdit}
+        onAltChange={setEditAlt}
+        onCaptionChange={setEditCaption}
+        onSizeChange={setEditSize}
+        onSave={saveEditImg}
+        onDeselect={deselectImg}
+        onClose={closeEditImg}
+      />
 
-            {!selectedEditImg ? (
-              /* Image grid picker */
-              <div className="p-6">
-                <p className="text-sm text-dark-text-secondary mb-4">Select an image to edit:</p>
-                <div className="grid grid-cols-3 gap-3 max-h-80 overflow-y-auto">
-                  {editImgList.map((img, i) => (
-                    <button
-                      key={i}
-                      onClick={() => selectImgForEdit(img)}
-                      className="group relative aspect-square rounded-lg overflow-hidden border-2 border-dark-border-subtle hover:border-primary-500 transition-colors bg-dark-bg-tertiary"
-                    >
-                      <img
-                        src={img.url}
-                        alt={img.alt}
-                        className="w-full h-full object-cover"
-                        onError={(e) => {
-                          (e.target as HTMLImageElement).style.display = 'none'
-                        }}
-                      />
-                      <div className="absolute inset-x-0 bottom-0 bg-black/70 px-2 py-1">
-                        <p className="text-xs text-dark-text-secondary truncate">{img.alt || 'No alt text'}</p>
-                      </div>
-                    </button>
-                  ))}
-                </div>
-              </div>
-            ) : (
-              /* Edit form */
-              <div className="p-6">
-                <div className="flex gap-4">
-                  {/* Preview */}
-                  <div className="w-40 h-40 flex-shrink-0 rounded-lg overflow-hidden bg-dark-bg-tertiary border border-dark-border-subtle">
-                    <img
-                      src={selectedEditImg.url}
-                      alt={editAlt}
-                      className="w-full h-full object-cover"
-                    />
-                  </div>
-                  {/* Fields */}
-                  <div className="flex-1 space-y-4">
-                    <div>
-                      <label className="block text-xs font-medium text-dark-text-secondary mb-1">Alt text</label>
-                      <input
-                        type="text"
-                        value={editAlt}
-                        onChange={e => setEditAlt(e.target.value)}
-                        className="w-full px-3 py-2 rounded-lg bg-dark-bg-tertiary border border-dark-border-subtle text-sm text-dark-text-primary focus:outline-none focus:border-primary-500"
-                        placeholder="Describe this image..."
-                      />
-                    </div>
-                    <div>
-                      <label className="block text-xs font-medium text-dark-text-secondary mb-1">Caption</label>
-                      <input
-                        type="text"
-                        value={editCaption}
-                        onChange={e => setEditCaption(e.target.value)}
-                        className="w-full px-3 py-2 rounded-lg bg-dark-bg-tertiary border border-dark-border-subtle text-sm text-dark-text-primary focus:outline-none focus:border-primary-500"
-                        placeholder="Optional caption..."
-                      />
-                    </div>
-                    <div>
-                      <label className="block text-xs font-medium text-dark-text-secondary mb-1">Size</label>
-                      <div className="flex gap-1.5">
-                        {([['s', 'Small'], ['m', 'Medium'], ['l', 'Large']] as const).map(([val, label]) => (
-                          <button
-                            key={val}
-                            type="button"
-                            onClick={() => setEditSize(val)}
-                            className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-colors ${
-                              editSize === val
-                                ? 'bg-primary-500 text-white'
-                                : 'bg-dark-bg-tertiary text-dark-text-secondary hover:bg-dark-bg-tertiary/80'
-                            }`}
-                          >
-                            {label}
-                          </button>
-                        ))}
-                      </div>
-                    </div>
-                  </div>
-                </div>
-                {/* Actions */}
-                <div className="flex items-center justify-end gap-3 mt-6">
-                  <button
-                    onClick={() => setSelectedEditImg(null)}
-                    className="px-4 py-2 rounded-lg text-sm font-medium text-dark-text-secondary hover:text-dark-text-primary transition-colors"
-                  >
-                    Back
-                  </button>
-                  <button
-                    onClick={saveEditImg}
-                    className="px-4 py-2 rounded-lg text-sm font-medium bg-primary-600 text-white hover:bg-primary-500 transition-colors"
-                  >
-                    Save
-                  </button>
-                </div>
-              </div>
-            )}
-          </div>
-        </div>
-      )}
-
-      {/* Draw Browser Modal */}
       {showDrawBrowser && (
         <DrawBrowserModal
           drawings={drawList}
@@ -1661,11 +1469,10 @@ export default function WikiEditor({ page }: WikiEditorProps) {
           onDelete={handleDrawDelete}
           onDeleteUnused={handleDrawDeleteUnused}
           onNew={handleDrawNew}
-          onClose={() => setShowDrawBrowser(false)}
+          onClose={closeDrawBrowser}
         />
       )}
 
-      {/* Edit Draw Modal */}
       {editDrawList && (
         <EditDrawModal
           draws={editDrawList}
@@ -1676,22 +1483,22 @@ export default function WikiEditor({ page }: WikiEditorProps) {
           onSizeChange={setEditDrawSize}
           onZoomChange={setEditDrawZoom}
           onSave={saveEditDraw}
-          onClose={() => { setEditDrawList(null); setSelectedEditDraw(null) }}
+          onClose={closeEditDraw}
         />
       )}
-    </div>
+    </>
   )
 }
 
 // ── DrawCard sub-component ───────────────────────────────────────
 
-function DrawCard({ drawing, isUsed, onInsert, onRename, onDelete }: {
+function DrawCard({ drawing, isUsed, onInsert, onRename, onDelete }: Readonly<{
   drawing: DrawItem
   isUsed: boolean
   onInsert: (id: string, size: string, zoom: string) => void
   onRename: (id: string, title: string) => void
   onDelete: (id: string) => void
-}) {
+}>) {
   const [editing, setEditing] = useState(false)
   const [title, setTitle] = useState(drawing.title || 'Untitled')
   const [size, setSize] = useState('m')
@@ -1718,18 +1525,9 @@ function DrawCard({ drawing, isUsed, onInsert, onRename, onDelete }: {
     } catch { return drawing.updated_at }
   })()
 
-  const handleCardClick = (e: React.MouseEvent) => {
-    const target = e.target as HTMLElement
-    const tag = target.tagName
-    if (tag === 'SELECT' || tag === 'OPTION' || tag === 'BUTTON' || tag === 'INPUT' || tag === 'SVG' || tag === 'PATH' || tag === 'POLYLINE') return
-    if (target.closest('select') || target.closest('button') || target.closest('input')) return
-    onInsert(drawing.id, size, zoom)
-  }
-
   return (
     <div
-      onClick={handleCardClick}
-      className={`border rounded-xl p-4 flex flex-col gap-1.5 cursor-pointer transition-colors hover:bg-dark-bg-tertiary/50 ${isUsed ? 'border-green-500/30 hover:border-green-500/50' : 'border-dark-border-subtle hover:border-primary-500/50'}`}
+      className={`border rounded-xl p-4 flex flex-col gap-1.5 transition-colors ${isUsed ? 'border-green-500/30 hover:border-green-500/50' : 'border-dark-border-subtle hover:border-primary-500/50'}`}
     >
       <div className="flex items-center gap-1.5">
         {editing ? (
@@ -1758,7 +1556,7 @@ function DrawCard({ drawing, isUsed, onInsert, onRename, onDelete }: {
         )}
       </div>
       <span className="text-xs text-dark-text-tertiary">{formattedDate}</span>
-      <div className="flex gap-1.5 mt-1 items-center" onClick={e => e.stopPropagation()}>
+      <div className="flex gap-1.5 mt-1 items-center" role="toolbar" onClick={e => e.stopPropagation()} onKeyDown={e => e.stopPropagation()}>
         <SearchSelect
           variant="inline"
           value={size}
@@ -1801,13 +1599,19 @@ function DrawCard({ drawing, isUsed, onInsert, onRename, onDelete }: {
           </svg>
         </button>
       </div>
+      <button
+        onClick={() => onInsert(drawing.id, size, zoom)}
+        className="mt-1.5 w-full py-1.5 rounded-lg text-xs font-medium bg-primary-500/10 text-primary-400 hover:bg-primary-500/20 transition-colors"
+      >
+        Insert
+      </button>
     </div>
   )
 }
 
 // ── DrawBrowserModal ─────────────────────────────────────────────
 
-function DrawBrowserModal({ drawings, loading, editorContent, onInsert, onRename, onDelete, onDeleteUnused, onNew, onClose }: {
+function DrawBrowserModal({ drawings, loading, editorContent, onInsert, onRename, onDelete, onDeleteUnused, onNew, onClose }: Readonly<{
   drawings: DrawItem[]
   loading: boolean
   editorContent: string
@@ -1817,7 +1621,7 @@ function DrawBrowserModal({ drawings, loading, editorContent, onInsert, onRename
   onDeleteUnused: (ids: string[]) => void
   onNew: () => void
   onClose: () => void
-}) {
+}>) {
   const [confirmAction, setConfirmAction] = useState<{ message: string; onConfirm: () => void } | null>(null)
 
   const usedIds = new Set<string>()
@@ -1843,13 +1647,16 @@ function DrawBrowserModal({ drawings, loading, editorContent, onInsert, onRename
   }
 
   return (
-    <div
-      className="fixed inset-0 z-[60] flex items-center justify-center bg-black/60 backdrop-blur-sm"
-      onClick={onClose}
-    >
-      <div
-        className="relative w-full max-w-2xl mx-4 bg-dark-bg-secondary rounded-xl border border-dark-border-subtle shadow-2xl overflow-hidden flex flex-col max-h-[80vh]"
-        onClick={e => e.stopPropagation()}
+    <div className="fixed inset-0 z-[60] flex items-center justify-center">
+      <button
+        type="button"
+        className="absolute inset-0 bg-black/60 backdrop-blur-sm border-0"
+        onClick={onClose}
+        aria-label="Close dialog"
+      />
+      <dialog
+        open
+        className="relative z-[1] w-full max-w-2xl mx-4 m-0 p-0 bg-dark-bg-secondary rounded-xl border border-dark-border-subtle shadow-2xl overflow-hidden flex flex-col max-h-[80vh]"
       >
         {/* Header */}
         <div className="flex items-center justify-between px-6 py-4 border-b border-dark-border-subtle">
@@ -1874,11 +1681,13 @@ function DrawBrowserModal({ drawings, loading, editorContent, onInsert, onRename
 
         {/* Body */}
         <div className="overflow-y-auto p-6">
-          {loading ? (
+          {loading && (
             <p className="text-center text-sm text-dark-text-tertiary py-8">Loading drawings...</p>
-          ) : drawings.length === 0 ? (
+          )}
+          {!loading && drawings.length === 0 && (
             <p className="text-center text-sm text-dark-text-tertiary py-8">No drawings yet. Create one above!</p>
-          ) : (
+          )}
+          {!loading && drawings.length > 0 && (
             <>
               {unusedDrawings.length > 0 && (
                 <div className="flex items-center justify-between gap-2 mb-3 px-3 py-2.5 rounded-lg bg-red-500/10 border border-red-500/20">
@@ -1909,13 +1718,16 @@ function DrawBrowserModal({ drawings, loading, editorContent, onInsert, onRename
 
         {/* Confirmation dialog overlay */}
         {confirmAction && (
-          <div
-            className="absolute inset-0 z-10 flex items-center justify-center bg-black/45 backdrop-blur-sm rounded-xl"
-            onClick={() => setConfirmAction(null)}
-          >
-            <div
-              className="bg-dark-bg-secondary rounded-xl border border-dark-border-subtle shadow-2xl p-6 max-w-[340px] text-center"
-              onClick={e => e.stopPropagation()}
+          <div className="absolute inset-0 z-10 flex items-center justify-center">
+            <button
+              type="button"
+              className="absolute inset-0 bg-black/45 backdrop-blur-sm rounded-xl border-0"
+              onClick={() => setConfirmAction(null)}
+              aria-label="Close confirmation"
+            />
+            <dialog
+              open
+              className="relative z-[1] m-0 p-6 bg-dark-bg-secondary rounded-xl border border-dark-border-subtle shadow-2xl max-w-[340px] text-center"
             >
               <p className="text-sm font-medium text-dark-text-primary mb-4">{confirmAction.message}</p>
               <div className="flex gap-2 justify-center">
@@ -1932,35 +1744,38 @@ function DrawBrowserModal({ drawings, loading, editorContent, onInsert, onRename
                   Delete
                 </button>
               </div>
-            </div>
+            </dialog>
           </div>
         )}
-      </div>
+      </dialog>
     </div>
   )
 }
 
 // ── EditDrawModal ────────────────────────────────────────────────
 
-function EditDrawModal({ draws, selectedDraw, editSize, editZoom, onSelect, onSizeChange, onZoomChange, onSave, onClose }: {
-  draws: Array<{ shortcode: string; id: string; size: string; zoom: string; index: number }>
-  selectedDraw: { shortcode: string; id: string; size: string; zoom: string; index: number } | null
+function EditDrawModal({ draws, selectedDraw, editSize, editZoom, onSelect, onSizeChange, onZoomChange, onSave, onClose }: Readonly<{
+  draws: DrawInfo[]
+  selectedDraw: DrawInfo | null
   editSize: string
   editZoom: string
-  onSelect: (draw: { shortcode: string; id: string; size: string; zoom: string; index: number }) => void
+  onSelect: (draw: DrawInfo) => void
   onSizeChange: (size: string) => void
   onZoomChange: (zoom: string) => void
   onSave: () => void
   onClose: () => void
-}) {
+}>) {
   return (
-    <div
-      className="fixed inset-0 z-[60] flex items-center justify-center bg-black/60 backdrop-blur-sm"
-      onClick={onClose}
-    >
-      <div
-        className="w-full max-w-lg mx-4 bg-dark-bg-secondary rounded-xl border border-dark-border-subtle shadow-2xl overflow-hidden"
-        onClick={e => e.stopPropagation()}
+    <div className="fixed inset-0 z-[60] flex items-center justify-center">
+      <button
+        type="button"
+        className="absolute inset-0 bg-black/60 backdrop-blur-sm border-0"
+        onClick={onClose}
+        aria-label="Close dialog"
+      />
+      <dialog
+        open
+        className="relative z-[1] w-full max-w-lg mx-4 m-0 p-0 bg-dark-bg-secondary rounded-xl border border-dark-border-subtle shadow-2xl overflow-hidden"
       >
         {/* Header */}
         <div className="flex items-center justify-between px-6 py-4 border-b border-dark-border-subtle">
@@ -1975,14 +1790,14 @@ function EditDrawModal({ draws, selectedDraw, editSize, editZoom, onSelect, onSi
           </button>
         </div>
 
-        {!selectedDraw ? (
+        {selectedDraw ? null : (
           /* Draw shortcode list */
           <div className="p-6">
             <p className="text-sm text-dark-text-secondary mb-4">Select a draw shortcode to edit:</p>
             <div className="space-y-2 max-h-80 overflow-y-auto">
-              {draws.map((draw, i) => (
+              {draws.map((draw) => (
                 <button
-                  key={i}
+                  key={draw.shortcode}
                   onClick={() => onSelect(draw)}
                   className="w-full text-left px-4 py-3 rounded-lg border border-dark-border-subtle hover:border-primary-500/50 hover:bg-dark-bg-tertiary/50 transition-colors"
                 >
@@ -1994,7 +1809,8 @@ function EditDrawModal({ draws, selectedDraw, editSize, editZoom, onSelect, onSi
               ))}
             </div>
           </div>
-        ) : (
+        )}
+        {selectedDraw && (
           /* Edit form */
           <div className="p-6">
             <div className="mb-4 px-3 py-2 rounded-lg bg-dark-bg-tertiary border border-dark-border-subtle">
@@ -2003,8 +1819,8 @@ function EditDrawModal({ draws, selectedDraw, editSize, editZoom, onSelect, onSi
 
             <div className="space-y-4">
               {/* Size */}
-              <div>
-                <label className="block text-xs font-medium text-dark-text-secondary mb-1.5">Size</label>
+              <fieldset className="border-0 p-0 m-0 min-w-0">
+                <legend className="block text-xs font-medium text-dark-text-secondary mb-1.5">Size</legend>
                 <div className="flex gap-1.5">
                   {([['s', 'Small'], ['m', 'Medium'], ['l', 'Large']] as const).map(([val, label]) => (
                     <button
@@ -2021,11 +1837,11 @@ function EditDrawModal({ draws, selectedDraw, editSize, editZoom, onSelect, onSi
                     </button>
                   ))}
                 </div>
-              </div>
+              </fieldset>
 
               {/* Zoom */}
-              <div>
-                <label className="block text-xs font-medium text-dark-text-secondary mb-1.5">Zoom</label>
+              <fieldset className="border-0 p-0 m-0 min-w-0">
+                <legend className="block text-xs font-medium text-dark-text-secondary mb-1.5">Zoom</legend>
                 <div className="flex gap-1.5 flex-wrap">
                   {(['fit', '50%', '100%', '150%', '200%'] as const).map((val) => (
                     <button
@@ -2042,7 +1858,7 @@ function EditDrawModal({ draws, selectedDraw, editSize, editZoom, onSelect, onSi
                     </button>
                   ))}
                 </div>
-              </div>
+              </fieldset>
             </div>
 
             {/* Actions */}
@@ -2072,7 +1888,7 @@ function EditDrawModal({ draws, selectedDraw, editSize, editZoom, onSelect, onSi
             </div>
           </div>
         )}
-      </div>
+      </dialog>
     </div>
   )
 }

@@ -56,84 +56,35 @@ type GlobalSearchResponse struct {
 	Wiki  []GlobalSearchWikiResult `json:"wiki"`
 }
 
-// HandleGlobalSearch performs search across tasks and wiki pages
-func (s *Server) HandleGlobalSearch(w http.ResponseWriter, r *http.Request) {
-	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
-	defer cancel()
-
-	userID, ok := ctx.Value(UserIDKey).(int64)
-	if !ok {
-		respondError(w, http.StatusUnauthorized, "unauthorized", "unauthorized")
-		return
+// resolveSearchTypes determines which entity types to search based on the request.
+func resolveSearchTypes(types []string) (searchTasks, searchWiki bool) {
+	if len(types) == 0 {
+		return true, true
 	}
-
-	var req GlobalSearchRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		respondError(w, http.StatusBadRequest, "invalid request body", "invalid_request")
-		return
-	}
-
-	if req.Query == "" {
-		respondError(w, http.StatusBadRequest, "query parameter is required", "invalid_request")
-		return
-	}
-
-	// Set defaults
-	if req.Limit == 0 {
-		req.Limit = 10
-	}
-	if req.Limit > 50 {
-		req.Limit = 50
-	}
-
-	// Determine which types to search
-	searchTasks := true
-	searchWiki := true
-	if len(req.Types) > 0 {
-		searchTasks = false
-		searchWiki = false
-		for _, t := range req.Types {
-			switch t {
-			case "tasks":
-				searchTasks = true
-			case "wiki":
-				searchWiki = true
-			}
+	for _, t := range types {
+		switch t {
+		case "tasks":
+			searchTasks = true
+		case "wiki":
+			searchWiki = true
 		}
 	}
+	return searchTasks, searchWiki
+}
 
-	s.logger.Debug("Global search request",
-		zap.String("query", req.Query),
-		zap.Int64("user_id", userID),
-		zap.Bool("search_tasks", searchTasks),
-		zap.Bool("search_wiki", searchWiki),
-	)
-
-	// Get user's accessible project IDs
-	accessibleProjects, err := s.getUserAccessibleProjects(ctx, userID)
-	if err != nil {
-		s.logger.Error("Failed to get accessible projects", zap.Error(err))
-		respondError(w, http.StatusInternalServerError, "failed to search", "internal_error")
-		return
+// normalizeSearchLimit clamps the limit to [1, 50] with a default of 10.
+func normalizeSearchLimit(limit int) int {
+	if limit <= 0 {
+		return 10
 	}
-
-	if len(accessibleProjects) == 0 {
-		respondJSON(w, http.StatusOK, GlobalSearchResponse{
-			Tasks: []SearchTaskResult{},
-			Wiki:  []GlobalSearchWikiResult{},
-		})
-		return
+	if limit > 50 {
+		return 50
 	}
+	return limit
+}
 
-	// Build project name lookup map
-	projectNameMap, err := s.buildProjectNameMap(ctx, accessibleProjects)
-	if err != nil {
-		s.logger.Error("Failed to load project names", zap.Error(err))
-		respondError(w, http.StatusInternalServerError, "failed to search", "internal_error")
-		return
-	}
-
-	// Search tasks and wiki in parallel — partial results are better than none
+// executeParallelSearch runs task and wiki searches concurrently and assembles the response.
+func (s *Server) executeParallelSearch(ctx context.Context, req GlobalSearchRequest, searchTasks, searchWiki bool, accessibleProjects []int64, projectNameMap map[int64]string) GlobalSearchResponse {
 	var (
 		taskResults []SearchTaskResult
 		wikiResults []GlobalSearchWikiResult
@@ -177,7 +128,66 @@ func (s *Server) HandleGlobalSearch(w http.ResponseWriter, r *http.Request) {
 	if response.Wiki == nil {
 		response.Wiki = []GlobalSearchWikiResult{}
 	}
+	return response
+}
 
+// HandleGlobalSearch performs search across tasks and wiki pages
+func (s *Server) HandleGlobalSearch(w http.ResponseWriter, r *http.Request) {
+	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
+	defer cancel()
+
+	userID, ok := ctx.Value(UserIDKey).(int64)
+	if !ok {
+		respondError(w, http.StatusUnauthorized, "unauthorized", "unauthorized")
+		return
+	}
+
+	var req GlobalSearchRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		respondError(w, http.StatusBadRequest, "invalid request body", "invalid_request")
+		return
+	}
+
+	if req.Query == "" {
+		respondError(w, http.StatusBadRequest, "query parameter is required", "invalid_request")
+		return
+	}
+
+	req.Limit = normalizeSearchLimit(req.Limit)
+	searchTasks, searchWiki := resolveSearchTypes(req.Types)
+
+	s.logger.Debug("Global search request",
+		zap.String("query", req.Query),
+		zap.Int64("user_id", userID),
+		zap.Bool("search_tasks", searchTasks),
+		zap.Bool("search_wiki", searchWiki),
+	)
+
+	// Get user's accessible project IDs
+	accessibleProjects, err := s.getUserAccessibleProjects(ctx, userID)
+	if err != nil {
+		s.logger.Error("Failed to get accessible projects", zap.Error(err))
+		respondError(w, http.StatusInternalServerError, "failed to search", "internal_error")
+		return
+	}
+
+	if len(accessibleProjects) == 0 {
+		respondJSON(w, http.StatusOK, GlobalSearchResponse{
+			Tasks: []SearchTaskResult{},
+			Wiki:  []GlobalSearchWikiResult{},
+		})
+		return
+	}
+
+	// Build project name lookup map
+	projectNameMap, err := s.buildProjectNameMap(ctx, accessibleProjects)
+	if err != nil {
+		s.logger.Error("Failed to load project names", zap.Error(err))
+		respondError(w, http.StatusInternalServerError, "failed to search", "internal_error")
+		return
+	}
+
+	response := s.executeParallelSearch(ctx, req, searchTasks, searchWiki, accessibleProjects, projectNameMap)
 	respondJSON(w, http.StatusOK, response)
 }
 

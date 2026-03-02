@@ -16,6 +16,8 @@ import (
 	"taskai/ent/wikipage"
 )
 
+const errInvalidRequestBody = "invalid request body"
+
 // WikiPageResponse represents a wiki page in API responses
 type WikiPageResponse struct {
 	ID          int64     `json:"id"`
@@ -138,7 +140,7 @@ func (s *Server) HandleCreateWikiPage(w http.ResponseWriter, r *http.Request) {
 
 	var req CreateWikiPageRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		respondError(w, http.StatusBadRequest, "invalid request body", "invalid_input")
+		respondError(w, http.StatusBadRequest, errInvalidRequestBody, "invalid_input")
 		return
 	}
 
@@ -300,7 +302,7 @@ func (s *Server) HandleUpdateWikiPage(w http.ResponseWriter, r *http.Request) {
 
 	var req UpdateWikiPageRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		respondError(w, http.StatusBadRequest, "invalid request body", "invalid_input")
+		respondError(w, http.StatusBadRequest, errInvalidRequestBody, "invalid_input")
 		return
 	}
 
@@ -445,7 +447,7 @@ func (s *Server) HandleUpdateWikiPageContent(w http.ResponseWriter, r *http.Requ
 
 	var req UpdateWikiPageContentRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		respondError(w, http.StatusBadRequest, "invalid request body", "invalid_input")
+		respondError(w, http.StatusBadRequest, errInvalidRequestBody, "invalid_input")
 		return
 	}
 

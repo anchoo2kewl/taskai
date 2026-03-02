@@ -194,11 +194,14 @@ export default function CommandPalette() {
     const commands: Command[] = []
 
     taskResults.forEach(task => {
-      const statusIcon = task.status === 'done' ? '✅' : task.status === 'in_progress' ? '🔄' : '📝'
+      let statusIcon = '📝'
+      if (task.status === 'done') statusIcon = '✅'
+      else if (task.status === 'in_progress') statusIcon = '🔄'
+      const prioritySuffix = task.priority === 'medium' ? '' : ' · ' + task.priority
       commands.push({
         id: `task-${task.id}`,
         name: `#${task.task_number} ${task.title}`,
-        description: `${task.project_name} · ${task.status.replace('_', ' ')}${task.priority !== 'medium' ? ` · ${task.priority}` : ''}`,
+        description: task.project_name + ' · ' + task.status.replace('_', ' ') + prioritySuffix,
         icon: statusIcon,
         category: 'tasks',
         action: () => {
@@ -212,7 +215,7 @@ export default function CommandPalette() {
       commands.push({
         id: `wiki-${wiki.page_id}-${wiki.snippet.slice(0, 20)}`,
         name: wiki.page_title,
-        description: `${wiki.project_name}${wiki.headings_path ? ` · ${wiki.headings_path}` : ''}`,
+        description: wiki.project_name + (wiki.headings_path ? ' · ' + wiki.headings_path : ''),
         icon: '📄',
         category: 'wiki',
         action: () => {

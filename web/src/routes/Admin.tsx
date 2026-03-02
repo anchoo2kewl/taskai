@@ -255,7 +255,7 @@ export default function Admin() {
       const data = await api.getVersion()
       setVersionInfo(data)
     } catch (err) {
-      // non-critical load failure
+      console.error('Failed to load version info:', err)
     } finally {
       setVersionLoading(false)
     }
@@ -664,14 +664,14 @@ export default function Admin() {
                         }
 
                         const blob = await response.blob()
-                        const url = window.URL.createObjectURL(blob)
+                        const url = globalThis.URL.createObjectURL(blob)
                         const a = document.createElement('a')
                         a.href = url
                         a.download = `taskai-backup-${new Date().toISOString().split('T')[0]}.json`
                         document.body.appendChild(a)
                         a.click()
-                        window.URL.revokeObjectURL(url)
-                        document.body.removeChild(a)
+                        globalThis.URL.revokeObjectURL(url)
+                        a.remove()
 
                         setBackupStatus('✅ Export completed successfully')
                       } catch (err: unknown) {
@@ -761,7 +761,7 @@ export default function Admin() {
                       setBackupStatus(`✅ Import completed: ${result.rows} rows imported`)
 
                       // Reload page after successful import
-                      setTimeout(() => window.location.reload(), 2000)
+                      setTimeout(() => globalThis.location.reload(), 2000)
                     } catch (err: unknown) {
                       setBackupError(err instanceof Error ? err.message : 'Import failed')
                     } finally {

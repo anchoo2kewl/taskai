@@ -67,7 +67,7 @@ export default function ProjectDetail() {
       const lanes = await api.getSwimLanes(Number(projectId))
       setSwimLanes(lanes.sort((a, b) => a.position - b.position))
     } catch (err) {
-      // non-critical load failure — use defaults below
+      console.error('Failed to load swim lanes:', err)
       // Fallback to default swim lanes if fetch fails
       setSwimLanes([
         { id: 0, project_id: Number(projectId), name: 'To Do', color: '#6B7280', position: 0, status_category: 'todo', created_at: '', updated_at: '' },

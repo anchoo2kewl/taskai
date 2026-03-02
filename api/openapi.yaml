@@ -2047,6 +2047,14 @@ components:
           minLength: 8
           description: Must contain at least one letter and one digit
           example: "securepass123"
+        first_name:
+          type: string
+          maxLength: 50
+          example: "Anshuman"
+        last_name:
+          type: string
+          maxLength: 50
+          example: "Biswas"
 
     LoginRequest:
       type: object
@@ -2064,10 +2072,14 @@ components:
     UpdateProfileRequest:
       type: object
       properties:
-        name:
+        first_name:
           type: string
-          maxLength: 100
-          example: "Anshuman Biswas"
+          maxLength: 50
+          example: "Anshuman"
+        last_name:
+          type: string
+          maxLength: 50
+          example: "Biswas"
 
     CreateProjectRequest:
       type: object
@@ -2392,7 +2404,14 @@ components:
           example: "user@example.com"
         name:
           type: ["string", "null"]
+          description: "Computed display name (first_name + last_name)"
           example: "Anshuman Biswas"
+        first_name:
+          type: string
+          example: "Anshuman"
+        last_name:
+          type: string
+          example: "Biswas"
         is_admin:
           type: boolean
           example: false

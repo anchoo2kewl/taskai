@@ -20,6 +20,8 @@ type SignupRequest struct {
 	Email      string `json:"email"`
 	Password   string `json:"password"`
 	InviteCode string `json:"invite_code"`
+	FirstName  string `json:"first_name"`
+	LastName   string `json:"last_name"`
 }
 
 // LoginRequest represents the login request payload
@@ -39,6 +41,8 @@ type User struct {
 	ID        int64     `json:"id"`
 	Email     string    `json:"email"`
 	Name      string    `json:"name,omitempty"`
+	FirstName string    `json:"first_name,omitempty"`
+	LastName  string    `json:"last_name,omitempty"`
 	IsAdmin   bool      `json:"is_admin"`
 	CreatedAt time.Time `json:"created_at"`
 }
@@ -106,10 +110,21 @@ func (s *Server) HandleSignup(w http.ResponseWriter, r *http.Request) {
 	defer tx.Rollback()
 
 	// Create user using Ent
-	newUser, err := tx.User.Create().
+	userCreate := tx.User.Create().
 		SetEmail(req.Email).
-		SetPasswordHash(hashedPassword).
-		Save(ctx)
+		SetPasswordHash(hashedPassword)
+	if req.FirstName != "" {
+		userCreate = userCreate.SetFirstName(req.FirstName)
+	}
+	if req.LastName != "" {
+		userCreate = userCreate.SetLastName(req.LastName)
+	}
+	// Also set legacy name field for backward compat
+	fullName := strings.TrimSpace(req.FirstName + " " + req.LastName)
+	if fullName != "" {
+		userCreate = userCreate.SetName(fullName)
+	}
+	newUser, err := userCreate.Save(ctx)
 	if err != nil {
 		if ent.IsConstraintError(err) {
 			respondError(w, http.StatusConflict, "email already exists", "email_exists")
@@ -121,10 +136,7 @@ func (s *Server) HandleSignup(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Create team for the user
-	teamName := newUser.Email + "'s Team"
-	if newUser.Name != nil {
-		teamName = *newUser.Name + "'s Team"
-	}
+	teamName := userDisplayName(newUser) + "'s Team"
 
 	team, err := tx.Team.Create().
 		SetName(teamName).
@@ -175,14 +187,7 @@ func (s *Server) HandleSignup(w http.ResponseWriter, r *http.Request) {
 	)
 
 	// Convert Ent user to API user struct
-	var apiUser User
-	apiUser.ID = newUser.ID
-	apiUser.Email = newUser.Email
-	if newUser.Name != nil {
-		apiUser.Name = *newUser.Name
-	}
-	apiUser.IsAdmin = newUser.IsAdmin
-	apiUser.CreatedAt = newUser.CreatedAt
+	apiUser := entUserToAPI(newUser)
 
 	// Generate JWT token
 	token, err := auth.GenerateToken(apiUser.ID, apiUser.Email, s.config.JWTSecret, s.config.JWTExpiry())
@@ -252,15 +257,7 @@ func (s *Server) HandleLogin(w http.ResponseWriter, r *http.Request) {
 	}()
 
 	// Convert Ent user to API user struct
-	apiUser := User{
-		ID:        entUser.ID,
-		Email:     entUser.Email,
-		IsAdmin:   entUser.IsAdmin,
-		CreatedAt: entUser.CreatedAt,
-	}
-	if entUser.Name != nil {
-		apiUser.Name = *entUser.Name
-	}
+	apiUser := entUserToAPI(entUser)
 
 	// Generate JWT token
 	token, err := auth.GenerateToken(apiUser.ID, apiUser.Email, s.config.JWTSecret, s.config.JWTExpiry())
@@ -299,23 +296,13 @@ func (s *Server) HandleMe(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Convert Ent user to API user struct
-	apiUser := User{
-		ID:        entUser.ID,
-		Email:     entUser.Email,
-		IsAdmin:   entUser.IsAdmin,
-		CreatedAt: entUser.CreatedAt,
-	}
-	if entUser.Name != nil {
-		apiUser.Name = *entUser.Name
-	}
-
-	respondJSON(w, http.StatusOK, apiUser)
+	respondJSON(w, http.StatusOK, entUserToAPI(entUser))
 }
 
 // UpdateProfileRequest represents the update profile request
 type UpdateProfileRequest struct {
-	Name string `json:"name"`
+	FirstName string `json:"first_name"`
+	LastName  string `json:"last_name"`
 }
 
 // HandleUpdateProfile updates the current user's profile
@@ -332,19 +319,31 @@ func (s *Server) HandleUpdateProfile(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Validate name
-	if len(req.Name) > 100 {
-		respondError(w, http.StatusBadRequest, "name must be 100 characters or less", "validation_error")
+	// Validate names
+	if len(req.FirstName) > 50 {
+		respondError(w, http.StatusBadRequest, "first name must be 50 characters or less", "validation_error")
+		return
+	}
+	if len(req.LastName) > 50 {
+		respondError(w, http.StatusBadRequest, "last name must be 50 characters or less", "validation_error")
 		return
 	}
 
-	// Update user name using Ent
+	// Update user using Ent
 	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
 	defer cancel()
 
-	entUser, err := s.db.Client.User.UpdateOneID(userID).
-		SetName(req.Name).
-		Save(ctx)
+	update := s.db.Client.User.UpdateOneID(userID).
+		SetFirstName(req.FirstName).
+		SetLastName(req.LastName)
+	// Also update legacy name field
+	fullName := strings.TrimSpace(req.FirstName + " " + req.LastName)
+	if fullName != "" {
+		update = update.SetName(fullName)
+	} else {
+		update = update.ClearName()
+	}
+	entUser, err := update.Save(ctx)
 	if err != nil {
 		if ent.IsNotFound(err) {
 			respondError(w, http.StatusNotFound, "user not found", "not_found")
@@ -355,18 +354,7 @@ func (s *Server) HandleUpdateProfile(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Convert Ent user to API user struct
-	apiUser := User{
-		ID:        entUser.ID,
-		Email:     entUser.Email,
-		IsAdmin:   entUser.IsAdmin,
-		CreatedAt: entUser.CreatedAt,
-	}
-	if entUser.Name != nil {
-		apiUser.Name = *entUser.Name
-	}
-
-	respondJSON(w, http.StatusOK, apiUser)
+	respondJSON(w, http.StatusOK, entUserToAPI(entUser))
 }
 
 // validateSignupRequest validates the signup request
@@ -422,4 +410,68 @@ func validatePasswordStrength(password string) error {
 	}
 
 	return nil
+}
+
+// userDisplayName builds "First Last" from an Ent user, falling back to name then email.
+func userDisplayName(u *ent.User) string {
+	first := ""
+	last := ""
+	if u.FirstName != nil {
+		first = *u.FirstName
+	}
+	if u.LastName != nil {
+		last = *u.LastName
+	}
+	full := strings.TrimSpace(first + " " + last)
+	if full != "" {
+		return full
+	}
+	if u.Name != nil && *u.Name != "" {
+		return *u.Name
+	}
+	return u.Email
+}
+
+// userDisplayNamePtr returns a pointer to the display name, or nil if empty.
+func userDisplayNamePtr(u *ent.User) *string {
+	first := ""
+	last := ""
+	if u.FirstName != nil {
+		first = *u.FirstName
+	}
+	if u.LastName != nil {
+		last = *u.LastName
+	}
+	full := strings.TrimSpace(first + " " + last)
+	if full != "" {
+		return &full
+	}
+	if u.Name != nil && *u.Name != "" {
+		return u.Name
+	}
+	return nil
+}
+
+// entUserToAPI converts an Ent user to the API User struct.
+func entUserToAPI(u *ent.User) User {
+	apiUser := User{
+		ID:        u.ID,
+		Email:     u.Email,
+		IsAdmin:   u.IsAdmin,
+		CreatedAt: u.CreatedAt,
+	}
+	if u.FirstName != nil {
+		apiUser.FirstName = *u.FirstName
+	}
+	if u.LastName != nil {
+		apiUser.LastName = *u.LastName
+	}
+	// Compute Name from first_name + last_name, fallback to name field
+	full := strings.TrimSpace(apiUser.FirstName + " " + apiUser.LastName)
+	if full != "" {
+		apiUser.Name = full
+	} else if u.Name != nil {
+		apiUser.Name = *u.Name
+	}
+	return apiUser
 }

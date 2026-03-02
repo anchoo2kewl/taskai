@@ -92,6 +92,46 @@ func (_u *UserUpdate) ClearName() *UserUpdate {
 	return _u
 }
 
+// SetFirstName sets the "first_name" field.
+func (_u *UserUpdate) SetFirstName(v string) *UserUpdate {
+	_u.mutation.SetFirstName(v)
+	return _u
+}
+
+// SetNillableFirstName sets the "first_name" field if the given value is not nil.
+func (_u *UserUpdate) SetNillableFirstName(v *string) *UserUpdate {
+	if v != nil {
+		_u.SetFirstName(*v)
+	}
+	return _u
+}
+
+// ClearFirstName clears the value of the "first_name" field.
+func (_u *UserUpdate) ClearFirstName() *UserUpdate {
+	_u.mutation.ClearFirstName()
+	return _u
+}
+
+// SetLastName sets the "last_name" field.
+func (_u *UserUpdate) SetLastName(v string) *UserUpdate {
+	_u.mutation.SetLastName(v)
+	return _u
+}
+
+// SetNillableLastName sets the "last_name" field if the given value is not nil.
+func (_u *UserUpdate) SetNillableLastName(v *string) *UserUpdate {
+	if v != nil {
+		_u.SetLastName(*v)
+	}
+	return _u
+}
+
+// ClearLastName clears the value of the "last_name" field.
+func (_u *UserUpdate) ClearLastName() *UserUpdate {
+	_u.mutation.ClearLastName()
+	return _u
+}
+
 // SetIsAdmin sets the "is_admin" field.
 func (_u *UserUpdate) SetIsAdmin(v bool) *UserUpdate {
 	_u.mutation.SetIsAdmin(v)
@@ -970,6 +1010,18 @@ func (_u *UserUpdate) sqlSave(ctx context.Context) (_node int, err error) {
 	}
 	if _u.mutation.NameCleared() {
 		_spec.ClearField(user.FieldName, field.TypeString)
+	}
+	if value, ok := _u.mutation.FirstName(); ok {
+		_spec.SetField(user.FieldFirstName, field.TypeString, value)
+	}
+	if _u.mutation.FirstNameCleared() {
+		_spec.ClearField(user.FieldFirstName, field.TypeString)
+	}
+	if value, ok := _u.mutation.LastName(); ok {
+		_spec.SetField(user.FieldLastName, field.TypeString, value)
+	}
+	if _u.mutation.LastNameCleared() {
+		_spec.ClearField(user.FieldLastName, field.TypeString)
 	}
 	if value, ok := _u.mutation.IsAdmin(); ok {
 		_spec.SetField(user.FieldIsAdmin, field.TypeBool, value)
@@ -1927,6 +1979,46 @@ func (_u *UserUpdateOne) ClearName() *UserUpdateOne {
 	return _u
 }
 
+// SetFirstName sets the "first_name" field.
+func (_u *UserUpdateOne) SetFirstName(v string) *UserUpdateOne {
+	_u.mutation.SetFirstName(v)
+	return _u
+}
+
+// SetNillableFirstName sets the "first_name" field if the given value is not nil.
+func (_u *UserUpdateOne) SetNillableFirstName(v *string) *UserUpdateOne {
+	if v != nil {
+		_u.SetFirstName(*v)
+	}
+	return _u
+}
+
+// ClearFirstName clears the value of the "first_name" field.
+func (_u *UserUpdateOne) ClearFirstName() *UserUpdateOne {
+	_u.mutation.ClearFirstName()
+	return _u
+}
+
+// SetLastName sets the "last_name" field.
+func (_u *UserUpdateOne) SetLastName(v string) *UserUpdateOne {
+	_u.mutation.SetLastName(v)
+	return _u
+}
+
+// SetNillableLastName sets the "last_name" field if the given value is not nil.
+func (_u *UserUpdateOne) SetNillableLastName(v *string) *UserUpdateOne {
+	if v != nil {
+		_u.SetLastName(*v)
+	}
+	return _u
+}
+
+// ClearLastName clears the value of the "last_name" field.
+func (_u *UserUpdateOne) ClearLastName() *UserUpdateOne {
+	_u.mutation.ClearLastName()
+	return _u
+}
+
 // SetIsAdmin sets the "is_admin" field.
 func (_u *UserUpdateOne) SetIsAdmin(v bool) *UserUpdateOne {
 	_u.mutation.SetIsAdmin(v)
@@ -2835,6 +2927,18 @@ func (_u *UserUpdateOne) sqlSave(ctx context.Context) (_node *User, err error) {
 	}
 	if _u.mutation.NameCleared() {
 		_spec.ClearField(user.FieldName, field.TypeString)
+	}
+	if value, ok := _u.mutation.FirstName(); ok {
+		_spec.SetField(user.FieldFirstName, field.TypeString, value)
+	}
+	if _u.mutation.FirstNameCleared() {
+		_spec.ClearField(user.FieldFirstName, field.TypeString)
+	}
+	if value, ok := _u.mutation.LastName(); ok {
+		_spec.SetField(user.FieldLastName, field.TypeString, value)
+	}
+	if _u.mutation.LastNameCleared() {
+		_spec.ClearField(user.FieldLastName, field.TypeString)
 	}
 	if value, ok := _u.mutation.IsAdmin(); ok {
 		_spec.SetField(user.FieldIsAdmin, field.TypeBool, value)

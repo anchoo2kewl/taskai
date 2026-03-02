@@ -23,6 +23,10 @@ type User struct {
 	PasswordHash string `json:"-"`
 	// Name holds the value of the "name" field.
 	Name *string `json:"name,omitempty"`
+	// FirstName holds the value of the "first_name" field.
+	FirstName *string `json:"first_name,omitempty"`
+	// LastName holds the value of the "last_name" field.
+	LastName *string `json:"last_name,omitempty"`
 	// IsAdmin holds the value of the "is_admin" field.
 	IsAdmin bool `json:"is_admin,omitempty"`
 	// TotpSecret holds the value of the "totp_secret" field.
@@ -270,7 +274,7 @@ func (*User) scanValues(columns []string) ([]any, error) {
 			values[i] = new(sql.NullBool)
 		case user.FieldID, user.FieldInviteCount:
 			values[i] = new(sql.NullInt64)
-		case user.FieldEmail, user.FieldPasswordHash, user.FieldName, user.FieldTotpSecret, user.FieldBackupCodes:
+		case user.FieldEmail, user.FieldPasswordHash, user.FieldName, user.FieldFirstName, user.FieldLastName, user.FieldTotpSecret, user.FieldBackupCodes:
 			values[i] = new(sql.NullString)
 		case user.FieldPasswordChangedAt, user.FieldCreatedAt, user.FieldUpdatedAt:
 			values[i] = new(sql.NullTime)
@@ -313,6 +317,20 @@ func (_m *User) assignValues(columns []string, values []any) error {
 			} else if value.Valid {
 				_m.Name = new(string)
 				*_m.Name = value.String
+			}
+		case user.FieldFirstName:
+			if value, ok := values[i].(*sql.NullString); !ok {
+				return fmt.Errorf("unexpected type %T for field first_name", values[i])
+			} else if value.Valid {
+				_m.FirstName = new(string)
+				*_m.FirstName = value.String
+			}
+		case user.FieldLastName:
+			if value, ok := values[i].(*sql.NullString); !ok {
+				return fmt.Errorf("unexpected type %T for field last_name", values[i])
+			} else if value.Valid {
+				_m.LastName = new(string)
+				*_m.LastName = value.String
 			}
 		case user.FieldIsAdmin:
 			if value, ok := values[i].(*sql.NullBool); !ok {
@@ -503,6 +521,16 @@ func (_m *User) String() string {
 	builder.WriteString(", ")
 	if v := _m.Name; v != nil {
 		builder.WriteString("name=")
+		builder.WriteString(*v)
+	}
+	builder.WriteString(", ")
+	if v := _m.FirstName; v != nil {
+		builder.WriteString("first_name=")
+		builder.WriteString(*v)
+	}
+	builder.WriteString(", ")
+	if v := _m.LastName; v != nil {
+		builder.WriteString("last_name=")
 		builder.WriteString(*v)
 	}
 	builder.WriteString(", ")

@@ -4,6 +4,23 @@ import SearchSelect from './ui/SearchSelect'
 import ImagePickerModal from './ImagePickerModal'
 import * as Y from 'yjs'
 import { WebsocketProvider } from 'y-websocket'
+import {
+  unescapeHtml,
+  buildImageMarkup,
+  findImagesInContent,
+  detectImageSize,
+  findDrawsInContent,
+  mapYjsStatus,
+  findDrawShortcodeAtPosition,
+  shouldSaveContent,
+  getSaveStatusColor,
+  getSaveStatusText,
+  getSaveStatusTextColor,
+  buildDrawShortcode,
+  insertMarkupAtCursor,
+  clearSavedStatus,
+} from './WikiEditor.helpers'
+import type { ImageInfo, DrawInfo, SyncState, SaveStatus } from './WikiEditor.helpers'
 
 // Use relative URL in production, or VITE_API_URL for dev override
 const API_BASE = import.meta.env.VITE_API_URL || (import.meta.env.PROD ? '' : 'http://localhost:8080')
@@ -243,32 +260,7 @@ function initDrawEmbeds(
   })
 }
 
-// ── HTML entity helpers ──────────────────────────────────────────
-
-function escapeHtml(s: string): string {
-  return s.replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;').replaceAll('"', '&quot;')
-}
-
-function unescapeHtml(s: string): string {
-  return s.replaceAll('&amp;', '&').replaceAll('&lt;', '<').replaceAll('&gt;', '>').replaceAll('&quot;', '"')
-}
-
 // ── Image edit overlays — add S/M/L size controls to images in preview ──
-
-function buildImageMarkup(url: string, alt: string, caption: string, size: string): string {
-  const sizeStyles: Record<string, string> = {
-    s: 'max-width:50%;height:auto;',
-    m: 'max-width:75%;height:auto;',
-    l: 'width:100%;height:auto;max-width:100%;',
-  }
-  const imgStyle = sizeStyles[size] || sizeStyles.m
-
-  if (size === 'l' && !caption) {
-    return `![${alt}](${url})`
-  }
-  const captionHtml = caption ? '<figcaption>' + escapeHtml(caption) + '</figcaption>' : ''
-  return `<figure style="text-align:center;margin:1.5rem 0"><a href="${url}" data-lightbox="article-images" data-title="${escapeHtml(alt)}"><img src="${url}" alt="${escapeHtml(alt)}" style="${imgStyle}"/></a>${captionHtml}</figure>`
-}
 
 function addImageEditOverlays(
   container: HTMLElement | null,
@@ -352,131 +344,6 @@ interface DrawItem {
   updated_at: string
 }
 
-// ── Extracted complexity helpers (reduce WikiEditor cognitive complexity) ──
-
-type ImageInfo = { html: string; url: string; alt: string; caption: string; index: number }
-type DrawInfo = { shortcode: string; id: string; size: string; zoom: string; index: number }
-
-function findImagesInContent(content: string): ImageInfo[] {
-  const images: ImageInfo[] = []
-
-  const figureRegex = /<figure[^>]*>[\s\S]*?<\/figure>/g
-  const imgSrcRegex = /src="([^"]+)"/
-  const imgAltRegex = /alt="([^"]*)"/
-  const captionRegex = /<figcaption>([\s\S]*?)<\/figcaption>/
-  let match
-  while ((match = figureRegex.exec(content)) !== null) {
-    const figHtml = match[0]
-    const srcMatch = imgSrcRegex.exec(figHtml)
-    if (!srcMatch) continue
-    const altMatch = imgAltRegex.exec(figHtml)
-    const capMatch = captionRegex.exec(figHtml)
-    images.push({
-      html: figHtml,
-      url: srcMatch[1],
-      alt: unescapeHtml(altMatch?.[1] || ''),
-      caption: unescapeHtml(capMatch?.[1] || ''),
-      index: match.index,
-    })
-  }
-
-  const mdRegex = /!\[([^\]]*)\]\(([^)]+)\)/g
-  while ((match = mdRegex.exec(content)) !== null) {
-    const pos = match.index
-    const insideFigure = images.some(img => pos >= img.index && pos < img.index + img.html.length)
-    if (insideFigure) continue
-    images.push({ html: match[0], url: match[2], alt: match[1], caption: '', index: match.index })
-  }
-
-  images.sort((a, b) => a.index - b.index)
-  return images
-}
-
-function detectImageSize(html: string): string {
-  if (!html.startsWith('<figure')) return 'l'
-  if (/max-width:\s*50%/.test(html)) return 's'
-  if (/max-width:\s*75%/.test(html)) return 'm'
-  return 'l'
-}
-
-function findDrawsInContent(content: string): DrawInfo[] {
-  const draws: DrawInfo[] = []
-  const re = /\[draw:([a-zA-Z0-9_-]+)(?::edit)?(?::([sml]))?(?::z([^\]]+))?\]/g
-  let match
-  while ((match = re.exec(content)) !== null) {
-    draws.push({
-      shortcode: match[0],
-      id: match[1],
-      size: match[2] || 'm',
-      zoom: match[3] || 'fit',
-      index: match.index,
-    })
-  }
-  draws.sort((a, b) => a.index - b.index)
-  return draws
-}
-
-function mapYjsStatus(status: string): 'connecting' | 'connected' | 'disconnected' {
-  if (status === 'connected') return 'connected'
-  if (status === 'disconnected') return 'disconnected'
-  return 'connecting'
-}
-
-function findDrawShortcodeAtPosition(text: string, pos: number): string | null {
-  const re = /\[draw:([a-zA-Z0-9_-]+)(?::edit)?\]/g
-  let match
-  while ((match = re.exec(text)) !== null) {
-    if (pos >= match.index && pos <= match.index + match[0].length) {
-      return match[1]
-    }
-  }
-  return null
-}
-
-function shouldSaveContent(isDirty: boolean, current: string, lastSaved: string): boolean {
-  return isDirty && current !== lastSaved
-}
-
-// ── Status display helpers ───────────────────────────────────
-
-type SyncState = 'connecting' | 'connected' | 'disconnected'
-type SaveStatus = 'idle' | 'saving' | 'saved' | 'error'
-
-function getSyncStatusColor(syncState: SyncState): string {
-  switch (syncState) {
-    case 'connected': return 'bg-green-500'
-    case 'connecting': return 'bg-yellow-500'
-    case 'disconnected': return 'bg-red-500'
-  }
-}
-
-function getSaveStatusColor(saveStatus: SaveStatus, syncState: SyncState): string {
-  switch (saveStatus) {
-    case 'saving': return 'bg-yellow-500'
-    case 'saved': return 'bg-green-500'
-    case 'error': return 'bg-red-500'
-    default: return getSyncStatusColor(syncState)
-  }
-}
-
-function getSaveStatusText(saveStatus: SaveStatus, autoSaveEnabled: boolean): string {
-  switch (saveStatus) {
-    case 'saving': return 'Saving...'
-    case 'saved': return 'Saved'
-    case 'error': return 'Save failed'
-    default: return autoSaveEnabled ? 'Autosave on' : 'Autosave off'
-  }
-}
-
-function getSaveStatusTextColor(saveStatus: SaveStatus): string {
-  switch (saveStatus) {
-    case 'saving': return 'text-yellow-400'
-    case 'saved': return 'text-green-400'
-    case 'error': return 'text-red-400'
-    default: return 'text-dark-text-tertiary'
-  }
-}
-
 // ── Draw API helpers ─────────────────────────────────────────
 
 async function fetchDrawings(): Promise<DrawItem[]> {
@@ -535,12 +402,6 @@ async function deleteDrawings(ids: string[]): Promise<boolean> {
   }
 }
 
-function buildDrawShortcode(id: string, size: string, zoom: string): string {
-  const sizeTag = size === 'm' ? '' : ':' + size
-  const zoomTag = zoom === 'fit' ? '' : ':z' + zoom
-  return `[draw:${id}:edit${sizeTag}${zoomTag}]`
-}
-
 async function uploadSingleFile(file: File, pageId: number): Promise<{ url: string; publicId: string; altName: string }> {
   const sig = await apiClient.getUploadSignature({ pageId })
   const formData = new FormData()
@@ -572,20 +433,6 @@ async function uploadSingleFile(file: File, pageId: number): Promise<{ url: stri
   return { url: uploadData.secure_url, publicId: uploadData.public_id, altName }
 }
 
-function insertMarkupAtCursor(
-  textarea: HTMLTextAreaElement | null,
-  content: string,
-  markup: string,
-): { newContent: string; focusPos: number | null } {
-  if (textarea) {
-    const start = textarea.selectionStart
-    const end = textarea.selectionEnd
-    return { newContent: content.substring(0, start) + markup + content.substring(end), focusPos: start + markup.length }
-  }
-  const sep = content.endsWith('\n') ? '' : '\n'
-  return { newContent: content + sep + markup + '\n', focusPos: null }
-}
-
 // ── Server-side preview fetcher ──────────────────────────────────
 
 async function fetchPreview(markdown: string, signal?: AbortSignal): Promise<string> {
@@ -602,10 +449,6 @@ async function fetchPreview(markdown: string, signal?: AbortSignal): Promise<str
   if (!resp.ok) throw new Error(`Preview failed: ${resp.status}`)
   const data = await resp.json()
   return data.html
-}
-
-function clearSavedStatus(prev: SaveStatus): SaveStatus {
-  return prev === 'saved' ? 'idle' : prev
 }
 
 async function abortAndFetchPreview(

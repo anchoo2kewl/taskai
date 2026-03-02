@@ -154,12 +154,12 @@ jobs:
           echo "Checking API health..."
           curl -f https://taskai.cc/api/health || exit 1
 
-          echo "Checking go-draw canvas.js has eraser tool..."
-          CANVAS_JS=$(curl -sL https://taskai.cc/draw/static/canvas.js)
-          if echo "$CANVAS_JS" | grep -q 'eraser'; then
-            echo "✅ canvas.js contains eraser tool"
+          echo "Checking go-draw canvas.js is up to date..."
+          CANVAS_JS=$(curl -sL -H "Cache-Control: no-cache" "https://taskai.cc/draw/static/canvas.js?v=$(date +%s)")
+          if echo "$CANVAS_JS" | grep -q 'isRotating'; then
+            echo "✅ canvas.js contains rotation support"
           else
-            echo "❌ canvas.js does NOT contain eraser tool — stale content!"
+            echo "❌ canvas.js does NOT contain rotation support — stale content!"
             exit 1
           fi
           echo "✅ Production deployed successfully"

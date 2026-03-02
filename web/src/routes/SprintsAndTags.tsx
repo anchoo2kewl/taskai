@@ -4,6 +4,7 @@ import Card from '../components/ui/Card'
 import Button from '../components/ui/Button'
 import TextInput from '../components/ui/TextInput'
 import FormError from '../components/ui/FormError'
+import SearchSelect from '../components/ui/SearchSelect'
 import { apiClient } from '../lib/api'
 
 interface Sprint {
@@ -301,15 +302,15 @@ export default function SprintsAndTags() {
 
                     <div>
                       <label className="block text-sm font-medium text-gray-700 mb-1">Status</label>
-                      <select
+                      <SearchSelect
                         value={sprintFormData.status}
-                        onChange={(e) => setSprintFormData({ ...sprintFormData, status: e.target.value as 'planned' | 'active' | 'completed' })}
-                        className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-primary-500 outline-none"
-                      >
-                        <option value="planned">Planned</option>
-                        <option value="active">Active</option>
-                        <option value="completed">Completed</option>
-                      </select>
+                        onChange={(v) => setSprintFormData({ ...sprintFormData, status: v as 'planned' | 'active' | 'completed' })}
+                        options={[
+                          { value: 'planned', label: 'Planned' },
+                          { value: 'active', label: 'Active' },
+                          { value: 'completed', label: 'Completed' },
+                        ]}
+                      />
                     </div>
                   </div>
 

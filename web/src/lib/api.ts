@@ -461,6 +461,13 @@ class ApiClient {
     return this.request<GetCurrentUserResponse>('/api/me')
   }
 
+  async updateProfile(data: { first_name: string; last_name: string }): Promise<GetCurrentUserResponse> {
+    return this.request<GetCurrentUserResponse>('/api/me/profile', {
+      method: 'PATCH',
+      body: JSON.stringify(data),
+    })
+  }
+
   // Health check
   async healthCheck(): Promise<{ status: string; database?: string }> {
     return this.request('/healthz')

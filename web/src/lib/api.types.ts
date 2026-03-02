@@ -908,6 +908,10 @@ export interface components {
              * @example securepass123
              */
             password: string;
+            /** @example Anshuman */
+            first_name?: string;
+            /** @example Biswas */
+            last_name?: string;
         };
         LoginRequest: {
             /**
@@ -922,8 +926,10 @@ export interface components {
             password: string;
         };
         UpdateProfileRequest: {
-            /** @example Anshuman Biswas */
-            name?: string;
+            /** @example Anshuman */
+            first_name?: string;
+            /** @example Biswas */
+            last_name?: string;
         };
         CreateProjectRequest: {
             /** @example My Project */
@@ -1127,8 +1133,15 @@ export interface components {
              * @example user@example.com
              */
             email?: string;
-            /** @example Anshuman Biswas */
+            /**
+             * @description Computed display name (first_name + last_name)
+             * @example Anshuman Biswas
+             */
             name?: string | null;
+            /** @example Anshuman */
+            first_name?: string;
+            /** @example Biswas */
+            last_name?: string;
             /** @example false */
             is_admin?: boolean;
             /** Format: date-time */

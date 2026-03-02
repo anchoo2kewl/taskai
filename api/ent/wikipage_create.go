@@ -43,6 +43,12 @@ func (_c *WikiPageCreate) SetSlug(v string) *WikiPageCreate {
 	return _c
 }
 
+// SetCreatedBy sets the "created_by" field.
+func (_c *WikiPageCreate) SetCreatedBy(v int64) *WikiPageCreate {
+	_c.mutation.SetCreatedBy(v)
+	return _c
+}
+
 // SetContent sets the "content" field.
 func (_c *WikiPageCreate) SetContent(v string) *WikiPageCreate {
 	_c.mutation.SetContent(v)
@@ -54,12 +60,6 @@ func (_c *WikiPageCreate) SetNillableContent(v *string) *WikiPageCreate {
 	if v != nil {
 		_c.SetContent(*v)
 	}
-	return _c
-}
-
-// SetCreatedBy sets the "created_by" field.
-func (_c *WikiPageCreate) SetCreatedBy(v int64) *WikiPageCreate {
-	_c.mutation.SetCreatedBy(v)
 	return _c
 }
 

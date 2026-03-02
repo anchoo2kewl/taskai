@@ -1,5 +1,6 @@
 import { useEffect, useState, useCallback, useRef } from 'react'
 import { WikiPage, apiClient } from '../lib/api'
+import SearchSelect from './ui/SearchSelect'
 import ImagePickerModal from './ImagePickerModal'
 import * as Y from 'yjs'
 import { WebsocketProvider } from 'y-websocket'
@@ -1757,31 +1758,29 @@ function DrawCard({ drawing, isUsed, onInsert, onRename, onDelete }: {
         )}
       </div>
       <span className="text-xs text-dark-text-tertiary">{formattedDate}</span>
-      <div className="flex gap-1.5 mt-1 items-center">
-        <select
+      <div className="flex gap-1.5 mt-1 items-center" onClick={e => e.stopPropagation()}>
+        <SearchSelect
+          variant="inline"
           value={size}
-          onChange={e => setSize(e.target.value)}
-          onClick={e => e.stopPropagation()}
-          className="px-1.5 py-0.5 rounded border border-dark-border-subtle bg-dark-bg-tertiary text-[11px] font-medium text-dark-text-secondary focus:outline-none focus:border-primary-500"
-          title="Size"
-        >
-          <option value="s">S</option>
-          <option value="m">M</option>
-          <option value="l">L</option>
-        </select>
-        <select
+          onChange={setSize}
+          options={[
+            { value: 's', label: 'S' },
+            { value: 'm', label: 'M' },
+            { value: 'l', label: 'L' },
+          ]}
+        />
+        <SearchSelect
+          variant="inline"
           value={zoom}
-          onChange={e => setZoom(e.target.value)}
-          onClick={e => e.stopPropagation()}
-          className="px-1.5 py-0.5 rounded border border-dark-border-subtle bg-dark-bg-tertiary text-[11px] font-medium text-dark-text-secondary focus:outline-none focus:border-primary-500"
-          title="Zoom"
-        >
-          <option value="fit">fit</option>
-          <option value="50%">50%</option>
-          <option value="100%">100%</option>
-          <option value="150%">150%</option>
-          <option value="200%">200%</option>
-        </select>
+          onChange={setZoom}
+          options={[
+            { value: 'fit', label: 'fit' },
+            { value: '50%', label: '50%' },
+            { value: '100%', label: '100%' },
+            { value: '150%', label: '150%' },
+            { value: '200%', label: '200%' },
+          ]}
+        />
         <button
           onClick={(e) => { e.stopPropagation(); window.open(`/draw/${drawing.id}/edit`, '_blank') }}
           className="w-[26px] h-[26px] rounded flex items-center justify-center bg-dark-bg-tertiary text-dark-text-secondary hover:bg-dark-bg-tertiary/80 hover:text-dark-text-primary transition-colors"

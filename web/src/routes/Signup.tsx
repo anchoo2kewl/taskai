@@ -13,6 +13,8 @@ export default function Signup() {
   const inviteCodeFromURL = searchParams.get('code') || ''
   const redirectTo = searchParams.get('redirect')
 
+  const [firstName, setFirstName] = useState('')
+  const [lastName, setLastName] = useState('')
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [confirmPassword, setConfirmPassword] = useState('')
@@ -93,13 +95,18 @@ export default function Signup() {
       return
     }
 
+    if (!firstName.trim()) {
+      setFieldErrors(prev => ({ ...prev, firstName: 'First name is required' }))
+      return
+    }
+
     if (!inviteCode.trim()) {
       setFieldErrors(prev => ({ ...prev, inviteCode: 'Invite code is required' }))
       return
     }
 
     try {
-      await signup({ email, password, invite_code: inviteCode.trim() })
+      await signup({ email, password, invite_code: inviteCode.trim(), first_name: firstName.trim(), last_name: lastName.trim() })
       // AuthContext will update user, useEffect will redirect
     } catch {
       // Error is handled by AuthContext
@@ -184,6 +191,33 @@ export default function Signup() {
                   placeholder="Paste your invite code"
                   disabled={loading}
                   helpText={validatingInvite ? 'Validating...' : undefined}
+                />
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <TextInput
+                  id="first-name"
+                  name="first-name"
+                  type="text"
+                  label="First Name"
+                  autoComplete="given-name"
+                  required
+                  value={firstName}
+                  onChange={(e) => setFirstName(e.target.value)}
+                  error={fieldErrors.firstName}
+                  placeholder="First"
+                  disabled={loading}
+                />
+                <TextInput
+                  id="last-name"
+                  name="last-name"
+                  type="text"
+                  label="Last Name"
+                  autoComplete="family-name"
+                  value={lastName}
+                  onChange={(e) => setLastName(e.target.value)}
+                  placeholder="Last"
+                  disabled={loading}
                 />
               </div>
 

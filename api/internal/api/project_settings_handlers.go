@@ -78,7 +78,9 @@ func (s *Server) HandleGetProjectMembers(w http.ResponseWriter, r *http.Request)
 	}
 
 	query := `
-		SELECT pm.id, pm.project_id, pm.user_id, u.email, u.name, pm.role, pm.granted_by, pm.granted_at
+		SELECT pm.id, pm.project_id, pm.user_id, u.email,
+		       COALESCE(NULLIF(TRIM(COALESCE(u.first_name,'') || ' ' || COALESCE(u.last_name,'')), ''), u.name) as name,
+		       pm.role, pm.granted_by, pm.granted_at
 		FROM project_members pm
 		JOIN users u ON pm.user_id = u.id
 		WHERE pm.project_id = ?

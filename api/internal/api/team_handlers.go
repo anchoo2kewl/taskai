@@ -135,7 +135,7 @@ func (s *Server) HandleGetTeamMembers(w http.ResponseWriter, r *http.Request) {
 		}
 
 		if em.Edges.User != nil {
-			m.UserName = em.Edges.User.Name
+			m.UserName = userDisplayNamePtr(em.Edges.User)
 			m.Email = em.Edges.User.Email
 		}
 
@@ -271,11 +271,7 @@ func (s *Server) HandleInviteTeamMember(w http.ResponseWriter, r *http.Request) 
 		inviter, err := s.db.Client.User.Get(ctx, userID)
 		inviterName := ""
 		if err == nil {
-			if inviter.Name != nil {
-				inviterName = *inviter.Name
-			} else {
-				inviterName = inviter.Email
-			}
+			inviterName = userDisplayName(inviter)
 		}
 
 		// Get team name
@@ -370,7 +366,7 @@ func (s *Server) HandleGetMyInvitations(w http.ResponseWriter, r *http.Request) 
 			inv.TeamName = entInv.Edges.Team.Name
 		}
 		if entInv.Edges.Inviter != nil {
-			inv.InviterName = entInv.Edges.Inviter.Name
+			inv.InviterName = userDisplayNamePtr(entInv.Edges.Inviter)
 		}
 
 		invitations = append(invitations, inv)
@@ -675,7 +671,7 @@ func (s *Server) getInvitation(ctx context.Context, invitationID int64) (*TeamIn
 		inv.TeamName = entInv.Edges.Team.Name
 	}
 	if entInv.Edges.Inviter != nil {
-		inv.InviterName = entInv.Edges.Inviter.Name
+		inv.InviterName = userDisplayNamePtr(entInv.Edges.Inviter)
 	}
 
 	return &inv, nil
@@ -749,13 +745,7 @@ func (s *Server) HandleGetInvitationByToken(w http.ResponseWriter, r *http.Reque
 	}
 
 	if entInv.Edges.Inviter != nil {
-		inviterName := ""
-		if entInv.Edges.Inviter.Name != nil {
-			inviterName = *entInv.Edges.Inviter.Name
-		} else {
-			inviterName = entInv.Edges.Inviter.Email
-		}
-		resp.InviterName = inviterName
+		resp.InviterName = userDisplayName(entInv.Edges.Inviter)
 	}
 
 	if resp.RequiresSignup && entInv.InviteCode != nil {

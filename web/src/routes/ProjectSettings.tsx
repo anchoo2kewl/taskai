@@ -4,6 +4,7 @@ import Card from '../components/ui/Card'
 import Button from '../components/ui/Button'
 import TextInput from '../components/ui/TextInput'
 import FormError from '../components/ui/FormError'
+import SearchSelect from '../components/ui/SearchSelect'
 import { apiClient, type SwimLane, type Project } from '../lib/api'
 
 interface ProjectMember {
@@ -420,34 +421,31 @@ export default function ProjectSettings() {
                     <label className="block text-sm font-medium text-dark-text-primary mb-1">
                       Team Member <span className="text-danger-400">*</span>
                     </label>
-                    <select
+                    <SearchSelect
                       value={selectedUserId}
-                      onChange={(e) => setSelectedUserId(e.target.value)}
-                      required
-                      className="w-full px-3 py-2 bg-dark-bg-secondary border border-dark-border-subtle text-dark-text-primary rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-primary-500 outline-none transition-colors"
-                    >
-                      <option value="">Select a team member...</option>
-                      {availableTeamMembers.map(member => (
-                        <option key={member.user_id} value={member.user_id}>
-                          {member.name || member.email}
-                        </option>
-                      ))}
-                    </select>
+                      onChange={setSelectedUserId}
+                      placeholder="Select a team member..."
+                      options={availableTeamMembers.map(member => ({
+                        value: String(member.user_id),
+                        label: member.name || member.email,
+                        description: member.name ? member.email : undefined,
+                      }))}
+                    />
                   </div>
                   <div>
                     <label className="block text-sm font-medium text-dark-text-primary mb-1">
                       Role <span className="text-danger-400">*</span>
                     </label>
-                    <select
+                    <SearchSelect
                       value={newMemberRole}
-                      onChange={(e) => setNewMemberRole(e.target.value)}
-                      className="w-full px-3 py-2 bg-dark-bg-secondary border border-dark-border-subtle text-dark-text-primary rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-primary-500 outline-none transition-colors"
-                    >
-                      <option value="viewer">Viewer</option>
-                      <option value="member">Member</option>
-                      <option value="editor">Editor</option>
-                      <option value="owner">Owner</option>
-                    </select>
+                      onChange={setNewMemberRole}
+                      options={[
+                        { value: 'viewer', label: 'Viewer' },
+                        { value: 'member', label: 'Member' },
+                        { value: 'editor', label: 'Editor' },
+                        { value: 'owner', label: 'Owner' },
+                      ]}
+                    />
                   </div>
                 </div>
                 <div className="mt-4">
@@ -488,16 +486,17 @@ export default function ProjectSettings() {
                           </div>
                         </div>
                         <div className="flex items-center gap-3">
-                          <select
+                          <SearchSelect
+                            variant="inline"
                             value={member.role}
-                            onChange={(e) => handleUpdateMemberRole(member.id, e.target.value)}
-                            className="px-3 py-1.5 text-sm bg-dark-bg-secondary text-dark-text-primary border border-dark-border-subtle rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-primary-500 outline-none"
-                          >
-                            <option value="viewer">Viewer</option>
-                            <option value="member">Member</option>
-                            <option value="editor">Editor</option>
-                            <option value="owner">Owner</option>
-                          </select>
+                            onChange={(v) => handleUpdateMemberRole(member.id, v)}
+                            options={[
+                              { value: 'viewer', label: 'Viewer' },
+                              { value: 'member', label: 'Member' },
+                              { value: 'editor', label: 'Editor' },
+                              { value: 'owner', label: 'Owner' },
+                            ]}
+                          />
                           <button
                             onClick={() => handleRemoveMember(member.id)}
                             className="p-2 text-danger-300 hover:bg-danger-500/10 rounded-lg transition-colors"
@@ -588,15 +587,15 @@ export default function ProjectSettings() {
                     <label className="block text-sm font-medium text-dark-text-primary mb-1">
                       Status Category <span className="text-danger-400">*</span>
                     </label>
-                    <select
+                    <SearchSelect
                       value={newLaneStatusCategory}
-                      onChange={(e) => setNewLaneStatusCategory(e.target.value as 'todo' | 'in_progress' | 'done')}
-                      className="w-full md:w-48 px-3 py-2 bg-dark-bg-secondary border border-dark-border-subtle text-dark-text-primary rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-primary-500 outline-none transition-colors"
-                    >
-                      <option value="todo">To Do</option>
-                      <option value="in_progress">In Progress</option>
-                      <option value="done">Done</option>
-                    </select>
+                      onChange={(v) => setNewLaneStatusCategory(v as 'todo' | 'in_progress' | 'done')}
+                      options={[
+                        { value: 'todo', label: 'To Do' },
+                        { value: 'in_progress', label: 'In Progress' },
+                        { value: 'done', label: 'Done' },
+                      ]}
+                    />
                   </div>
                   <div className="mt-4">
                     <Button onClick={handleAddSwimLane} disabled={!newLaneName.trim()} size="sm">

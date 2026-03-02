@@ -341,7 +341,7 @@ func TestHandleUpdateProfile(t *testing.T) {
 	}{
 		{
 			name: "update name successfully",
-			body: UpdateProfileRequest{Name: "John Doe"},
+			body: UpdateProfileRequest{FirstName: "John", LastName: "Doe"},
 			setupFunc: func(ts *TestServer) int64 {
 				return ts.CreateTestUser(t, "user@example.com", "password123")
 			},
@@ -350,7 +350,7 @@ func TestHandleUpdateProfile(t *testing.T) {
 		},
 		{
 			name: "set empty name",
-			body: UpdateProfileRequest{Name: ""},
+			body: UpdateProfileRequest{FirstName: "", LastName: ""},
 			setupFunc: func(ts *TestServer) int64 {
 				return ts.CreateTestUser(t, "user@example.com", "password123")
 			},
@@ -358,27 +358,37 @@ func TestHandleUpdateProfile(t *testing.T) {
 			wantName:   "",
 		},
 		{
-			name: "name at 100 char limit",
-			body: UpdateProfileRequest{Name: strings.Repeat("a", 100)},
+			name: "first name at 50 char limit",
+			body: UpdateProfileRequest{FirstName: strings.Repeat("a", 50), LastName: "B"},
 			setupFunc: func(ts *TestServer) int64 {
 				return ts.CreateTestUser(t, "user@example.com", "password123")
 			},
 			wantStatus: http.StatusOK,
-			wantName:   strings.Repeat("a", 100),
+			wantName:   strings.Repeat("a", 50) + " B",
 		},
 		{
-			name: "name exceeds 100 chars",
-			body: UpdateProfileRequest{Name: strings.Repeat("a", 101)},
+			name: "first name exceeds 50 chars",
+			body: UpdateProfileRequest{FirstName: strings.Repeat("a", 51)},
 			setupFunc: func(ts *TestServer) int64 {
 				return ts.CreateTestUser(t, "user@example.com", "password123")
 			},
 			wantStatus:    http.StatusBadRequest,
-			wantError:     "name must be 100 characters or less",
+			wantError:     "first name must be 50 characters or less",
+			wantErrorCode: "validation_error",
+		},
+		{
+			name: "last name exceeds 50 chars",
+			body: UpdateProfileRequest{FirstName: "John", LastName: strings.Repeat("a", 51)},
+			setupFunc: func(ts *TestServer) int64 {
+				return ts.CreateTestUser(t, "user@example.com", "password123")
+			},
+			wantStatus:    http.StatusBadRequest,
+			wantError:     "last name must be 50 characters or less",
 			wantErrorCode: "validation_error",
 		},
 		{
 			name:          "unauthenticated request",
-			body:          UpdateProfileRequest{Name: "Test"},
+			body:          UpdateProfileRequest{FirstName: "Test"},
 			noAuth:        true,
 			wantStatus:    http.StatusUnauthorized,
 			wantError:     "user not authenticated",

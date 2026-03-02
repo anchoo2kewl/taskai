@@ -528,7 +528,7 @@ func (s *Server) HandleListTaskAttachments(w http.ResponseWriter, r *http.Reques
 		`SELECT ta.id, ta.task_id, ta.project_id, ta.user_id, ta.filename, ta.alt_name,
 		        ta.file_type, ta.content_type, ta.file_size,
 		        ta.cloudinary_url, ta.cloudinary_public_id, ta.created_at,
-		        u.name as user_name
+		        COALESCE(NULLIF(TRIM(COALESCE(u.first_name,'') || ' ' || COALESCE(u.last_name,'')), ''), u.name) as user_name
 		 FROM task_attachments ta
 		 LEFT JOIN users u ON ta.user_id = u.id
 		 WHERE ta.task_id = $1
@@ -709,7 +709,7 @@ func (s *Server) HandleListImages(w http.ResponseWriter, r *http.Request) {
 			`SELECT DISTINCT ta.id, ta.task_id, ta.project_id, ta.user_id, ta.filename, ta.alt_name,
 			        ta.file_type, ta.content_type, ta.file_size,
 			        ta.cloudinary_url, ta.cloudinary_public_id, ta.created_at,
-			        u.name as user_name
+			        COALESCE(NULLIF(TRIM(COALESCE(u.first_name,'') || ' ' || COALESCE(u.last_name,'')), ''), u.name) as user_name
 			 FROM task_attachments ta
 			 LEFT JOIN users u ON ta.user_id = u.id
 			 WHERE ta.file_type = 'image' AND (
@@ -727,7 +727,7 @@ func (s *Server) HandleListImages(w http.ResponseWriter, r *http.Request) {
 			`SELECT DISTINCT ta.id, ta.task_id, ta.project_id, ta.user_id, ta.filename, ta.alt_name,
 			        ta.file_type, ta.content_type, ta.file_size,
 			        ta.cloudinary_url, ta.cloudinary_public_id, ta.created_at,
-			        u.name as user_name
+			        COALESCE(NULLIF(TRIM(COALESCE(u.first_name,'') || ' ' || COALESCE(u.last_name,'')), ''), u.name) as user_name
 			 FROM task_attachments ta
 			 LEFT JOIN users u ON ta.user_id = u.id
 			 WHERE ta.file_type = 'image' AND (
@@ -820,7 +820,7 @@ func (s *Server) HandleUpdateAttachment(w http.ResponseWriter, r *http.Request) 
 		`SELECT ta.id, ta.task_id, ta.project_id, ta.user_id, ta.filename, ta.alt_name,
 		        ta.file_type, ta.content_type, ta.file_size,
 		        ta.cloudinary_url, ta.cloudinary_public_id, ta.created_at,
-		        u.name as user_name
+		        COALESCE(NULLIF(TRIM(COALESCE(u.first_name,'') || ' ' || COALESCE(u.last_name,'')), ''), u.name) as user_name
 		 FROM task_attachments ta
 		 LEFT JOIN users u ON ta.user_id = u.id
 		 WHERE ta.id = $1`, attachmentID,
@@ -849,7 +849,7 @@ func (s *Server) HandleGetStorageUsage(w http.ResponseWriter, r *http.Request) {
 	}
 
 	rows, err := s.db.QueryContext(ctx,
-		`SELECT ta.user_id, COALESCE(u.name, u.email) as user_name,
+		`SELECT ta.user_id, COALESCE(NULLIF(TRIM(COALESCE(u.first_name,'') || ' ' || COALESCE(u.last_name,'')), ''), u.name, u.email) as user_name,
 		        COUNT(*) as file_count, COALESCE(SUM(ta.file_size), 0) as total_size
 		 FROM task_attachments ta
 		 LEFT JOIN users u ON ta.user_id = u.id
@@ -899,7 +899,7 @@ func (s *Server) HandleListAssets(w http.ResponseWriter, r *http.Request) {
 	baseQuery := `SELECT DISTINCT ta.id, ta.task_id, ta.project_id, ta.user_id, ta.filename, ta.alt_name,
 		ta.file_type, ta.content_type, ta.file_size,
 		ta.cloudinary_url, ta.cloudinary_public_id, ta.created_at,
-		u.name as user_name,
+		COALESCE(NULLIF(TRIM(COALESCE(u.first_name,'') || ' ' || COALESCE(u.last_name,'')), ''), u.name) as user_name,
 		CASE WHEN ta.user_id = $1 THEN 1 ELSE 0 END as is_owner
 	 FROM task_attachments ta
 	 LEFT JOIN users u ON ta.user_id = u.id
@@ -1012,7 +1012,7 @@ func (s *Server) HandleListWikiPageAttachments(w http.ResponseWriter, r *http.Re
 		`SELECT wa.id, wa.wiki_page_id, wa.project_id, wa.user_id, wa.filename, wa.alt_name,
 		        wa.file_type, wa.content_type, wa.file_size,
 		        wa.cloudinary_url, wa.cloudinary_public_id, wa.created_at,
-		        u.name as user_name
+		        COALESCE(NULLIF(TRIM(COALESCE(u.first_name,'') || ' ' || COALESCE(u.last_name,'')), ''), u.name) as user_name
 		 FROM wiki_page_attachments wa
 		 LEFT JOIN users u ON wa.user_id = u.id
 		 WHERE wa.wiki_page_id = $1

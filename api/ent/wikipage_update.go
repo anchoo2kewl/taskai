@@ -75,6 +75,20 @@ func (_u *WikiPageUpdate) SetNillableSlug(v *string) *WikiPageUpdate {
 	return _u
 }
 
+// SetCreatedBy sets the "created_by" field.
+func (_u *WikiPageUpdate) SetCreatedBy(v int64) *WikiPageUpdate {
+	_u.mutation.SetCreatedBy(v)
+	return _u
+}
+
+// SetNillableCreatedBy sets the "created_by" field if the given value is not nil.
+func (_u *WikiPageUpdate) SetNillableCreatedBy(v *int64) *WikiPageUpdate {
+	if v != nil {
+		_u.SetCreatedBy(*v)
+	}
+	return _u
+}
+
 // SetContent sets the "content" field.
 func (_u *WikiPageUpdate) SetContent(v string) *WikiPageUpdate {
 	_u.mutation.SetContent(v)
@@ -89,17 +103,9 @@ func (_u *WikiPageUpdate) SetNillableContent(v *string) *WikiPageUpdate {
 	return _u
 }
 
-// SetCreatedBy sets the "created_by" field.
-func (_u *WikiPageUpdate) SetCreatedBy(v int64) *WikiPageUpdate {
-	_u.mutation.SetCreatedBy(v)
-	return _u
-}
-
-// SetNillableCreatedBy sets the "created_by" field if the given value is not nil.
-func (_u *WikiPageUpdate) SetNillableCreatedBy(v *int64) *WikiPageUpdate {
-	if v != nil {
-		_u.SetCreatedBy(*v)
-	}
+// ClearContent clears the value of the "content" field.
+func (_u *WikiPageUpdate) ClearContent() *WikiPageUpdate {
+	_u.mutation.ClearContent()
 	return _u
 }
 
@@ -327,6 +333,9 @@ func (_u *WikiPageUpdate) sqlSave(ctx context.Context) (_node int, err error) {
 	}
 	if value, ok := _u.mutation.Content(); ok {
 		_spec.SetField(wikipage.FieldContent, field.TypeString, value)
+	}
+	if _u.mutation.ContentCleared() {
+		_spec.ClearField(wikipage.FieldContent, field.TypeString)
 	}
 	if value, ok := _u.mutation.UpdatedAt(); ok {
 		_spec.SetField(wikipage.FieldUpdatedAt, field.TypeTime, value)
@@ -586,6 +595,20 @@ func (_u *WikiPageUpdateOne) SetNillableSlug(v *string) *WikiPageUpdateOne {
 	return _u
 }
 
+// SetCreatedBy sets the "created_by" field.
+func (_u *WikiPageUpdateOne) SetCreatedBy(v int64) *WikiPageUpdateOne {
+	_u.mutation.SetCreatedBy(v)
+	return _u
+}
+
+// SetNillableCreatedBy sets the "created_by" field if the given value is not nil.
+func (_u *WikiPageUpdateOne) SetNillableCreatedBy(v *int64) *WikiPageUpdateOne {
+	if v != nil {
+		_u.SetCreatedBy(*v)
+	}
+	return _u
+}
+
 // SetContent sets the "content" field.
 func (_u *WikiPageUpdateOne) SetContent(v string) *WikiPageUpdateOne {
 	_u.mutation.SetContent(v)
@@ -600,17 +623,9 @@ func (_u *WikiPageUpdateOne) SetNillableContent(v *string) *WikiPageUpdateOne {
 	return _u
 }
 
-// SetCreatedBy sets the "created_by" field.
-func (_u *WikiPageUpdateOne) SetCreatedBy(v int64) *WikiPageUpdateOne {
-	_u.mutation.SetCreatedBy(v)
-	return _u
-}
-
-// SetNillableCreatedBy sets the "created_by" field if the given value is not nil.
-func (_u *WikiPageUpdateOne) SetNillableCreatedBy(v *int64) *WikiPageUpdateOne {
-	if v != nil {
-		_u.SetCreatedBy(*v)
-	}
+// ClearContent clears the value of the "content" field.
+func (_u *WikiPageUpdateOne) ClearContent() *WikiPageUpdateOne {
+	_u.mutation.ClearContent()
 	return _u
 }
 
@@ -868,6 +883,9 @@ func (_u *WikiPageUpdateOne) sqlSave(ctx context.Context) (_node *WikiPage, err 
 	}
 	if value, ok := _u.mutation.Content(); ok {
 		_spec.SetField(wikipage.FieldContent, field.TypeString, value)
+	}
+	if _u.mutation.ContentCleared() {
+		_spec.ClearField(wikipage.FieldContent, field.TypeString)
 	}
 	if value, ok := _u.mutation.UpdatedAt(); ok {
 		_spec.SetField(wikipage.FieldUpdatedAt, field.TypeTime, value)

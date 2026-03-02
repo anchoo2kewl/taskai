@@ -95,11 +95,8 @@ func (s *Server) HandleListInvites(w http.ResponseWriter, r *http.Request) {
 			inv.ExpiresAt = &expiresAtStr
 		}
 		if ei.Edges.Invitee != nil {
-			if ei.Edges.Invitee.Name != nil && *ei.Edges.Invitee.Name != "" {
-				inv.InviteeName = ei.Edges.Invitee.Name
-			} else {
-				inv.InviteeName = &ei.Edges.Invitee.Email
-			}
+			name := userDisplayName(ei.Edges.Invitee)
+			inv.InviteeName = &name
 		}
 		invites = append(invites, inv)
 	}
@@ -203,10 +200,7 @@ func (s *Server) HandleCreateInvite(w http.ResponseWriter, r *http.Request) {
 	s.logger.Info("Invite created", zap.Int64("user_id", userID), zap.String("code", code[:8]+"..."))
 
 	// Send email if requested and email service is available
-	inviterName := userEntity.Email
-	if userEntity.Name != nil && *userEntity.Name != "" {
-		inviterName = *userEntity.Name
-	}
+	inviterName := userDisplayName(userEntity)
 
 	emailSent := false
 	if req.Email != "" {
@@ -268,8 +262,9 @@ func (s *Server) HandleValidateInvite(w http.ResponseWriter, r *http.Request) {
 
 	name := ""
 	if inviteEntity.Edges.Inviter != nil {
-		if inviteEntity.Edges.Inviter.Name != nil && *inviteEntity.Edges.Inviter.Name != "" {
-			name = *inviteEntity.Edges.Inviter.Name
+		dn := userDisplayNamePtr(inviteEntity.Edges.Inviter)
+		if dn != nil {
+			name = *dn
 		}
 	}
 

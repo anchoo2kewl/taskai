@@ -4,10 +4,18 @@ import Card from '../components/ui/Card'
 import Button from '../components/ui/Button'
 import TextInput from '../components/ui/TextInput'
 import FormError from '../components/ui/FormError'
+import SearchSelect from '../components/ui/SearchSelect'
 import { apiClient, type CloudinaryCredentialResponse, type APIKey, type Team, type TeamMember, type TeamInvitation, type Invite } from '../lib/api'
 
 export default function Settings() {
   const navigate = useNavigate()
+
+  // Profile state
+  const [profileFirstName, setProfileFirstName] = useState('')
+  const [profileLastName, setProfileLastName] = useState('')
+  const [profileError, setProfileError] = useState('')
+  const [profileSuccess, setProfileSuccess] = useState('')
+  const [isSavingProfile, setIsSavingProfile] = useState(false)
 
   // Password change state
   const [currentPassword, setCurrentPassword] = useState('')
@@ -80,12 +88,38 @@ export default function Settings() {
   const [inviteRecipientEmail, setInviteRecipientEmail] = useState('')
 
   useEffect(() => {
+    loadProfile()
     load2FAStatus()
     loadAPIKeys()
     loadTeamData()
     loadCloudinaryCredentials()
     loadInvites()
   }, [])
+
+  const loadProfile = async () => {
+    try {
+      const me = await apiClient.getCurrentUser()
+      setProfileFirstName(me.first_name || '')
+      setProfileLastName(me.last_name || '')
+    } catch {
+      // non-critical load failure
+    }
+  }
+
+  const handleProfileSave = async (e: React.FormEvent) => {
+    e.preventDefault()
+    setProfileError('')
+    setProfileSuccess('')
+    setIsSavingProfile(true)
+    try {
+      await apiClient.updateProfile({ first_name: profileFirstName.trim(), last_name: profileLastName.trim() })
+      setProfileSuccess('Profile updated successfully')
+    } catch (error: unknown) {
+      setProfileError(error instanceof Error ? error.message : 'Failed to update profile')
+    } finally {
+      setIsSavingProfile(false)
+    }
+  }
 
   const load2FAStatus = async () => {
     try {
@@ -548,6 +582,55 @@ export default function Settings() {
         </div>
 
         <div className="space-y-6">
+          {/* Profile Section */}
+          <Card className="shadow-md">
+            <div className="p-6 sm:p-8 flex items-start gap-4">
+              <div className="flex-shrink-0 w-10 h-10 bg-primary-500/10 rounded-lg flex items-center justify-center">
+                <svg className="w-6 h-6 text-primary-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
+                </svg>
+              </div>
+              <div className="flex-1">
+                <h2 className="text-xl font-semibold text-dark-text-primary mb-1">Profile</h2>
+                <p className="text-sm text-dark-text-secondary mb-6">Update your display name</p>
+
+                {profileSuccess && (
+                  <div className="mb-4 p-4 bg-success-500/10 border-l-4 border-success-400 rounded-r-lg">
+                    <div className="flex items-center">
+                      <svg className="w-5 h-5 text-success-400 mr-2" fill="currentColor" viewBox="0 0 20 20">
+                        <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" />
+                      </svg>
+                      <span className="text-sm text-success-300">{profileSuccess}</span>
+                    </div>
+                  </div>
+                )}
+
+                <FormError message={profileError} className="mb-4" />
+
+                <form onSubmit={handleProfileSave} className="space-y-4 max-w-md">
+                  <div className="grid grid-cols-2 gap-3">
+                    <TextInput
+                      label="First Name"
+                      value={profileFirstName}
+                      onChange={(e) => setProfileFirstName(e.target.value)}
+                      placeholder="First"
+                    />
+                    <TextInput
+                      label="Last Name"
+                      value={profileLastName}
+                      onChange={(e) => setProfileLastName(e.target.value)}
+                      placeholder="Last"
+                    />
+                  </div>
+
+                  <Button type="submit" disabled={isSavingProfile} size="sm">
+                    {isSavingProfile ? 'Saving...' : 'Save Profile'}
+                  </Button>
+                </form>
+              </div>
+            </div>
+          </Card>
+
           {/* Password Change Section */}
           <Card className="shadow-md">
             <div className="p-6 sm:p-8 flex items-start gap-4">
@@ -936,17 +1019,17 @@ export default function Settings() {
                     <label className="block text-sm font-medium text-dark-text-primary mb-2">
                       Max File Size (MB)
                     </label>
-                    <select
-                      value={cloudMaxSize}
-                      onChange={(e) => setCloudMaxSize(parseInt(e.target.value))}
-                      className="w-full px-3 py-2 border border-dark-border-subtle bg-dark-bg-secondary text-dark-text-primary rounded-lg focus:border-primary-500 focus:ring-2 focus:ring-primary-500/20 outline-none transition-colors"
-                    >
-                      <option value="5">5 MB</option>
-                      <option value="10">10 MB</option>
-                      <option value="25">25 MB</option>
-                      <option value="50">50 MB</option>
-                      <option value="100">100 MB</option>
-                    </select>
+                    <SearchSelect
+                      value={String(cloudMaxSize)}
+                      onChange={(v) => setCloudMaxSize(parseInt(v))}
+                      options={[
+                        { value: '5', label: '5 MB' },
+                        { value: '10', label: '10 MB' },
+                        { value: '25', label: '25 MB' },
+                        { value: '50', label: '50 MB' },
+                        { value: '100', label: '100 MB' },
+                      ]}
+                    />
                   </div>
 
                   <Button type="submit" disabled={isSavingCloudinary}>
@@ -1044,17 +1127,17 @@ export default function Settings() {
                     <label className="block text-sm font-medium text-dark-text-primary mb-2">
                       Expiration
                     </label>
-                    <select
-                      value={newKeyExpires || ''}
-                      onChange={(e) => setNewKeyExpires(e.target.value ? parseInt(e.target.value) : undefined)}
-                      className="w-full px-3 py-2 border border-dark-border-subtle bg-dark-bg-secondary text-dark-text-primary rounded-lg focus:border-primary-500 focus:ring-2 focus:ring-primary-500/20 outline-none transition-colors"
-                    >
-                      <option value="30">30 days</option>
-                      <option value="90">90 days</option>
-                      <option value="180">180 days</option>
-                      <option value="365">1 year</option>
-                      <option value="">Never expires</option>
-                    </select>
+                    <SearchSelect
+                      value={newKeyExpires !== undefined ? String(newKeyExpires) : ''}
+                      onChange={(v) => setNewKeyExpires(v ? parseInt(v) : undefined)}
+                      options={[
+                        { value: '30', label: '30 days' },
+                        { value: '90', label: '90 days' },
+                        { value: '180', label: '180 days' },
+                        { value: '365', label: '1 year' },
+                        { value: '', label: 'Never expires' },
+                      ]}
+                    />
                   </div>
 
                   <Button type="submit" disabled={isCreatingKey}>

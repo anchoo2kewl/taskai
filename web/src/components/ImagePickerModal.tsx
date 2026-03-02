@@ -9,7 +9,7 @@ interface ImagePickerModalProps {
   onUploadComplete: () => void
 }
 
-export default function ImagePickerModal({ onSelect, onClose, taskId, wikiPageId, onUploadComplete }: ImagePickerModalProps) {
+export default function ImagePickerModal({ onSelect, onClose, taskId, wikiPageId, onUploadComplete }: Readonly<ImagePickerModalProps>) {
   const [images, setImages] = useState<Attachment[]>([])
   const [searchQuery, setSearchQuery] = useState('')
   const [loading, setLoading] = useState(true)
@@ -50,11 +50,11 @@ export default function ImagePickerModal({ onSelect, onClose, taskId, wikiPageId
 
   const handleSelectFile = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0]
-    if (!file || !file.type.startsWith('image/')) {
+    if (!file?.type.startsWith('image/')) {
       setError('Only images can be inserted')
       return
     }
-    const defaultAlt = file.name.replace(/\.[^.]+$/, '').replace(/[-_]/g, ' ')
+    const defaultAlt = file.name.replace(/\.[^.]+$/, '').replaceAll(/[-_]/g, ' ')
     setPendingUploadFile(file)
     setUploadAltText(defaultAlt)
     e.target.value = ''
@@ -124,12 +124,17 @@ export default function ImagePickerModal({ onSelect, onClose, taskId, wikiPageId
 
   return (
     <div
+      role="button"
+      tabIndex={0}
       className="fixed inset-0 z-[60] flex items-center justify-center bg-black/60 backdrop-blur-sm"
       onClick={onClose}
+      onKeyDown={(e) => { if (e.key === 'Escape' || e.key === 'Enter') onClose() }}
     >
       <div
+        role="dialog"
         className="w-full max-w-2xl mx-4 bg-dark-bg-secondary rounded-xl border border-dark-border-subtle shadow-2xl overflow-hidden"
         onClick={(e) => e.stopPropagation()}
+        onKeyDown={(e) => e.stopPropagation()}
       >
         {/* Header */}
         <div className="flex items-center justify-between px-5 py-4 border-b border-dark-border-subtle">
@@ -257,11 +262,12 @@ export default function ImagePickerModal({ onSelect, onClose, taskId, wikiPageId
           {error && (
             <p className="text-sm text-danger-400 mb-3">{error}</p>
           )}
-          {loading ? (
+          {loading && (
             <div className="flex items-center justify-center py-8">
               <span className="text-sm text-dark-text-tertiary animate-pulse">Loading images...</span>
             </div>
-          ) : images.length === 0 ? (
+          )}
+          {!loading && images.length === 0 && (
             <div className="text-center py-8">
               <svg className="w-10 h-10 mx-auto text-dark-text-tertiary mb-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
@@ -270,7 +276,8 @@ export default function ImagePickerModal({ onSelect, onClose, taskId, wikiPageId
                 {searchQuery ? 'No images match your search' : 'No images yet. Upload one to get started.'}
               </p>
             </div>
-          ) : (
+          )}
+          {!loading && images.length > 0 && (
             <>
             <div className="grid grid-cols-3 sm:grid-cols-4 gap-2">
               {images.map((img: Attachment) => (

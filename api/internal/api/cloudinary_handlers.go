@@ -18,6 +18,13 @@ import (
 	"go.uber.org/zap"
 )
 
+const (
+	errFailedCountAttachments = "failed to count attachments"
+	errDeleteOwnAttachments   = "you can only delete your own attachments"
+	errFailedDeleteAttachment = "failed to delete attachment"
+	msgAttachmentDeleted      = "Attachment deleted"
+)
+
 var nonAlphanumericRe = regexp.MustCompile(`[^a-z0-9]+`)
 
 // slugifyProjectName converts a project name into a URL-safe slug for Cloudinary folders.
@@ -417,7 +424,7 @@ func (s *Server) HandleGetUploadSignature(w http.ResponseWriter, r *http.Request
 		).Scan(&attachmentCount)
 		if err != nil {
 			s.logger.Error("Failed to count attachments", zap.Error(err))
-			respondError(w, http.StatusInternalServerError, "failed to count attachments", "internal_error")
+			respondError(w, http.StatusInternalServerError, errFailedCountAttachments, "internal_error")
 			return
 		}
 
@@ -465,7 +472,7 @@ func (s *Server) HandleGetUploadSignature(w http.ResponseWriter, r *http.Request
 		).Scan(&attachmentCount)
 		if err != nil {
 			s.logger.Error("Failed to count wiki page attachments", zap.Error(err))
-			respondError(w, http.StatusInternalServerError, "failed to count attachments", "internal_error")
+			respondError(w, http.StatusInternalServerError, errFailedCountAttachments, "internal_error")
 			return
 		}
 
@@ -604,7 +611,7 @@ func (s *Server) HandleCreateTaskAttachment(w http.ResponseWriter, r *http.Reque
 	).Scan(&attachmentCount)
 	if err != nil {
 		s.logger.Error("Failed to count attachments", zap.Error(err))
-		respondError(w, http.StatusInternalServerError, "failed to count attachments", "internal_error")
+		respondError(w, http.StatusInternalServerError, errFailedCountAttachments, "internal_error")
 		return
 	}
 	if attachmentCount >= 99 {
@@ -676,7 +683,7 @@ func (s *Server) HandleDeleteTaskAttachment(w http.ResponseWriter, r *http.Reque
 		return
 	}
 	if ownerID != userID {
-		respondError(w, http.StatusForbidden, "you can only delete your own attachments", "forbidden")
+		respondError(w, http.StatusForbidden, errDeleteOwnAttachments, "forbidden")
 		return
 	}
 
@@ -685,11 +692,11 @@ func (s *Server) HandleDeleteTaskAttachment(w http.ResponseWriter, r *http.Reque
 	)
 	if err != nil {
 		s.logger.Error("Failed to delete attachment", zap.Error(err))
-		respondError(w, http.StatusInternalServerError, "failed to delete attachment", "internal_error")
+		respondError(w, http.StatusInternalServerError, errFailedDeleteAttachment, "internal_error")
 		return
 	}
 
-	respondJSON(w, http.StatusOK, map[string]string{"message": "Attachment deleted"})
+	respondJSON(w, http.StatusOK, map[string]string{"message": msgAttachmentDeleted})
 }
 
 // HandleListImages returns images accessible to the current user (own + shared project members)
@@ -981,7 +988,7 @@ func (s *Server) HandleDeleteAttachment(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	if ownerID != userID {
-		respondError(w, http.StatusForbidden, "you can only delete your own attachments", "forbidden")
+		respondError(w, http.StatusForbidden, errDeleteOwnAttachments, "forbidden")
 		return
 	}
 
@@ -990,11 +997,11 @@ func (s *Server) HandleDeleteAttachment(w http.ResponseWriter, r *http.Request) 
 	)
 	if err != nil {
 		s.logger.Error("Failed to delete attachment", zap.Error(err))
-		respondError(w, http.StatusInternalServerError, "failed to delete attachment", "internal_error")
+		respondError(w, http.StatusInternalServerError, errFailedDeleteAttachment, "internal_error")
 		return
 	}
 
-	respondJSON(w, http.StatusOK, map[string]string{"message": "Attachment deleted"})
+	respondJSON(w, http.StatusOK, map[string]string{"message": msgAttachmentDeleted})
 }
 
 // HandleListWikiPageAttachments returns all attachments for a wiki page
@@ -1088,7 +1095,7 @@ func (s *Server) HandleCreateWikiPageAttachment(w http.ResponseWriter, r *http.R
 	).Scan(&attachmentCount)
 	if err != nil {
 		s.logger.Error("Failed to count wiki page attachments", zap.Error(err))
-		respondError(w, http.StatusInternalServerError, "failed to count attachments", "internal_error")
+		respondError(w, http.StatusInternalServerError, errFailedCountAttachments, "internal_error")
 		return
 	}
 	if attachmentCount >= 100 {
@@ -1160,7 +1167,7 @@ func (s *Server) HandleDeleteWikiPageAttachment(w http.ResponseWriter, r *http.R
 		return
 	}
 	if ownerID != userID {
-		respondError(w, http.StatusForbidden, "you can only delete your own attachments", "forbidden")
+		respondError(w, http.StatusForbidden, errDeleteOwnAttachments, "forbidden")
 		return
 	}
 
@@ -1169,9 +1176,9 @@ func (s *Server) HandleDeleteWikiPageAttachment(w http.ResponseWriter, r *http.R
 	)
 	if err != nil {
 		s.logger.Error("Failed to delete wiki page attachment", zap.Error(err))
-		respondError(w, http.StatusInternalServerError, "failed to delete attachment", "internal_error")
+		respondError(w, http.StatusInternalServerError, errFailedDeleteAttachment, "internal_error")
 		return
 	}
 
-	respondJSON(w, http.StatusOK, map[string]string{"message": "Attachment deleted"})
+	respondJSON(w, http.StatusOK, map[string]string{"message": msgAttachmentDeleted})
 }

@@ -111,7 +111,7 @@ function makeSizeBtn(sz: string, isActive: boolean): HTMLButtonElement {
   const btn = document.createElement('button')
   btn.type = 'button'
   btn.textContent = sz.toUpperCase()
-  btn.setAttribute('data-size', sz)
+  btn.dataset.size = sz
   Object.assign(btn.style, {
     padding: '3px 8px', border: 'none', borderRadius: '4px',
     background: isActive ? 'rgba(99,102,241,0.8)' : 'transparent',
@@ -128,14 +128,14 @@ function makeSizeBtn(sz: string, isActive: boolean): HTMLButtonElement {
 function updateSizeBtnStates(overlay: HTMLElement, activeSize: string) {
   overlay.querySelectorAll('button[data-size]').forEach((b) => {
     const btn = b as HTMLButtonElement
-    const isActive = btn.getAttribute('data-size') === activeSize
+    const isActive = btn.dataset.size === activeSize
     btn.classList.toggle('active', isActive)
     btn.style.background = isActive ? 'rgba(99,102,241,0.8)' : 'transparent'
     btn.style.color = isActive ? '#fff' : 'rgba(255,255,255,0.7)'
   })
 }
 
-function escapeRegExp(str: string) { return str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') }
+function escapeRegExp(str: string) { return str.replaceAll(/[.*+?^${}()|[\]\\]/g, String.raw`\$&`) }
 
 function initDrawEmbeds(
   container: HTMLElement | null,
@@ -145,13 +145,13 @@ function initDrawEmbeds(
   if (!container) return
   const embeds = container.querySelectorAll('.godraw-embed:not(.godraw-preview-init)')
   embeds.forEach((div) => {
-    let src = div.getAttribute('data-src')
-    const w = div.getAttribute('data-width') || '100%'
-    const h = div.getAttribute('data-height') || '520px'
-    const zoom = div.getAttribute('data-zoom')
+    let src = (div as HTMLElement).dataset.src
+    const w = (div as HTMLElement).dataset.width || '100%'
+    const h = (div as HTMLElement).dataset.height || '520px'
+    const zoom = (div as HTMLElement).dataset.zoom
     if (!src) return
 
-    const drawIdMatch = src.match(/\/([a-zA-Z0-9_-]+?)(?:\/edit)?$/)
+    const drawIdMatch = /\/([a-zA-Z0-9_-]+?)(?:\/edit)?$/.exec(src)
     const drawId = drawIdMatch ? drawIdMatch[1] : null
 
     src = src.replace(/\/edit$/, '')
@@ -177,7 +177,7 @@ function initDrawEmbeds(
       // Detect current size from shortcode
       let currentSize = 'm'
       if (contentRef) {
-        const scRe = new RegExp('\\[draw:' + escapeRegExp(drawId) + '(?::edit)?(?::([sml]))?')
+        const scRe = new RegExp(String.raw`\[draw:` + escapeRegExp(drawId) + '(?::edit)?(?::([sml]))?')
         const scMatch = scRe.exec(contentRef.current)
         if (scMatch?.[1]) currentSize = scMatch[1]
       }
@@ -191,10 +191,10 @@ function initDrawEmbeds(
         btn.addEventListener('click', (e) => {
           e.preventDefault(); e.stopPropagation()
           if (!contentRef || !updateContent) return
-          const re = new RegExp('\\[draw:' + escapeRegExp(drawId) + '(?::edit)?(?::[sml])?(?::z[^\\]]+)?\\]')
+          const re = new RegExp(String.raw`\[draw:` + escapeRegExp(drawId) + String.raw`(?::edit)?(?::[sml])?(?::z[^\]]+)?\]`)
           const m = re.exec(contentRef.current)
           if (!m) return
-          const zoomMatch = m[0].match(/:z([^\]]+)/)
+          const zoomMatch = /:z([^\]]+)/.exec(m[0])
           const zoomTag = zoomMatch ? ':z' + zoomMatch[1] : ''
           const sizeTag = sz === 'm' ? '' : ':' + sz
           const newSC = `[draw:${drawId}:edit${sizeTag}${zoomTag}]`
@@ -252,12 +252,13 @@ function buildImageMarkup(url: string, alt: string, caption: string, size: strin
     l: 'width:100%;height:auto;max-width:100%;',
   }
   const imgStyle = sizeStyles[size] || sizeStyles.m
-  const escHtml = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;')
+  const escHtml = (s: string) => s.replaceAll(/&/g, '&amp;').replaceAll(/</g, '&lt;').replaceAll(/>/g, '&gt;').replaceAll(/"/g, '&quot;')
 
   if (size === 'l' && !caption) {
     return `![${alt}](${url})`
   }
-  return `<figure style="text-align:center;margin:1.5rem 0"><a href="${url}" data-lightbox="article-images" data-title="${escHtml(alt)}"><img src="${url}" alt="${escHtml(alt)}" style="${imgStyle}"/></a>${caption ? `<figcaption>${escHtml(caption)}</figcaption>` : ''}</figure>`
+  const captionHtml = caption ? '<figcaption>' + escHtml(caption) + '</figcaption>' : ''
+  return `<figure style="text-align:center;margin:1.5rem 0"><a href="${url}" data-lightbox="article-images" data-title="${escHtml(alt)}"><img src="${url}" alt="${escHtml(alt)}" style="${imgStyle}"/></a>${captionHtml}</figure>`
 }
 
 function addImageEditOverlays(
@@ -281,7 +282,7 @@ function addImageEditOverlays(
     else if (/max-width:\s*75%/.test(styleStr)) currentSize = 'm'
 
     // Wrap the image (or its <figure> parent)
-    const wrapTarget = (img.closest('figure') || img) as HTMLElement
+    const wrapTarget = img.closest<HTMLElement>('figure') || img
     const wrapper = document.createElement('div')
     wrapper.style.position = 'relative'
     wrapper.style.display = 'inline-block'
@@ -298,17 +299,17 @@ function addImageEditOverlays(
         const content = contentRef.current
 
         // Try <figure> containing this URL
-        const figRe = new RegExp('<figure[^>]*>[\\s\\S]*?' + escapeRegExp(imgUrl) + '[\\s\\S]*?<\\/figure>')
+        const figRe = new RegExp(String.raw`<figure[^>]*>[\s\S]*?` + escapeRegExp(imgUrl) + String.raw`[\s\S]*?</figure>`)
         const figMatch = figRe.exec(content)
         if (figMatch) {
-          const altM = figMatch[0].match(/alt="([^"]*)"/)
-          const capM = figMatch[0].match(/<figcaption>([\s\S]*?)<\/figcaption>/)
-          const alt = (altM?.[1] || '').replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"')
-          const cap = (capM?.[1] || '').replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"')
+          const altM = /alt="([^"]*)"/.exec(figMatch[0])
+          const capM = /<figcaption>([\s\S]*?)<\/figcaption>/.exec(figMatch[0])
+          const alt = (altM?.[1] || '').replaceAll(/&amp;/g, '&').replaceAll(/&lt;/g, '<').replaceAll(/&gt;/g, '>').replaceAll(/&quot;/g, '"')
+          const cap = (capM?.[1] || '').replaceAll(/&amp;/g, '&').replaceAll(/&lt;/g, '<').replaceAll(/&gt;/g, '>').replaceAll(/&quot;/g, '"')
           updateContent(content.replace(figMatch[0], buildImageMarkup(imgUrl, alt, cap, sz)))
         } else {
           // Try markdown ![alt](url)
-          const mdRe = new RegExp('!\\[([^\\]]*)\\]\\(' + escapeRegExp(imgUrl) + '\\)')
+          const mdRe = new RegExp(String.raw`!\[([^\]]*)\]\(` + escapeRegExp(imgUrl) + String.raw`\)`)
           const mdMatch = mdRe.exec(content)
           if (mdMatch) {
             updateContent(content.replace(mdMatch[0], buildImageMarkup(imgUrl, mdMatch[1], '', sz)))
@@ -362,7 +363,7 @@ async function fetchPreview(markdown: string, signal?: AbortSignal): Promise<str
 
 // ── Component ────────────────────────────────────────────────────
 
-export default function WikiEditor({ page }: WikiEditorProps) {
+export default function WikiEditor({ page }: Readonly<WikiEditorProps>) {
   const [content, setContent] = useState('')
   const [isPreview, setIsPreview] = useState(true)
   const [previewHTML, setPreviewHTML] = useState('')
@@ -470,19 +471,17 @@ export default function WikiEditor({ page }: WikiEditorProps) {
       const current = contentRef.current
       if (isDirtyRef.current && current !== lastSavedContentRef.current) {
         const blob = new Blob([JSON.stringify({ content: current })], { type: 'application/json' })
-        const token = localStorage.getItem('auth_token')
         const API_BASE_FOR_SAVE = import.meta.env.VITE_API_URL || (import.meta.env.PROD ? '' : 'http://localhost:8080')
+        // sendBeacon doesn't support custom headers (no auth), so this is best-effort.
+        // The interval save is the primary mechanism.
         navigator.sendBeacon(
           `${API_BASE_FOR_SAVE}/api/wiki/pages/${page.id}/content`,
           blob
         )
-        // Note: sendBeacon doesn't support custom headers (no auth), so this is best-effort.
-        // The interval save is the primary mechanism.
-        void token // suppress unused warning
       }
     }
-    window.addEventListener('beforeunload', handler)
-    return () => window.removeEventListener('beforeunload', handler)
+    globalThis.addEventListener('beforeunload', handler)
+    return () => globalThis.removeEventListener('beforeunload', handler)
   }, [page.id])
 
   // ── Yjs setup ────────────────────────────────────────────────
@@ -672,7 +671,6 @@ export default function WikiEditor({ page }: WikiEditorProps) {
     if (e.key === 'Escape' && isFullscreen) {
       e.preventDefault()
       setIsFullscreen(false)
-      return
     }
   }, [content, syncToYjs, isFullscreen])
 
@@ -747,8 +745,8 @@ export default function WikiEditor({ page }: WikiEditorProps) {
         setIsFullscreen(false)
       }
     }
-    window.addEventListener('keydown', handler)
-    return () => window.removeEventListener('keydown', handler)
+    globalThis.addEventListener('keydown', handler)
+    return () => globalThis.removeEventListener('keydown', handler)
   }, [isFullscreen])
 
   // ── Fullscreen divider resize ────────────────────────────────
@@ -775,7 +773,7 @@ export default function WikiEditor({ page }: WikiEditorProps) {
 
   const insertImageMarkdown = (alt: string, url: string, caption?: string, size?: string) => {
     const textarea = isFullscreen ? fsTextareaRef.current : textareaRef.current
-    const escHtml = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;')
+    const escHtml = (s: string) => s.replaceAll(/&/g, '&amp;').replaceAll(/</g, '&lt;').replaceAll(/>/g, '&gt;').replaceAll(/"/g, '&quot;')
     const sz = size || 'm'
     const sizeStyles: Record<string, string> = {
       s: 'max-width:50%;height:auto;',
@@ -787,7 +785,8 @@ export default function WikiEditor({ page }: WikiEditorProps) {
     if (sz === 'l' && !caption) {
       markup = `![${alt}](${url})`
     } else {
-      markup = `<figure style="text-align:center;margin:1.5rem 0"><a href="${url}" data-lightbox="article-images" data-title="${escHtml(alt)}"><img src="${url}" alt="${escHtml(alt)}" style="${imgStyle}"/></a>${caption ? `<figcaption>${escHtml(caption)}</figcaption>` : ''}</figure>\n`
+      const capHtml = caption ? '<figcaption>' + escHtml(caption) + '</figcaption>' : ''
+      markup = `<figure style="text-align:center;margin:1.5rem 0"><a href="${url}" data-lightbox="article-images" data-title="${escHtml(alt)}"><img src="${url}" alt="${escHtml(alt)}" style="${imgStyle}"/></a>${capHtml}</figure>\n`
     }
 
     if (textarea) {
@@ -862,7 +861,7 @@ export default function WikiEditor({ page }: WikiEditorProps) {
         if (!uploadRes.ok) throw new Error('Upload failed')
         const uploadData = await uploadRes.json()
 
-        const altName = file.name.replace(/\.[^.]+$/, '').replace(/[-_]/g, ' ')
+        const altName = file.name.replace(/\.[^.]+$/, '').replaceAll(/[-_]/g, ' ')
 
         await apiClient.createWikiPageAttachment(page.id, {
           filename: file.name,
@@ -884,7 +883,7 @@ export default function WikiEditor({ page }: WikiEditorProps) {
         isDirtyRef.current = true
       }
     } catch (err) {
-      // drop upload failed — error state handled by UI
+      console.error('Drop upload failed:', err)
     } finally {
       setIsDropUploading(false)
     }
@@ -905,21 +904,24 @@ export default function WikiEditor({ page }: WikiEditorProps) {
   const handleEditImg = useCallback(() => {
     const images: Array<{ html: string; url: string; alt: string; caption: string; index: number }> = []
 
-    // Match <figure> blocks with <img>
-    const figureRegex = /<figure[^>]*>[\s\S]*?<img\s[^>]*src="([^"]+)"[^>]*?(?:alt="([^"]*)")?[\s\S]*?(?:<figcaption>([\s\S]*?)<\/figcaption>)?[\s\S]*?<\/figure>/g
+    // Match <figure> blocks with <img> (split into simpler regexes to reduce complexity)
+    const figureRegex = /<figure[^>]*>[\s\S]*?<\/figure>/g
+    const imgSrcRegex = /src="([^"]+)"/
+    const imgAltRegex = /alt="([^"]*)"/
+    const captionRegex = /<figcaption>([\s\S]*?)<\/figcaption>/
     let match
     while ((match = figureRegex.exec(content)) !== null) {
-      // Also try to extract alt from img if it wasn't in the first capture
-      let alt = match[2] || ''
-      if (!alt) {
-        const altMatch = match[0].match(/alt="([^"]*)"/)
-        if (altMatch) alt = altMatch[1]
-      }
+      const figHtml = match[0]
+      const srcMatch = imgSrcRegex.exec(figHtml)
+      if (!srcMatch) continue
+      const altMatch = imgAltRegex.exec(figHtml)
+      const capMatch = captionRegex.exec(figHtml)
+      const unesc = (s: string) => s.replaceAll(/&amp;/g, '&').replaceAll(/&lt;/g, '<').replaceAll(/&gt;/g, '>').replaceAll(/&quot;/g, '"')
       images.push({
-        html: match[0],
-        url: match[1],
-        alt: alt.replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"'),
-        caption: (match[3] || '').replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"'),
+        html: figHtml,
+        url: srcMatch[1],
+        alt: unesc(altMatch?.[1] || ''),
+        caption: unesc(capMatch?.[1] || ''),
         index: match.index,
       })
     }
@@ -969,7 +971,7 @@ export default function WikiEditor({ page }: WikiEditorProps) {
   const saveEditImg = useCallback(() => {
     if (!selectedEditImg) return
 
-    const escHtml = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;')
+    const escHtml = (s: string) => s.replaceAll(/&/g, '&amp;').replaceAll(/</g, '&lt;').replaceAll(/>/g, '&gt;').replaceAll(/"/g, '&quot;')
     const sizeStyles: Record<string, string> = {
       s: 'max-width:50%;height:auto;',
       m: 'max-width:75%;height:auto;',
@@ -983,7 +985,8 @@ export default function WikiEditor({ page }: WikiEditorProps) {
       newMarkup = `![${editAlt}](${selectedEditImg.url})`
     } else {
       // Use <figure>
-      newMarkup = `<figure style="text-align:center;margin:1.5rem 0"><a href="${selectedEditImg.url}" data-lightbox="article-images" data-title="${escHtml(editAlt)}"><img src="${selectedEditImg.url}" alt="${escHtml(editAlt)}" style="${imgStyle}"/></a>${editCaption ? `<figcaption>${escHtml(editCaption)}</figcaption>` : ''}</figure>`
+      const capHtml = editCaption ? '<figcaption>' + escHtml(editCaption) + '</figcaption>' : ''
+      newMarkup = `<figure style="text-align:center;margin:1.5rem 0"><a href="${selectedEditImg.url}" data-lightbox="article-images" data-title="${escHtml(editAlt)}"><img src="${selectedEditImg.url}" alt="${escHtml(editAlt)}" style="${imgStyle}"/></a>${capHtml}</figure>`
     }
 
     const newContent = content.replace(selectedEditImg.html, newMarkup)
@@ -1065,13 +1068,13 @@ export default function WikiEditor({ page }: WikiEditorProps) {
     try {
       const res = await fetch('/draw/api/new', { method: 'POST' })
       const data = await res.json()
-      if (data && data.id) {
+      if (data?.id) {
         const editUrl = data.edit_url || `/draw/${data.id}/edit`
         window.open(editUrl, '_blank')
         loadDrawings()
       }
     } catch (err) {
-      // drawing creation failed — silently swallowed
+      console.error('Failed to create drawing:', err)
     }
   }, [loadDrawings])
 
@@ -1087,7 +1090,7 @@ export default function WikiEditor({ page }: WikiEditorProps) {
 
   // ── Toolbar JSX ──────────────────────────────────────────────
 
-  const Toolbar = ({ compact }: { compact?: boolean }) => (
+  const renderToolbar = (compact?: boolean) => (
     <div className={`flex items-center gap-1 ${compact ? '' : 'flex-wrap'}`}>
       {toolbarActions.map((action) => (
         <button
@@ -1144,6 +1147,34 @@ export default function WikiEditor({ page }: WikiEditorProps) {
     </div>
   )
 
+  // ── Save status helpers ─────────────────────────────────────
+  const getSaveStatusColor = () => {
+    switch (saveStatus) {
+      case 'saving': return 'bg-yellow-500'
+      case 'saved': return 'bg-green-500'
+      case 'error': return 'bg-red-500'
+      default: return getSyncStatusColor()
+    }
+  }
+
+  const getSaveStatusText = () => {
+    switch (saveStatus) {
+      case 'saving': return 'Saving...'
+      case 'saved': return 'Saved'
+      case 'error': return 'Save failed'
+      default: return autoSaveEnabled ? 'Autosave on' : 'Autosave off'
+    }
+  }
+
+  const getSaveStatusTextColor = () => {
+    switch (saveStatus) {
+      case 'saving': return 'text-yellow-400'
+      case 'saved': return 'text-green-400'
+      case 'error': return 'text-red-400'
+      default: return 'text-dark-text-tertiary'
+    }
+  }
+
   // ── Fullscreen overlay ───────────────────────────────────────
 
   if (isFullscreen) {
@@ -1156,21 +1187,13 @@ export default function WikiEditor({ page }: WikiEditorProps) {
               <span className="text-sm font-semibold text-dark-text-primary truncate max-w-xs">
                 {page.title}
               </span>
-              <Toolbar compact />
+              {renderToolbar(true)}
             </div>
             <div className="flex items-center gap-3">
               <div className="flex items-center gap-2">
-                <div className={`w-2 h-2 rounded-full ${
-                  saveStatus === 'saving' ? 'bg-yellow-500' :
-                  saveStatus === 'saved' ? 'bg-green-500' :
-                  saveStatus === 'error' ? 'bg-red-500' :
-                  getSyncStatusColor()
-                }`} />
+                <div className={`w-2 h-2 rounded-full ${getSaveStatusColor()}`} />
                 <span className="text-xs text-dark-text-tertiary">
-                  {saveStatus === 'saving' ? 'Saving...' :
-                   saveStatus === 'saved' ? 'Saved' :
-                   saveStatus === 'error' ? 'Save failed' :
-                   autoSaveEnabled ? 'Autosave on' : 'Autosave off'}
+                  {getSaveStatusText()}
                 </span>
               </div>
               <button
@@ -1313,17 +1336,9 @@ export default function WikiEditor({ page }: WikiEditorProps) {
             <h1 className="text-2xl font-semibold text-dark-text-primary">{page.title}</h1>
             <div className="flex items-center gap-3 mt-2">
               <div className="flex items-center gap-2">
-                <div className={`w-2 h-2 rounded-full ${
-                  saveStatus === 'saving' ? 'bg-yellow-500' :
-                  saveStatus === 'saved' ? 'bg-green-500' :
-                  saveStatus === 'error' ? 'bg-red-500' :
-                  getSyncStatusColor()
-                }`} />
+                <div className={`w-2 h-2 rounded-full ${getSaveStatusColor()}`} />
                 <span className="text-sm text-dark-text-tertiary">
-                  {saveStatus === 'saving' ? 'Saving...' :
-                   saveStatus === 'saved' ? 'Saved' :
-                   saveStatus === 'error' ? 'Save failed' :
-                   autoSaveEnabled ? 'Autosave on' : 'Autosave off'}
+                  {getSaveStatusText()}
                 </span>
               </div>
               <button
@@ -1385,7 +1400,7 @@ export default function WikiEditor({ page }: WikiEditorProps) {
       {/* Toolbar (edit mode only) */}
       {!isPreview && (
         <div className="border-b border-dark-border-subtle bg-dark-bg-secondary px-6 py-2">
-          <Toolbar />
+          {renderToolbar()}
         </div>
       )}
 
@@ -1496,16 +1511,8 @@ export default function WikiEditor({ page }: WikiEditorProps) {
           <div className="flex items-center gap-4 text-xs text-dark-text-tertiary">
             <span>Markdown supported</span>
             <span>&bull;</span>
-            <span className={
-              saveStatus === 'saving' ? 'text-yellow-400' :
-              saveStatus === 'saved' ? 'text-green-400' :
-              saveStatus === 'error' ? 'text-red-400' :
-              ''
-            }>
-              {saveStatus === 'saving' ? 'Saving...' :
-               saveStatus === 'saved' ? 'Saved' :
-               saveStatus === 'error' ? 'Save failed' :
-               autoSaveEnabled ? 'Autosave on' : 'Autosave off'}
+            <span className={getSaveStatusTextColor()}>
+              {getSaveStatusText()}
             </span>
             <span>&bull;</span>
             <span>Tab to indent</span>
@@ -1528,12 +1535,17 @@ export default function WikiEditor({ page }: WikiEditorProps) {
       {/* Edit Image Modal */}
       {editImgList && (
         <div
+          role="button"
+          tabIndex={0}
           className="fixed inset-0 z-[60] flex items-center justify-center bg-black/60 backdrop-blur-sm"
           onClick={() => { setEditImgList(null); setSelectedEditImg(null) }}
+          onKeyDown={e => { if (e.key === 'Escape' || e.key === 'Enter') { setEditImgList(null); setSelectedEditImg(null) } }}
         >
           <div
+            role="dialog"
             className="w-full max-w-2xl mx-4 bg-dark-bg-secondary rounded-xl border border-dark-border-subtle shadow-2xl overflow-hidden"
             onClick={e => e.stopPropagation()}
+            onKeyDown={e => e.stopPropagation()}
           >
             {/* Header */}
             <div className="flex items-center justify-between px-6 py-4 border-b border-dark-border-subtle">
@@ -1548,14 +1560,14 @@ export default function WikiEditor({ page }: WikiEditorProps) {
               </button>
             </div>
 
-            {!selectedEditImg ? (
+            {selectedEditImg ? null : (
               /* Image grid picker */
               <div className="p-6">
                 <p className="text-sm text-dark-text-secondary mb-4">Select an image to edit:</p>
                 <div className="grid grid-cols-3 gap-3 max-h-80 overflow-y-auto">
-                  {editImgList.map((img, i) => (
+                  {editImgList.map((img) => (
                     <button
-                      key={i}
+                      key={img.url}
                       onClick={() => selectImgForEdit(img)}
                       className="group relative aspect-square rounded-lg overflow-hidden border-2 border-dark-border-subtle hover:border-primary-500 transition-colors bg-dark-bg-tertiary"
                     >
@@ -1574,7 +1586,8 @@ export default function WikiEditor({ page }: WikiEditorProps) {
                   ))}
                 </div>
               </div>
-            ) : (
+            )}
+            {selectedEditImg && (
               /* Edit form */
               <div className="p-6">
                 <div className="flex gap-4">
@@ -1589,8 +1602,9 @@ export default function WikiEditor({ page }: WikiEditorProps) {
                   {/* Fields */}
                   <div className="flex-1 space-y-4">
                     <div>
-                      <label className="block text-xs font-medium text-dark-text-secondary mb-1">Alt text</label>
+                      <label htmlFor="edit-img-alt" className="block text-xs font-medium text-dark-text-secondary mb-1">Alt text</label>
                       <input
+                        id="edit-img-alt"
                         type="text"
                         value={editAlt}
                         onChange={e => setEditAlt(e.target.value)}
@@ -1599,8 +1613,9 @@ export default function WikiEditor({ page }: WikiEditorProps) {
                       />
                     </div>
                     <div>
-                      <label className="block text-xs font-medium text-dark-text-secondary mb-1">Caption</label>
+                      <label htmlFor="edit-img-caption" className="block text-xs font-medium text-dark-text-secondary mb-1">Caption</label>
                       <input
+                        id="edit-img-caption"
                         type="text"
                         value={editCaption}
                         onChange={e => setEditCaption(e.target.value)}
@@ -1609,7 +1624,7 @@ export default function WikiEditor({ page }: WikiEditorProps) {
                       />
                     </div>
                     <div>
-                      <label className="block text-xs font-medium text-dark-text-secondary mb-1">Size</label>
+                      <label id="edit-img-size-label" className="block text-xs font-medium text-dark-text-secondary mb-1">Size</label>
                       <div className="flex gap-1.5">
                         {([['s', 'Small'], ['m', 'Medium'], ['l', 'Large']] as const).map(([val, label]) => (
                           <button
@@ -1685,13 +1700,13 @@ export default function WikiEditor({ page }: WikiEditorProps) {
 
 // ── DrawCard sub-component ───────────────────────────────────────
 
-function DrawCard({ drawing, isUsed, onInsert, onRename, onDelete }: {
+function DrawCard({ drawing, isUsed, onInsert, onRename, onDelete }: Readonly<{
   drawing: DrawItem
   isUsed: boolean
   onInsert: (id: string, size: string, zoom: string) => void
   onRename: (id: string, title: string) => void
   onDelete: (id: string) => void
-}) {
+}>) {
   const [editing, setEditing] = useState(false)
   const [title, setTitle] = useState(drawing.title || 'Untitled')
   const [size, setSize] = useState('m')
@@ -1758,7 +1773,7 @@ function DrawCard({ drawing, isUsed, onInsert, onRename, onDelete }: {
         )}
       </div>
       <span className="text-xs text-dark-text-tertiary">{formattedDate}</span>
-      <div className="flex gap-1.5 mt-1 items-center" onClick={e => e.stopPropagation()}>
+      <div className="flex gap-1.5 mt-1 items-center" role="toolbar" onClick={e => e.stopPropagation()} onKeyDown={e => e.stopPropagation()}>
         <SearchSelect
           variant="inline"
           value={size}
@@ -1807,7 +1822,7 @@ function DrawCard({ drawing, isUsed, onInsert, onRename, onDelete }: {
 
 // ── DrawBrowserModal ─────────────────────────────────────────────
 
-function DrawBrowserModal({ drawings, loading, editorContent, onInsert, onRename, onDelete, onDeleteUnused, onNew, onClose }: {
+function DrawBrowserModal({ drawings, loading, editorContent, onInsert, onRename, onDelete, onDeleteUnused, onNew, onClose }: Readonly<{
   drawings: DrawItem[]
   loading: boolean
   editorContent: string
@@ -1817,7 +1832,7 @@ function DrawBrowserModal({ drawings, loading, editorContent, onInsert, onRename
   onDeleteUnused: (ids: string[]) => void
   onNew: () => void
   onClose: () => void
-}) {
+}>) {
   const [confirmAction, setConfirmAction] = useState<{ message: string; onConfirm: () => void } | null>(null)
 
   const usedIds = new Set<string>()
@@ -1844,12 +1859,17 @@ function DrawBrowserModal({ drawings, loading, editorContent, onInsert, onRename
 
   return (
     <div
+      role="button"
+      tabIndex={0}
       className="fixed inset-0 z-[60] flex items-center justify-center bg-black/60 backdrop-blur-sm"
       onClick={onClose}
+      onKeyDown={e => { if (e.key === 'Escape' || e.key === 'Enter') onClose() }}
     >
       <div
+        role="dialog"
         className="relative w-full max-w-2xl mx-4 bg-dark-bg-secondary rounded-xl border border-dark-border-subtle shadow-2xl overflow-hidden flex flex-col max-h-[80vh]"
         onClick={e => e.stopPropagation()}
+        onKeyDown={e => e.stopPropagation()}
       >
         {/* Header */}
         <div className="flex items-center justify-between px-6 py-4 border-b border-dark-border-subtle">
@@ -1910,12 +1930,17 @@ function DrawBrowserModal({ drawings, loading, editorContent, onInsert, onRename
         {/* Confirmation dialog overlay */}
         {confirmAction && (
           <div
+            role="button"
+            tabIndex={0}
             className="absolute inset-0 z-10 flex items-center justify-center bg-black/45 backdrop-blur-sm rounded-xl"
             onClick={() => setConfirmAction(null)}
+            onKeyDown={e => { if (e.key === 'Escape' || e.key === 'Enter') setConfirmAction(null) }}
           >
             <div
+              role="dialog"
               className="bg-dark-bg-secondary rounded-xl border border-dark-border-subtle shadow-2xl p-6 max-w-[340px] text-center"
               onClick={e => e.stopPropagation()}
+              onKeyDown={e => e.stopPropagation()}
             >
               <p className="text-sm font-medium text-dark-text-primary mb-4">{confirmAction.message}</p>
               <div className="flex gap-2 justify-center">
@@ -1955,12 +1980,17 @@ function EditDrawModal({ draws, selectedDraw, editSize, editZoom, onSelect, onSi
 }) {
   return (
     <div
+      role="button"
+      tabIndex={0}
       className="fixed inset-0 z-[60] flex items-center justify-center bg-black/60 backdrop-blur-sm"
       onClick={onClose}
+      onKeyDown={e => { if (e.key === 'Escape' || e.key === 'Enter') onClose() }}
     >
       <div
+        role="dialog"
         className="w-full max-w-lg mx-4 bg-dark-bg-secondary rounded-xl border border-dark-border-subtle shadow-2xl overflow-hidden"
         onClick={e => e.stopPropagation()}
+        onKeyDown={e => e.stopPropagation()}
       >
         {/* Header */}
         <div className="flex items-center justify-between px-6 py-4 border-b border-dark-border-subtle">
@@ -1975,14 +2005,14 @@ function EditDrawModal({ draws, selectedDraw, editSize, editZoom, onSelect, onSi
           </button>
         </div>
 
-        {!selectedDraw ? (
+        {selectedDraw ? null : (
           /* Draw shortcode list */
           <div className="p-6">
             <p className="text-sm text-dark-text-secondary mb-4">Select a draw shortcode to edit:</p>
             <div className="space-y-2 max-h-80 overflow-y-auto">
-              {draws.map((draw, i) => (
+              {draws.map((draw) => (
                 <button
-                  key={i}
+                  key={draw.shortcode}
                   onClick={() => onSelect(draw)}
                   className="w-full text-left px-4 py-3 rounded-lg border border-dark-border-subtle hover:border-primary-500/50 hover:bg-dark-bg-tertiary/50 transition-colors"
                 >
@@ -1994,7 +2024,8 @@ function EditDrawModal({ draws, selectedDraw, editSize, editZoom, onSelect, onSi
               ))}
             </div>
           </div>
-        ) : (
+        )}
+        {selectedDraw && (
           /* Edit form */
           <div className="p-6">
             <div className="mb-4 px-3 py-2 rounded-lg bg-dark-bg-tertiary border border-dark-border-subtle">
@@ -2004,8 +2035,8 @@ function EditDrawModal({ draws, selectedDraw, editSize, editZoom, onSelect, onSi
             <div className="space-y-4">
               {/* Size */}
               <div>
-                <label className="block text-xs font-medium text-dark-text-secondary mb-1.5">Size</label>
-                <div className="flex gap-1.5">
+                <span id="draw-size-label" className="block text-xs font-medium text-dark-text-secondary mb-1.5">Size</span>
+                <div className="flex gap-1.5" role="group" aria-labelledby="draw-size-label">
                   {([['s', 'Small'], ['m', 'Medium'], ['l', 'Large']] as const).map(([val, label]) => (
                     <button
                       key={val}
@@ -2025,8 +2056,8 @@ function EditDrawModal({ draws, selectedDraw, editSize, editZoom, onSelect, onSi
 
               {/* Zoom */}
               <div>
-                <label className="block text-xs font-medium text-dark-text-secondary mb-1.5">Zoom</label>
-                <div className="flex gap-1.5 flex-wrap">
+                <span id="draw-zoom-label" className="block text-xs font-medium text-dark-text-secondary mb-1.5">Zoom</span>
+                <div className="flex gap-1.5 flex-wrap" role="group" aria-labelledby="draw-zoom-label">
                   {(['fit', '50%', '100%', '150%', '200%'] as const).map((val) => (
                     <button
                       key={val}

@@ -530,16 +530,19 @@ function useAutoSave(
   }, [pageId, isDirtyRef, contentRef, lastSavedContentRef])
 }
 
-function useImageDrop(
-  pageId: number,
-  isFullscreen: boolean,
-  content: string,
-  setContent: (c: string) => void,
-  syncToYjs: (c: string) => void,
-  isDirtyRef: React.MutableRefObject<boolean>,
-  textareaRef: React.RefObject<HTMLTextAreaElement | null>,
-  fsTextareaRef: React.RefObject<HTMLTextAreaElement | null>,
-) {
+interface ImageDropOpts {
+  pageId: number
+  isFullscreen: boolean
+  content: string
+  setContent: (c: string) => void
+  syncToYjs: (c: string) => void
+  isDirtyRef: React.MutableRefObject<boolean>
+  textareaRef: React.RefObject<HTMLTextAreaElement | null>
+  fsTextareaRef: React.RefObject<HTMLTextAreaElement | null>
+}
+
+function useImageDrop(opts: ImageDropOpts) {
+  const { pageId, isFullscreen, content, setContent, syncToYjs, isDirtyRef, textareaRef, fsTextareaRef } = opts
   const dragCounterRef = useRef(0)
   const [isDragOver, setIsDragOver] = useState(false)
   const [isDropUploading, setIsDropUploading] = useState(false)
@@ -596,6 +599,161 @@ function useImageDrop(
   return { isDragOver, isDropUploading, handleDragEnter, handleDragOver, handleDragLeave, handleDrop }
 }
 
+// ── Draw browser hook ─────────────────────────────────────────────
+
+interface ContentOpts {
+  content: string
+  setContent: (c: string) => void
+  syncToYjs: (c: string) => void
+  isDirtyRef: React.MutableRefObject<boolean>
+  isFullscreen: boolean
+  textareaRef: React.RefObject<HTMLTextAreaElement | null>
+  fsTextareaRef: React.RefObject<HTMLTextAreaElement | null>
+}
+
+function useDrawBrowser(opts: ContentOpts) {
+  const { content, setContent, syncToYjs, isDirtyRef, isFullscreen, textareaRef, fsTextareaRef } = opts
+
+  const [showDrawBrowser, setShowDrawBrowser] = useState(false)
+  const [drawList, setDrawList] = useState<DrawItem[]>([])
+  const [drawLoading, setDrawLoading] = useState(false)
+  const [editDrawList, setEditDrawList] = useState<DrawInfo[] | null>(null)
+  const [selectedEditDraw, setSelectedEditDraw] = useState<DrawInfo | null>(null)
+  const [editDrawSize, setEditDrawSize] = useState('m')
+  const [editDrawZoom, setEditDrawZoom] = useState('fit')
+
+  const loadDrawings = useCallback(async () => {
+    setDrawLoading(true)
+    const drawings = await fetchDrawings()
+    setDrawList(drawings)
+    setDrawLoading(false)
+  }, [])
+
+  const handleDraw = useCallback(() => {
+    setShowDrawBrowser(true)
+    loadDrawings()
+  }, [loadDrawings])
+
+  const handleDrawInsert = useCallback((id: string, size: string, zoom: string) => {
+    const textarea = isFullscreen ? fsTextareaRef.current : textareaRef.current
+    const markup = '\n' + buildDrawShortcode(id, size, zoom) + '\n'
+    const { newContent, focusPos } = insertMarkupAtCursor(textarea, content, markup)
+    setContent(newContent)
+    syncToYjs(newContent)
+    isDirtyRef.current = true
+    if (focusPos !== null && textarea) {
+      setTimeout(() => { textarea.focus(); textarea.selectionStart = textarea.selectionEnd = focusPos }, 0)
+    }
+    setShowDrawBrowser(false)
+  }, [isFullscreen, content, setContent, syncToYjs, isDirtyRef, textareaRef, fsTextareaRef])
+
+  const handleDrawRename = useCallback(async (id: string, title: string) => {
+    const ok = await renameDrawing(id, title)
+    if (ok) setDrawList(prev => prev.map(d => d.id === id ? { ...d, title } : d))
+  }, [])
+
+  const handleDrawDelete = useCallback(async (id: string) => {
+    const ok = await deleteDrawing(id)
+    if (!ok) { alert('Failed to delete drawing'); return }
+    setDrawList(prev => prev.filter(d => d.id !== id))
+  }, [])
+
+  const handleDrawNew = useCallback(async () => {
+    const created = await createDrawing()
+    if (created) loadDrawings()
+  }, [loadDrawings])
+
+  const handleDrawDeleteUnused = useCallback(async (unusedIds: string[]) => {
+    await deleteDrawings(unusedIds)
+    loadDrawings()
+  }, [loadDrawings])
+
+  const handleEditDraw = useCallback(() => {
+    const draws = findDrawsInContent(content)
+    if (draws.length === 0) {
+      alert('No draw shortcodes found in content')
+      return
+    }
+    setEditDrawList(draws)
+    setSelectedEditDraw(null)
+  }, [content])
+
+  const selectDrawForEdit = (draw: DrawInfo) => {
+    setSelectedEditDraw(draw)
+    setEditDrawSize(draw.size)
+    setEditDrawZoom(draw.zoom)
+  }
+
+  const saveEditDraw = useCallback(() => {
+    if (!selectedEditDraw) return
+    const newShortcode = buildDrawShortcode(selectedEditDraw.id, editDrawSize, editDrawZoom)
+    const newContent = content.replace(selectedEditDraw.shortcode, newShortcode)
+    setContent(newContent)
+    syncToYjs(newContent)
+    isDirtyRef.current = true
+    setEditDrawList(null)
+    setSelectedEditDraw(null)
+  }, [selectedEditDraw, editDrawSize, editDrawZoom, content, setContent, syncToYjs, isDirtyRef])
+
+  return {
+    showDrawBrowser, drawList, drawLoading,
+    editDrawList, selectedEditDraw, editDrawSize, editDrawZoom,
+    handleDraw, handleDrawInsert, handleDrawRename, handleDrawDelete,
+    handleDrawNew, handleDrawDeleteUnused, handleEditDraw, selectDrawForEdit, saveEditDraw,
+    setEditDrawSize, setEditDrawZoom,
+    closeDrawBrowser: useCallback(() => setShowDrawBrowser(false), []),
+    closeEditDraw: useCallback(() => { setEditDrawList(null); setSelectedEditDraw(null) }, []),
+  }
+}
+
+// ── Image edit hook ──────────────────────────────────────────────
+
+function useImageEdit(opts: Pick<ContentOpts, 'content' | 'setContent' | 'syncToYjs' | 'isDirtyRef'>) {
+  const { content, setContent, syncToYjs, isDirtyRef } = opts
+
+  const [editImgList, setEditImgList] = useState<ImageInfo[] | null>(null)
+  const [selectedEditImg, setSelectedEditImg] = useState<ImageInfo | null>(null)
+  const [editAlt, setEditAlt] = useState('')
+  const [editCaption, setEditCaption] = useState('')
+  const [editSize, setEditSize] = useState('m')
+
+  const handleEditImg = useCallback(() => {
+    const images = findImagesInContent(content)
+    if (images.length === 0) {
+      alert('No images found in content')
+      return
+    }
+    setEditImgList(images)
+    setSelectedEditImg(null)
+  }, [content])
+
+  const selectImgForEdit = (img: ImageInfo) => {
+    setSelectedEditImg(img)
+    setEditAlt(img.alt)
+    setEditCaption(img.caption)
+    setEditSize(detectImageSize(img.html))
+  }
+
+  const saveEditImg = useCallback(() => {
+    if (!selectedEditImg) return
+    const newMarkup = buildImageMarkup(selectedEditImg.url, editAlt, editCaption, editSize)
+    const newContent = content.replace(selectedEditImg.html, newMarkup)
+    setContent(newContent)
+    syncToYjs(newContent)
+    isDirtyRef.current = true
+    setEditImgList(null)
+    setSelectedEditImg(null)
+  }, [selectedEditImg, editAlt, editCaption, editSize, content, setContent, syncToYjs, isDirtyRef])
+
+  return {
+    editImgList, selectedEditImg, editAlt, editCaption, editSize,
+    handleEditImg, selectImgForEdit, saveEditImg,
+    setEditAlt, setEditCaption, setEditSize,
+    deselectImg: useCallback(() => setSelectedEditImg(null), []),
+    closeEditImg: useCallback(() => { setEditImgList(null); setSelectedEditImg(null) }, []),
+  }
+}
+
 // ── Component ────────────────────────────────────────────────────
 
 export default function WikiEditor({ page }: Readonly<WikiEditorProps>) {
@@ -624,18 +782,6 @@ export default function WikiEditor({ page }: Readonly<WikiEditorProps>) {
   const previewRef = useRef<HTMLDivElement>(null)
   const fsPreviewRef = useRef<HTMLDivElement>(null)
   const [fsSplitPct, setFsSplitPct] = useState(50)
-  const [editImgList, setEditImgList] = useState<ImageInfo[] | null>(null)
-  const [selectedEditImg, setSelectedEditImg] = useState<ImageInfo | null>(null)
-  const [editAlt, setEditAlt] = useState('')
-  const [editCaption, setEditCaption] = useState('')
-  const [editSize, setEditSize] = useState('m')
-  const [showDrawBrowser, setShowDrawBrowser] = useState(false)
-  const [drawList, setDrawList] = useState<DrawItem[]>([])
-  const [drawLoading, setDrawLoading] = useState(false)
-  const [editDrawList, setEditDrawList] = useState<DrawInfo[] | null>(null)
-  const [selectedEditDraw, setSelectedEditDraw] = useState<DrawInfo | null>(null)
-  const [editDrawSize, setEditDrawSize] = useState('m')
-  const [editDrawZoom, setEditDrawZoom] = useState('fit')
 
   // ── Keep contentRef in sync ──────────────────────────────────
   useEffect(() => { contentRef.current = content }, [content])
@@ -852,35 +998,6 @@ export default function WikiEditor({ page }: Readonly<WikiEditorProps>) {
     if (drawId) window.open(`/draw/${drawId}/edit`, '_blank')
   }, [])
 
-  // ── Edit existing draw shortcode ─────────────────────────────
-
-  const handleEditDraw = useCallback(() => {
-    const draws = findDrawsInContent(content)
-    if (draws.length === 0) {
-      alert('No draw shortcodes found in content')
-      return
-    }
-    setEditDrawList(draws)
-    setSelectedEditDraw(null)
-  }, [content])
-
-  const selectDrawForEdit = (draw: DrawInfo) => {
-    setSelectedEditDraw(draw)
-    setEditDrawSize(draw.size)
-    setEditDrawZoom(draw.zoom)
-  }
-
-  const saveEditDraw = useCallback(() => {
-    if (!selectedEditDraw) return
-    const newShortcode = buildDrawShortcode(selectedEditDraw.id, editDrawSize, editDrawZoom)
-    const newContent = content.replace(selectedEditDraw.shortcode, newShortcode)
-    setContent(newContent)
-    syncToYjs(newContent)
-    isDirtyRef.current = true
-    setEditDrawList(null)
-    setSelectedEditDraw(null)
-  }, [selectedEditDraw, editDrawSize, editDrawZoom, content, syncToYjs])
-
   useGlobalKeyboard(isFullscreen, setIsFullscreen)
 
   // ── Fullscreen divider resize ────────────────────────────────
@@ -919,87 +1036,21 @@ export default function WikiEditor({ page }: Readonly<WikiEditorProps>) {
   }
 
   const { isDragOver, isDropUploading, handleDragEnter, handleDragOver, handleDragLeave, handleDrop } =
-    useImageDrop(page.id, isFullscreen, content, setContent, syncToYjs, isDirtyRef, textareaRef, fsTextareaRef)
+    useImageDrop({ pageId: page.id, isFullscreen, content, setContent, syncToYjs, isDirtyRef, textareaRef, fsTextareaRef })
 
-  // ── Edit existing image ─────────────────────────────────────
+  const {
+    editImgList, selectedEditImg, editAlt, editCaption, editSize,
+    handleEditImg, selectImgForEdit, saveEditImg,
+    setEditAlt, setEditCaption, setEditSize, deselectImg, closeEditImg,
+  } = useImageEdit({ content, setContent, syncToYjs, isDirtyRef })
 
-  const handleEditImg = useCallback(() => {
-    const images = findImagesInContent(content)
-    if (images.length === 0) {
-      alert('No images found in content')
-      return
-    }
-    setEditImgList(images)
-    setSelectedEditImg(null)
-  }, [content])
-
-  const selectImgForEdit = (img: ImageInfo) => {
-    setSelectedEditImg(img)
-    setEditAlt(img.alt)
-    setEditCaption(img.caption)
-    setEditSize(detectImageSize(img.html))
-  }
-
-  const saveEditImg = useCallback(() => {
-    if (!selectedEditImg) return
-
-    const newMarkup = buildImageMarkup(selectedEditImg.url, editAlt, editCaption, editSize)
-
-    const newContent = content.replace(selectedEditImg.html, newMarkup)
-    setContent(newContent)
-    syncToYjs(newContent)
-    isDirtyRef.current = true
-    setEditImgList(null)
-    setSelectedEditImg(null)
-  }, [selectedEditImg, editAlt, editCaption, editSize, content, syncToYjs])
-
-  // ── Draw browser handlers ────────────────────────────────────
-
-  const loadDrawings = useCallback(async () => {
-    setDrawLoading(true)
-    const drawings = await fetchDrawings()
-    setDrawList(drawings)
-    setDrawLoading(false)
-  }, [])
-
-  const handleDraw = useCallback(() => {
-    setShowDrawBrowser(true)
-    loadDrawings()
-  }, [loadDrawings])
-
-  const handleDrawInsert = useCallback((id: string, size: string, zoom: string) => {
-    const textarea = isFullscreen ? fsTextareaRef.current : textareaRef.current
-    const markup = '\n' + buildDrawShortcode(id, size, zoom) + '\n'
-    const { newContent, focusPos } = insertMarkupAtCursor(textarea, content, markup)
-    setContent(newContent)
-    syncToYjs(newContent)
-    isDirtyRef.current = true
-    if (focusPos !== null && textarea) {
-      setTimeout(() => { textarea.focus(); textarea.selectionStart = textarea.selectionEnd = focusPos }, 0)
-    }
-    setShowDrawBrowser(false)
-  }, [isFullscreen, content, syncToYjs])
-
-  const handleDrawRename = useCallback(async (id: string, title: string) => {
-    const ok = await renameDrawing(id, title)
-    if (ok) setDrawList(prev => prev.map(d => d.id === id ? { ...d, title } : d))
-  }, [])
-
-  const handleDrawDelete = useCallback(async (id: string) => {
-    const ok = await deleteDrawing(id)
-    if (!ok) { alert('Failed to delete drawing'); return }
-    setDrawList(prev => prev.filter(d => d.id !== id))
-  }, [])
-
-  const handleDrawNew = useCallback(async () => {
-    const created = await createDrawing()
-    if (created) loadDrawings()
-  }, [loadDrawings])
-
-  const handleDrawDeleteUnused = useCallback(async (unusedIds: string[]) => {
-    await deleteDrawings(unusedIds)
-    loadDrawings()
-  }, [loadDrawings])
+  const {
+    showDrawBrowser, drawList, drawLoading,
+    editDrawList, selectedEditDraw, editDrawSize, editDrawZoom,
+    handleDraw, handleDrawInsert, handleDrawRename, handleDrawDelete,
+    handleDrawNew, handleDrawDeleteUnused, handleEditDraw, selectDrawForEdit, saveEditDraw,
+    setEditDrawSize, setEditDrawZoom, closeDrawBrowser, closeEditDraw,
+  } = useDrawBrowser({ content, setContent, syncToYjs, isDirtyRef, isFullscreen, textareaRef, fsTextareaRef })
 
   // ── Toolbar JSX ──────────────────────────────────────────────
 
@@ -1191,7 +1242,7 @@ export default function WikiEditor({ page }: Readonly<WikiEditorProps>) {
             onDelete={handleDrawDelete}
             onDeleteUnused={handleDrawDeleteUnused}
             onNew={handleDrawNew}
-            onClose={() => setShowDrawBrowser(false)}
+            onClose={closeDrawBrowser}
           />
         )}
 
@@ -1206,7 +1257,7 @@ export default function WikiEditor({ page }: Readonly<WikiEditorProps>) {
             onSizeChange={setEditDrawSize}
             onZoomChange={setEditDrawZoom}
             onSave={saveEditDraw}
-            onClose={() => { setEditDrawList(null); setSelectedEditDraw(null) }}
+            onClose={closeEditDraw}
           />
         )}
       </>
@@ -1430,7 +1481,7 @@ export default function WikiEditor({ page }: Readonly<WikiEditorProps>) {
           <button
             type="button"
             className="absolute inset-0 bg-black/60 backdrop-blur-sm border-0"
-            onClick={() => { setEditImgList(null); setSelectedEditImg(null) }}
+            onClick={closeEditImg}
             aria-label="Close dialog"
           />
           <dialog
@@ -1441,7 +1492,7 @@ export default function WikiEditor({ page }: Readonly<WikiEditorProps>) {
             <div className="flex items-center justify-between px-6 py-4 border-b border-dark-border-subtle">
               <h3 className="text-lg font-semibold text-dark-text-primary">Edit Image</h3>
               <button
-                onClick={() => { setEditImgList(null); setSelectedEditImg(null) }}
+                onClick={closeEditImg}
                 className="text-dark-text-tertiary hover:text-dark-text-primary transition-colors"
               >
                 <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -1537,7 +1588,7 @@ export default function WikiEditor({ page }: Readonly<WikiEditorProps>) {
                 {/* Actions */}
                 <div className="flex items-center justify-end gap-3 mt-6">
                   <button
-                    onClick={() => setSelectedEditImg(null)}
+                    onClick={deselectImg}
                     className="px-4 py-2 rounded-lg text-sm font-medium text-dark-text-secondary hover:text-dark-text-primary transition-colors"
                   >
                     Back
@@ -1566,7 +1617,7 @@ export default function WikiEditor({ page }: Readonly<WikiEditorProps>) {
           onDelete={handleDrawDelete}
           onDeleteUnused={handleDrawDeleteUnused}
           onNew={handleDrawNew}
-          onClose={() => setShowDrawBrowser(false)}
+          onClose={closeDrawBrowser}
         />
       )}
 
@@ -1581,7 +1632,7 @@ export default function WikiEditor({ page }: Readonly<WikiEditorProps>) {
           onSizeChange={setEditDrawSize}
           onZoomChange={setEditDrawZoom}
           onSave={saveEditDraw}
-          onClose={() => { setEditDrawList(null); setSelectedEditDraw(null) }}
+          onClose={closeEditDraw}
         />
       )}
     </div>

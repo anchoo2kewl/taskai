@@ -201,7 +201,7 @@ export interface GitHubUserMatch {
 export interface GitHubStatusMatch {
   key: string
   label: string
-  source: 'issue_state' | 'project_column'
+  source: 'issue_state' | 'project_column' | 'label'
   issue_count: number
   matched_lane_id: number | null
   matched_name: string

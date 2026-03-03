@@ -1270,11 +1270,18 @@ export default function ProjectSettings() {
                           <div className="space-y-2">
                             {(githubPreview.statuses ?? []).map((st: GitHubStatusMatch) => (
                               <div key={st.key} className="flex items-center gap-3 p-3 bg-dark-bg-secondary border border-dark-border-subtle rounded-lg">
-                                <div className={`w-2 h-2 rounded-full flex-shrink-0 ${st.source === 'project_column' ? 'bg-purple-400' : st.key === 'open' ? 'bg-green-400' : 'bg-gray-400'}`} />
+                                <div className={`w-2 h-2 rounded-full flex-shrink-0 ${
+                                  st.source === 'project_column' ? 'bg-purple-400' :
+                                  st.source === 'label' ? 'bg-yellow-400' :
+                                  st.key === 'open' ? 'bg-green-400' : 'bg-gray-400'
+                                }`} />
                                 <div className="flex-1 min-w-0">
                                   <span className="text-sm font-medium text-dark-text-primary">{st.label}</span>
                                   {st.source === 'project_column' && (
                                     <span className="ml-2 text-xs text-dark-text-tertiary">Projects V2</span>
+                                  )}
+                                  {st.source === 'label' && (
+                                    <span className="ml-2 text-xs text-dark-text-tertiary">label</span>
                                   )}
                                   {st.issue_count > 0 && (
                                     <span className="ml-2 text-xs text-dark-text-tertiary">{st.issue_count} issues</span>

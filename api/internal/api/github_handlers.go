@@ -266,14 +266,31 @@ query($owner: String!, $repo: String!) {
 		return nil, fmt.Errorf("graphql: %s", result.Errors[0].Message)
 	}
 	for _, proj := range result.Data.Repository.ProjectsV2.Nodes {
-		for _, field := range proj.Fields.Nodes {
-			if strings.EqualFold(field.Name, "status") && len(field.Options) > 0 {
-				return &ghProjectInfo{
-					ProjectID: proj.ID,
-					FieldID:   field.ID,
-					Options:   field.Options,
-				}, nil
+		// Try to find a status-like single-select field by name first
+		var best *ghProjectField
+		for i := range proj.Fields.Nodes {
+			f := &proj.Fields.Nodes[i]
+			if len(f.Options) == 0 {
+				continue
 			}
+			lower := strings.ToLower(f.Name)
+			if strings.Contains(lower, "status") || strings.Contains(lower, "stage") ||
+				strings.Contains(lower, "state") || strings.Contains(lower, "phase") ||
+				strings.Contains(lower, "column") {
+				best = f
+				break
+			}
+			// Fallback: first single-select field in this project
+			if best == nil {
+				best = f
+			}
+		}
+		if best != nil {
+			return &ghProjectInfo{
+				ProjectID: proj.ID,
+				FieldID:   best.ID,
+				Options:   best.Options,
+			}, nil
 		}
 	}
 	return nil, nil
@@ -423,6 +440,29 @@ func statusLabelForKey(key string) string {
 	default:
 		return key
 	}
+}
+
+// isStatusLikeLabel returns true if a label name looks like a workflow status.
+func isStatusLikeLabel(name string) bool {
+	lower := strings.ToLower(strings.TrimSpace(name))
+	keywords := []string{
+		"progress", "wip", "work in progress",
+		"review", "reviewing",
+		"blocked", "blocking",
+		"ready", "ready for",
+		"doing", "doing now",
+		"waiting", "on hold",
+		"needs", "need",
+		"triage", "triaged",
+		"accepted", "approved", "rejected", "declined",
+		"stale", "help wanted",
+	}
+	for _, kw := range keywords {
+		if strings.Contains(lower, kw) {
+			return true
+		}
+	}
+	return false
 }
 
 // autoMatchStatusToLane finds the best swim lane for a status key:
@@ -689,6 +729,32 @@ func (s *Server) HandleGitHubPreview(w http.ResponseWriter, r *http.Request) {
 		}
 		st := GitHubStatusMatch{Key: key, Label: statusLabelForKey(key), Source: "issue_state", IssueCount: count}
 		if laneID, laneName := autoMatchStatusToLane(key, lanes); laneID != 0 {
+			st.MatchedLaneID = &laneID
+			st.MatchedName = laneName
+		}
+		statuses = append(statuses, st)
+	}
+
+	// Add status-like labels found across issues (source="label")
+	labelCounts := map[string]int{}
+	for _, issue := range allIssues {
+		if issue.PullRequest != nil {
+			continue
+		}
+		for _, lbl := range issue.Labels {
+			if isStatusLikeLabel(lbl.Name) {
+				labelCounts[lbl.Name]++
+			}
+		}
+	}
+	for name, count := range labelCounts {
+		key := "label:" + name
+		if seen[key] {
+			continue
+		}
+		seen[key] = true
+		st := GitHubStatusMatch{Key: key, Label: name, Source: "label", IssueCount: count}
+		if laneID, laneName := autoMatchStatusToLane(name, lanes); laneID != 0 {
 			st.MatchedLaneID = &laneID
 			st.MatchedName = laneName
 		}
@@ -1012,21 +1078,40 @@ func (s *Server) handleGitHubImport(w http.ResponseWriter, r *http.Request, doUp
 
 			description := issue.Body
 
-			// Determine the effective status key for this issue:
-			// Projects V2 column name takes priority, then canonical state key
+			// Resolve swim lane with priority:
+			// 1. GitHub Projects V2 column name
+			// 2. Status-like label
+			// 3. Issue state key (open / closed / closed:not_planned)
+			// 4. Category fallback
 			var swimLaneID *int64
 			ghItemID := ""
-			effectiveKey := issueStatusKey(issue.State, issue.StateReason)
+
+			// 1. Projects V2 column
 			if itemStatus, ok := issueColumnMap[issue.Number]; ok {
 				ghItemID = itemStatus.ItemID
 				if itemStatus.StatusName != "" {
-					effectiveKey = itemStatus.StatusName
+					if laneID, ok := req.StatusAssignments[itemStatus.StatusName]; ok && laneID > 0 {
+						swimLaneID = &laneID
+					}
 				}
 			}
-			// Resolve swim lane from StatusAssignments, fall back to swimLaneByCategory
-			if laneID, ok := req.StatusAssignments[effectiveKey]; ok && laneID > 0 {
-				swimLaneID = &laneID
+			// 2. Status-like labels
+			if swimLaneID == nil {
+				for _, lbl := range issue.Labels {
+					if laneID, ok := req.StatusAssignments["label:"+lbl.Name]; ok && laneID > 0 {
+						swimLaneID = &laneID
+						break
+					}
+				}
 			}
+			// 3. Issue state key
+			if swimLaneID == nil {
+				stateKey := issueStatusKey(issue.State, issue.StateReason)
+				if laneID, ok := req.StatusAssignments[stateKey]; ok && laneID > 0 {
+					swimLaneID = &laneID
+				}
+			}
+			// 4. Category fallback
 			if swimLaneID == nil {
 				if slID, ok := swimLaneByCategory[taskStatus]; ok {
 					swimLaneID = &slID

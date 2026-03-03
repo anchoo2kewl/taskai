@@ -86,6 +86,8 @@ export default function ProjectSettings() {
   const [importSuccess, setImportSuccess] = useState('')
   const [userAssignments, setUserAssignments] = useState<Record<string, number>>({})
   const [columnAssignments, setColumnAssignments] = useState<Record<string, number>>({})
+  const [openLaneId, setOpenLaneId] = useState(0)
+  const [closedLaneId, setClosedLaneId] = useState(0)
   const [pullSprints, setPullSprints] = useState(true)
   const [pullTags, setPullTags] = useState(true)
   const [pullTasks, setPullTasks] = useState(true)
@@ -255,6 +257,9 @@ export default function ProjectSettings() {
         colAssignments[c.name] = c.matched_lane_id ?? 0
       }
       setColumnAssignments(colAssignments)
+      // Initialize open/closed lane defaults from swim lane categories
+      setOpenLaneId(preview.default_open_lane_id ?? 0)
+      setClosedLaneId(preview.default_closed_lane_id ?? 0)
     } catch (error: unknown) {
       setImportError(error instanceof Error ? error.message : 'Failed to fetch GitHub preview')
     } finally {
@@ -274,6 +279,8 @@ export default function ProjectSettings() {
         pull_comments: pullComments,
         user_assignments: userAssignments,
         column_assignments: columnAssignments,
+        open_lane_id: openLaneId,
+        closed_lane_id: closedLaneId,
       })
       const parts = [`${result.created_sprints} sprints`, `${result.created_tags} tags`, `${result.created_tasks} tasks (${result.skipped_tasks} skipped)`]
       if (result.created_comments > 0) parts.push(`${result.created_comments} comments`)
@@ -291,7 +298,7 @@ export default function ProjectSettings() {
     setImportSuccess('')
     setIsSyncing(true)
     try {
-      const result = await apiClient.githubSync(projectId)
+      const result = await apiClient.githubSync(projectId, { openLaneId, closedLaneId, columnAssignments })
       setImportSuccess(`Synced: ${result.created_tasks} new tasks, updated existing`)
       loadGitHubSettings()
     } catch (error: unknown) {
@@ -1262,6 +1269,45 @@ export default function ProjectSettings() {
                           </div>
                         </div>
                       )}
+
+                      {/* Issue status → swim lane mapping */}
+                      <div>
+                        <h4 className="text-sm font-medium text-dark-text-primary mb-2">Map issue status to swim lanes</h4>
+                        <div className="space-y-2">
+                          <div className="flex items-center gap-3 p-3 bg-dark-bg-secondary border border-dark-border-subtle rounded-lg">
+                            <div className="w-2 h-2 rounded-full bg-green-400 flex-shrink-0" />
+                            <div className="flex-1 min-w-0">
+                              <span className="text-sm font-medium text-dark-text-primary">Open issues</span>
+                            </div>
+                            <select
+                              value={openLaneId}
+                              onChange={(e) => setOpenLaneId(Number(e.target.value))}
+                              className="text-sm bg-dark-bg-primary border border-dark-border-subtle text-dark-text-primary rounded-md px-2 py-1 focus:outline-none focus:ring-1 focus:ring-primary-500"
+                            >
+                              <option value={0}>Default (by category)</option>
+                              {swimLanes.map(l => (
+                                <option key={l.id} value={l.id}>{l.name}</option>
+                              ))}
+                            </select>
+                          </div>
+                          <div className="flex items-center gap-3 p-3 bg-dark-bg-secondary border border-dark-border-subtle rounded-lg">
+                            <div className="w-2 h-2 rounded-full bg-gray-400 flex-shrink-0" />
+                            <div className="flex-1 min-w-0">
+                              <span className="text-sm font-medium text-dark-text-primary">Closed issues</span>
+                            </div>
+                            <select
+                              value={closedLaneId}
+                              onChange={(e) => setClosedLaneId(Number(e.target.value))}
+                              className="text-sm bg-dark-bg-primary border border-dark-border-subtle text-dark-text-primary rounded-md px-2 py-1 focus:outline-none focus:ring-1 focus:ring-primary-500"
+                            >
+                              <option value={0}>Default (by category)</option>
+                              {swimLanes.map(l => (
+                                <option key={l.id} value={l.id}>{l.name}</option>
+                              ))}
+                            </select>
+                          </div>
+                        </div>
+                      </div>
 
                       {/* GitHub Projects V2 column → swim lane mapping */}
                       {(githubPreview.project_columns ?? []).length > 0 && (

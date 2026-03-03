@@ -1,5 +1,6 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useMemo } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
+import { useAuth } from '../state/AuthContext'
 import Card from '../components/ui/Card'
 import Button from '../components/ui/Button'
 import TextInput from '../components/ui/TextInput'
@@ -41,12 +42,17 @@ export default function ProjectSettings() {
   const navigate = useNavigate()
   const { projectId: projectIdParam } = useParams<{ projectId: string }>()
   const projectId = parseInt(projectIdParam || '0')
+  const { user } = useAuth()
 
   // Project state
   const [project, setProject] = useState<Project | null>(null)
 
   // Members state
   const [members, setMembers] = useState<ProjectMember[]>([])
+  const isOwnerOrAdmin = useMemo(
+    () => members.some(m => m.user_id === user?.id && (m.role === 'owner' || m.role === 'admin')),
+    [members, user]
+  )
   const [invitations, setInvitations] = useState<ProjectInvitation[]>([])
   const [teamMembers, setTeamMembers] = useState<TeamMember[]>([])
   const [selectedUserId, setSelectedUserId] = useState('')
@@ -1182,8 +1188,8 @@ export default function ProjectSettings() {
                 </form>
               )}
 
-              {/* Import Section — shown when owner + repo are configured */}
-              {githubSettings.github_owner && githubSettings.github_repo_name && (
+              {/* Import Section — only owners and admins can import/sync */}
+              {isOwnerOrAdmin && githubSettings.github_owner && githubSettings.github_repo_name && (
                 <div className="mt-8 pt-6 border-t border-dark-border-subtle">
                   <h3 className="text-lg font-semibold text-dark-text-primary mb-1">Import from GitHub</h3>
                   <p className="text-sm text-dark-text-secondary mb-4">
@@ -1335,7 +1341,7 @@ export default function ProjectSettings() {
                     </div>
                   )}
 
-                  {/* Sync Now (shown after first sync) */}
+                  {/* Sync Now (shown after first sync, only for owners/admins) */}
                   {githubSettings.github_last_sync && (
                     <div className="mt-4 pt-4 border-t border-dark-border-subtle flex items-center gap-4">
                       <span className="text-sm text-dark-text-secondary">

@@ -33,6 +33,10 @@ vi.mock('../lib/api', () => ({
   apiClient: mocks,
 }))
 
+vi.mock('../state/AuthContext', () => ({
+  useAuth: () => ({ user: { id: 10, email: 'alice@test.com' } }),
+}))
+
 const members = [
   {
     id: 1,

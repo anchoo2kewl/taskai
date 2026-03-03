@@ -231,9 +231,7 @@ func (s *Server) HandleListTasks(w http.ResponseWriter, r *http.Request) {
 		// Add assignee info if present
 		if et.Edges.Assignee != nil {
 			t.AssigneeID = &et.Edges.Assignee.ID
-			if et.Edges.Assignee.Name != nil {
-				t.AssigneeName = et.Edges.Assignee.Name
-			}
+			t.AssigneeName = userDisplayNamePtr(et.Edges.Assignee)
 		}
 
 		// Add sprint info if present
@@ -480,9 +478,7 @@ func (s *Server) HandleCreateTask(w http.ResponseWriter, r *http.Request) {
 	// Add assignee info if present
 	if createdTask.Edges.Assignee != nil {
 		t.AssigneeID = &createdTask.Edges.Assignee.ID
-		if createdTask.Edges.Assignee.Name != nil {
-			t.AssigneeName = createdTask.Edges.Assignee.Name
-		}
+		t.AssigneeName = userDisplayNamePtr(createdTask.Edges.Assignee)
 	}
 
 	// Add sprint info if present
@@ -777,9 +773,7 @@ func (s *Server) HandleUpdateTask(w http.ResponseWriter, r *http.Request) {
 	// Add assignee info
 	if updatedTask.Edges.Assignee != nil {
 		t.AssigneeID = &updatedTask.Edges.Assignee.ID
-		if updatedTask.Edges.Assignee.Name != nil {
-			t.AssigneeName = updatedTask.Edges.Assignee.Name
-		}
+		t.AssigneeName = userDisplayNamePtr(updatedTask.Edges.Assignee)
 	}
 
 	// Add sprint info
@@ -968,9 +962,7 @@ func (s *Server) HandleGetTaskByNumber(w http.ResponseWriter, r *http.Request) {
 	// Add assignee info
 	if taskEntity.Edges.Assignee != nil {
 		t.AssigneeID = &taskEntity.Edges.Assignee.ID
-		if taskEntity.Edges.Assignee.Name != nil {
-			t.AssigneeName = taskEntity.Edges.Assignee.Name
-		}
+		t.AssigneeName = userDisplayNamePtr(taskEntity.Edges.Assignee)
 	}
 
 	// Add sprint info

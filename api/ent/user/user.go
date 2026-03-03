@@ -20,6 +20,10 @@ const (
 	FieldPasswordHash = "password_hash"
 	// FieldName holds the string denoting the name field in the database.
 	FieldName = "name"
+	// FieldFirstName holds the string denoting the first_name field in the database.
+	FieldFirstName = "first_name"
+	// FieldLastName holds the string denoting the last_name field in the database.
+	FieldLastName = "last_name"
 	// FieldIsAdmin holds the string denoting the is_admin field in the database.
 	FieldIsAdmin = "is_admin"
 	// FieldTotpSecret holds the string denoting the totp_secret field in the database.
@@ -217,6 +221,8 @@ var Columns = []string{
 	FieldEmail,
 	FieldPasswordHash,
 	FieldName,
+	FieldFirstName,
+	FieldLastName,
 	FieldIsAdmin,
 	FieldTotpSecret,
 	FieldTotpEnabled,
@@ -277,6 +283,16 @@ func ByPasswordHash(opts ...sql.OrderTermOption) OrderOption {
 // ByName orders the results by the name field.
 func ByName(opts ...sql.OrderTermOption) OrderOption {
 	return sql.OrderByField(FieldName, opts...).ToFunc()
+}
+
+// ByFirstName orders the results by the first_name field.
+func ByFirstName(opts ...sql.OrderTermOption) OrderOption {
+	return sql.OrderByField(FieldFirstName, opts...).ToFunc()
+}
+
+// ByLastName orders the results by the last_name field.
+func ByLastName(opts ...sql.OrderTermOption) OrderOption {
+	return sql.OrderByField(FieldLastName, opts...).ToFunc()
 }
 
 // ByIsAdmin orders the results by the is_admin field.

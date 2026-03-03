@@ -794,6 +794,8 @@ var (
 		{Name: "email", Type: field.TypeString, Unique: true},
 		{Name: "password_hash", Type: field.TypeString},
 		{Name: "name", Type: field.TypeString, Nullable: true},
+		{Name: "first_name", Type: field.TypeString, Nullable: true},
+		{Name: "last_name", Type: field.TypeString, Nullable: true},
 		{Name: "is_admin", Type: field.TypeBool, Default: false},
 		{Name: "totp_secret", Type: field.TypeString, Nullable: true},
 		{Name: "totp_enabled", Type: field.TypeBool, Default: false},
@@ -894,6 +896,7 @@ var (
 		{Name: "id", Type: field.TypeInt64, Increment: true},
 		{Name: "title", Type: field.TypeString, Size: 500},
 		{Name: "slug", Type: field.TypeString, Size: 500},
+		{Name: "content", Type: field.TypeString, Nullable: true, Size: 2147483647, Default: ""},
 		{Name: "created_at", Type: field.TypeTime},
 		{Name: "updated_at", Type: field.TypeTime},
 		{Name: "project_id", Type: field.TypeInt64},
@@ -907,13 +910,13 @@ var (
 		ForeignKeys: []*schema.ForeignKey{
 			{
 				Symbol:     "wiki_pages_projects_wiki_pages",
-				Columns:    []*schema.Column{WikiPagesColumns[5]},
+				Columns:    []*schema.Column{WikiPagesColumns[6]},
 				RefColumns: []*schema.Column{ProjectsColumns[0]},
 				OnDelete:   schema.NoAction,
 			},
 			{
 				Symbol:     "wiki_pages_users_wiki_pages_created",
-				Columns:    []*schema.Column{WikiPagesColumns[6]},
+				Columns:    []*schema.Column{WikiPagesColumns[7]},
 				RefColumns: []*schema.Column{UsersColumns[0]},
 				OnDelete:   schema.NoAction,
 			},
@@ -922,7 +925,7 @@ var (
 			{
 				Name:    "wikipage_project_id",
 				Unique:  false,
-				Columns: []*schema.Column{WikiPagesColumns[5]},
+				Columns: []*schema.Column{WikiPagesColumns[6]},
 			},
 			{
 				Name:    "wikipage_slug",
@@ -932,7 +935,7 @@ var (
 			{
 				Name:    "wikipage_project_id_slug",
 				Unique:  true,
-				Columns: []*schema.Column{WikiPagesColumns[5], WikiPagesColumns[2]},
+				Columns: []*schema.Column{WikiPagesColumns[6], WikiPagesColumns[2]},
 			},
 		},
 	}

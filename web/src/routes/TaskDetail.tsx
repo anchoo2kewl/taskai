@@ -3,6 +3,7 @@ import { useParams, useNavigate } from 'react-router-dom'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import Button from '../components/ui/Button'
+import SearchSelect from '../components/ui/SearchSelect'
 import ImagePickerModal from '../components/ImagePickerModal'
 import { apiClient, Task, type UpdateTaskRequest, type SwimLane, type Sprint, type ProjectMember, type Attachment, type TaskComment } from '../lib/api'
 
@@ -747,7 +748,8 @@ export default function TaskDetail({ isModal, onClose }: TaskDetailProps) {
             <div className="bg-dark-bg-secondary border border-dark-border-subtle rounded-lg divide-y divide-dark-border-subtle">
               {/* Swim Lane */}
               <SidebarField label="Swim Lane">
-                <InlineSelect
+                <SearchSelect
+                  variant="inline"
                   value={String(task.swim_lane_id ?? '')}
                   onChange={(v) => saveField('swim_lane_id', v)}
                   options={swimLanes.map(l => ({ value: String(l.id), label: l.name }))}
@@ -756,7 +758,8 @@ export default function TaskDetail({ isModal, onClose }: TaskDetailProps) {
 
               {/* Priority */}
               <SidebarField label="Priority">
-                <InlineSelect
+                <SearchSelect
+                  variant="inline"
                   value={task.priority || 'medium'}
                   onChange={(v) => saveField('priority', v)}
                   options={[
@@ -770,7 +773,8 @@ export default function TaskDetail({ isModal, onClose }: TaskDetailProps) {
 
               {/* Sprint */}
               <SidebarField label="Sprint">
-                <InlineSelect
+                <SearchSelect
+                  variant="inline"
                   value={task.sprint_id?.toString() || ''}
                   onChange={(v) => saveField('sprint_id', v)}
                   options={[
@@ -783,12 +787,13 @@ export default function TaskDetail({ isModal, onClose }: TaskDetailProps) {
               {/* Assignee */}
               <SidebarField label="Assignee">
                 {members.length > 0 ? (
-                  <InlineSelect
+                  <SearchSelect
+                    variant="inline"
                     value={task.assignee_id?.toString() || ''}
                     onChange={(v) => saveField('assignee_id', v)}
                     options={[
                       { value: '', label: 'Unassigned' },
-                      ...members.map(m => ({ value: String(m.user_id || m.id), label: m.user_name || m.email || `User ${m.user_id || m.id}` })),
+                      ...members.map(m => ({ value: String(m.user_id || m.id), label: m.user_name || m.email || `User ${m.user_id || m.id}`, description: m.email || undefined })),
                     ]}
                   />
                 ) : (
@@ -1119,27 +1124,3 @@ function SidebarField({ label, children }: { label: string; children: React.Reac
   )
 }
 
-function InlineSelect({ value, onChange, options }: {
-  value: string
-  onChange: (value: string) => void
-  options: { value: string; label: string }[]
-}) {
-  return (
-    <div className="relative">
-      <select
-        value={value}
-        onChange={(e) => onChange(e.target.value)}
-        className="w-full appearance-none bg-transparent cursor-pointer text-sm text-dark-text-primary hover:bg-dark-bg-tertiary/50 pl-3 pr-7 py-1.5 rounded-md border border-transparent hover:border-dark-border-subtle focus:border-primary-500 focus:ring-1 focus:ring-primary-500/30 outline-none transition-colors"
-      >
-        {options.map(opt => (
-          <option key={opt.value} value={opt.value} className="bg-dark-bg-secondary text-dark-text-primary">
-            {opt.label}
-          </option>
-        ))}
-      </select>
-      <svg className="absolute right-2 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-dark-text-tertiary pointer-events-none" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-      </svg>
-    </div>
-  )
-}

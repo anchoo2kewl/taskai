@@ -86,7 +86,7 @@ func (s *Server) HandleListTaskComments(w http.ResponseWriter, r *http.Request) 
 		}
 
 		if ec.Edges.User != nil {
-			c.UserName = ec.Edges.User.Name
+			c.UserName = userDisplayNamePtr(ec.Edges.User)
 		}
 
 		comments = append(comments, c)
@@ -177,7 +177,7 @@ func (s *Server) HandleCreateTaskComment(w http.ResponseWriter, r *http.Request)
 	}
 
 	if commentWithUser.Edges.User != nil {
-		c.UserName = commentWithUser.Edges.User.Name
+		c.UserName = userDisplayNamePtr(commentWithUser.Edges.User)
 	}
 
 	respondJSON(w, http.StatusCreated, c)

@@ -4,10 +4,18 @@ import Card from '../components/ui/Card'
 import Button from '../components/ui/Button'
 import TextInput from '../components/ui/TextInput'
 import FormError from '../components/ui/FormError'
-import { apiClient, type CloudinaryCredentialResponse, type APIKey, type Team, type TeamMember, type TeamInvitation, type Invite } from '../lib/api'
+import SearchSelect from '../components/ui/SearchSelect'
+import { apiClient, type CloudinaryCredentialResponse, type APIKey, type Team, type TeamMember, type TeamInvitation, type SentInvitation, type UserSearchResult, type Invite, type ProjectInvitation } from '../lib/api'
 
 export default function Settings() {
   const navigate = useNavigate()
+
+  // Profile state
+  const [profileFirstName, setProfileFirstName] = useState('')
+  const [profileLastName, setProfileLastName] = useState('')
+  const [profileError, setProfileError] = useState('')
+  const [profileSuccess, setProfileSuccess] = useState('')
+  const [isSavingProfile, setIsSavingProfile] = useState(false)
 
   // Password change state
   const [currentPassword, setCurrentPassword] = useState('')
@@ -68,6 +76,20 @@ export default function Settings() {
   const [isInviting, setIsInviting] = useState(false)
   const [isRemovingMember, setIsRemovingMember] = useState<number | null>(null)
   const [isRespondingToInvitation, setIsRespondingToInvitation] = useState<number | null>(null)
+  const [isEditingTeamName, setIsEditingTeamName] = useState(false)
+  const [editTeamName, setEditTeamName] = useState('')
+  const [isSavingTeamName, setIsSavingTeamName] = useState(false)
+  const [sentInvitations, setSentInvitations] = useState<SentInvitation[]>([])
+  const [searchResults, setSearchResults] = useState<UserSearchResult[]>([])
+  const [isSearching, setIsSearching] = useState(false)
+  const [selectedUser, setSelectedUser] = useState<UserSearchResult | null>(null)
+  const [showSearchDropdown, setShowSearchDropdown] = useState(false)
+
+  // Project invitations (received)
+  const [projectInvitations, setProjectInvitations] = useState<ProjectInvitation[]>([])
+  const [projectInviteError, setProjectInviteError] = useState('')
+  const [projectInviteSuccess, setProjectInviteSuccess] = useState('')
+  const [isRespondingToProjectInvite, setIsRespondingToProjectInvite] = useState<number | null>(null)
 
   // Invite system state
   const [myInvites, setMyInvites] = useState<Invite[]>([])
@@ -80,19 +102,46 @@ export default function Settings() {
   const [inviteRecipientEmail, setInviteRecipientEmail] = useState('')
 
   useEffect(() => {
+    loadProfile()
     load2FAStatus()
     loadAPIKeys()
     loadTeamData()
     loadCloudinaryCredentials()
     loadInvites()
+    loadProjectInvitations()
   }, [])
+
+  const loadProfile = async () => {
+    try {
+      const me = await apiClient.getCurrentUser()
+      setProfileFirstName(me.first_name || '')
+      setProfileLastName(me.last_name || '')
+    } catch {
+      // non-critical load failure
+    }
+  }
+
+  const handleProfileSave = async (e: React.FormEvent) => {
+    e.preventDefault()
+    setProfileError('')
+    setProfileSuccess('')
+    setIsSavingProfile(true)
+    try {
+      await apiClient.updateProfile({ first_name: profileFirstName.trim(), last_name: profileLastName.trim() })
+      setProfileSuccess('Profile updated successfully')
+    } catch (error: unknown) {
+      setProfileError(error instanceof Error ? error.message : 'Failed to update profile')
+    } finally {
+      setIsSavingProfile(false)
+    }
+  }
 
   const load2FAStatus = async () => {
     try {
       const status = await apiClient.get2FAStatus()
       setTwoFAEnabled(status.enabled)
     } catch (error) {
-      // non-critical load failure
+      console.error('Failed to load data:', error)
     }
   }
 
@@ -242,7 +291,7 @@ export default function Settings() {
         }
       }
     } catch (error) {
-      // non-critical load failure
+      console.error('Failed to load data:', error)
     }
   }
 
@@ -335,7 +384,46 @@ export default function Settings() {
       setMyInviteCount(data.invite_count)
       setIsUserAdmin(data.is_admin)
     } catch (error) {
-      // non-critical load failure
+      console.error('Failed to load data:', error)
+    }
+  }
+
+  const loadProjectInvitations = async () => {
+    try {
+      const data = await apiClient.getMyProjectInvitations()
+      setProjectInvitations(data)
+    } catch {
+      // non-critical
+    }
+  }
+
+  const handleAcceptProjectInvite = async (invId: number) => {
+    setProjectInviteError('')
+    setProjectInviteSuccess('')
+    setIsRespondingToProjectInvite(invId)
+    try {
+      await apiClient.acceptProjectInvitation(invId)
+      setProjectInviteSuccess('You have joined the project!')
+      loadProjectInvitations()
+    } catch (error: unknown) {
+      setProjectInviteError(error instanceof Error ? error.message : 'Failed to accept invitation')
+    } finally {
+      setIsRespondingToProjectInvite(null)
+    }
+  }
+
+  const handleRejectProjectInvite = async (invId: number) => {
+    setProjectInviteError('')
+    setProjectInviteSuccess('')
+    setIsRespondingToProjectInvite(invId)
+    try {
+      await apiClient.rejectProjectInvitation(invId)
+      setProjectInviteSuccess('Invitation declined')
+      loadProjectInvitations()
+    } catch (error: unknown) {
+      setProjectInviteError(error instanceof Error ? error.message : 'Failed to decline invitation')
+    } finally {
+      setIsRespondingToProjectInvite(null)
     }
   }
 
@@ -374,7 +462,7 @@ export default function Settings() {
       const keys = await apiClient.getAPIKeys()
       setApiKeys(keys)
     } catch (error) {
-      // non-critical load failure
+      console.error('Failed to load data:', error)
     }
   }
 
@@ -439,40 +527,18 @@ export default function Settings() {
 
   const loadTeamData = async () => {
     try {
-      const [teamData, membersData, invitationsData] = await Promise.all([
+      const [teamData, membersData, invitationsData, sentInvData] = await Promise.all([
         apiClient.getMyTeam(),
         apiClient.getTeamMembers(),
         apiClient.getMyInvitations(),
+        apiClient.getTeamSentInvitations(),
       ])
       setTeam(teamData)
       setTeamMembers(membersData)
       setInvitations(invitationsData)
+      setSentInvitations(sentInvData)
     } catch (error) {
-      // non-critical load failure
-    }
-  }
-
-  const handleInviteMember = async (e: React.FormEvent) => {
-    e.preventDefault()
-    setTeamError('')
-    setTeamSuccess('')
-
-    if (!inviteEmail.trim()) {
-      setTeamError('Email is required')
-      return
-    }
-
-    setIsInviting(true)
-
-    try {
-      await apiClient.inviteTeamMember(inviteEmail)
-      setTeamSuccess(`Invitation sent to ${inviteEmail}`)
-      setInviteEmail('')
-      await loadTeamData()
-    } catch (error: unknown) {
-      setTeamError(error instanceof Error ? error.message : 'Failed to send invitation')
-    } finally {
-      setIsInviting(false)
+      console.error('Failed to load data:', error)
     }
   }
 
@@ -528,6 +594,113 @@ export default function Settings() {
     }
   }
 
+  const handleSaveTeamName = async () => {
+    const trimmed = editTeamName.trim()
+    if (!trimmed) {
+      setTeamError('Team name is required')
+      return
+    }
+    setIsSavingTeamName(true)
+    setTeamError('')
+    setTeamSuccess('')
+
+    try {
+      const updated = await apiClient.updateTeam(trimmed)
+      setTeam(updated)
+      setIsEditingTeamName(false)
+      setTeamSuccess('Team name updated')
+    } catch (error: unknown) {
+      setTeamError(error instanceof Error ? error.message : 'Failed to update team name')
+    } finally {
+      setIsSavingTeamName(false)
+    }
+  }
+
+  const handleSearchUsers = async (query: string) => {
+    setInviteEmail(query)
+    setSelectedUser(null)
+
+    if (query.trim().length < 2) {
+      setSearchResults([])
+      setShowSearchDropdown(false)
+      return
+    }
+
+    setIsSearching(true)
+    try {
+      const results = await apiClient.searchTeamUsers(query.trim())
+      setSearchResults(results)
+      setShowSearchDropdown(results.length > 0)
+    } catch {
+      setSearchResults([])
+      setShowSearchDropdown(false)
+    } finally {
+      setIsSearching(false)
+    }
+  }
+
+  const handleSelectUser = (u: UserSearchResult) => {
+    setSelectedUser(u)
+    setInviteEmail(u.name ? `${u.name} (${u.email})` : u.email)
+    setShowSearchDropdown(false)
+    setSearchResults([])
+  }
+
+  const handleInviteOrAdd = async (e: React.FormEvent) => {
+    e.preventDefault()
+    setTeamError('')
+    setTeamSuccess('')
+
+    if (selectedUser) {
+      // Direct add existing user
+      setIsInviting(true)
+      try {
+        await apiClient.addTeamMember(selectedUser.id)
+        setTeamSuccess(`${selectedUser.name || selectedUser.email} added to the team`)
+        setInviteEmail('')
+        setSelectedUser(null)
+        await loadTeamData()
+      } catch (error: unknown) {
+        setTeamError(error instanceof Error ? error.message : 'Failed to add member')
+      } finally {
+        setIsInviting(false)
+      }
+    } else {
+      // Fall back to email invite
+      const email = inviteEmail.trim()
+      if (!email) {
+        setTeamError('Email is required')
+        return
+      }
+      setIsInviting(true)
+      try {
+        await apiClient.inviteTeamMember(email)
+        setTeamSuccess(`Invitation sent to ${email}`)
+        setInviteEmail('')
+        await loadTeamData()
+      } catch (error: unknown) {
+        setTeamError(error instanceof Error ? error.message : 'Failed to send invitation')
+      } finally {
+        setIsInviting(false)
+      }
+    }
+  }
+
+  // Debounce user search
+  useEffect(() => {
+    if (selectedUser) return
+    const query = inviteEmail.trim()
+    if (query.length < 2) {
+      setSearchResults([])
+      setShowSearchDropdown(false)
+      return
+    }
+    const timer = setTimeout(() => {
+      handleSearchUsers(inviteEmail)
+    }, 300)
+    return () => clearTimeout(timer)
+  }, [inviteEmail, selectedUser])
+
   return (
     <div className="min-h-screen bg-dark-bg-primary py-8">
       <div className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8">
@@ -548,6 +721,55 @@ export default function Settings() {
         </div>
 
         <div className="space-y-6">
+          {/* Profile Section */}
+          <Card className="shadow-md">
+            <div className="p-6 sm:p-8 flex items-start gap-4">
+              <div className="flex-shrink-0 w-10 h-10 bg-primary-500/10 rounded-lg flex items-center justify-center">
+                <svg className="w-6 h-6 text-primary-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
+                </svg>
+              </div>
+              <div className="flex-1">
+                <h2 className="text-xl font-semibold text-dark-text-primary mb-1">Profile</h2>
+                <p className="text-sm text-dark-text-secondary mb-6">Update your display name</p>
+
+                {profileSuccess && (
+                  <div className="mb-4 p-4 bg-success-500/10 border-l-4 border-success-400 rounded-r-lg">
+                    <div className="flex items-center">
+                      <svg className="w-5 h-5 text-success-400 mr-2" fill="currentColor" viewBox="0 0 20 20">
+                        <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" />
+                      </svg>
+                      <span className="text-sm text-success-300">{profileSuccess}</span>
+                    </div>
+                  </div>
+                )}
+
+                <FormError message={profileError} className="mb-4" />
+
+                <form onSubmit={handleProfileSave} className="space-y-4 max-w-md">
+                  <div className="grid grid-cols-2 gap-3">
+                    <TextInput
+                      label="First Name"
+                      value={profileFirstName}
+                      onChange={(e) => setProfileFirstName(e.target.value)}
+                      placeholder="First"
+                    />
+                    <TextInput
+                      label="Last Name"
+                      value={profileLastName}
+                      onChange={(e) => setProfileLastName(e.target.value)}
+                      placeholder="Last"
+                    />
+                  </div>
+
+                  <Button type="submit" disabled={isSavingProfile} size="sm">
+                    {isSavingProfile ? 'Saving...' : 'Save Profile'}
+                  </Button>
+                </form>
+              </div>
+            </div>
+          </Card>
+
           {/* Password Change Section */}
           <Card className="shadow-md">
             <div className="p-6 sm:p-8 flex items-start gap-4">
@@ -936,17 +1158,17 @@ export default function Settings() {
                     <label className="block text-sm font-medium text-dark-text-primary mb-2">
                       Max File Size (MB)
                     </label>
-                    <select
-                      value={cloudMaxSize}
-                      onChange={(e) => setCloudMaxSize(parseInt(e.target.value))}
-                      className="w-full px-3 py-2 border border-dark-border-subtle bg-dark-bg-secondary text-dark-text-primary rounded-lg focus:border-primary-500 focus:ring-2 focus:ring-primary-500/20 outline-none transition-colors"
-                    >
-                      <option value="5">5 MB</option>
-                      <option value="10">10 MB</option>
-                      <option value="25">25 MB</option>
-                      <option value="50">50 MB</option>
-                      <option value="100">100 MB</option>
-                    </select>
+                    <SearchSelect
+                      value={String(cloudMaxSize)}
+                      onChange={(v) => setCloudMaxSize(Number.parseInt(v))}
+                      options={[
+                        { value: '5', label: '5 MB' },
+                        { value: '10', label: '10 MB' },
+                        { value: '25', label: '25 MB' },
+                        { value: '50', label: '50 MB' },
+                        { value: '100', label: '100 MB' },
+                      ]}
+                    />
                   </div>
 
                   <Button type="submit" disabled={isSavingCloudinary}>
@@ -1045,9 +1267,9 @@ export default function Settings() {
                       Expiration
                     </label>
                     <select
-                      value={newKeyExpires || ''}
-                      onChange={(e) => setNewKeyExpires(e.target.value ? parseInt(e.target.value) : undefined)}
-                      className="w-full px-3 py-2 border border-dark-border-subtle bg-dark-bg-secondary text-dark-text-primary rounded-lg focus:border-primary-500 focus:ring-2 focus:ring-primary-500/20 outline-none transition-colors"
+                      value={newKeyExpires === undefined ? '' : String(newKeyExpires)}
+                      onChange={(e) => setNewKeyExpires(e.target.value ? Number.parseInt(e.target.value) : undefined)}
+                      className="w-full px-3 py-2 bg-dark-bg-secondary border border-dark-border-subtle rounded-lg text-sm text-dark-text-primary focus:outline-none focus:ring-2 focus:ring-primary-500/50 focus:border-primary-500/50"
                     >
                       <option value="30">30 days</option>
                       <option value="90">90 days</option>
@@ -1576,9 +1798,43 @@ print(response.json())`}
                 {team && (
                   <div className="mb-6 p-4 bg-dark-bg-secondary border border-dark-border-subtle rounded-lg">
                     <div className="flex items-center justify-between">
-                      <div>
+                      <div className="flex-1">
                         <p className="text-sm text-dark-text-secondary">Your Team</p>
-                        <p className="text-lg font-semibold text-dark-text-primary">{team.name}</p>
+                        {isEditingTeamName ? (
+                          <div className="flex items-center gap-2 mt-1">
+                            <input
+                              type="text"
+                              value={editTeamName}
+                              onChange={(e) => setEditTeamName(e.target.value)}
+                              maxLength={100}
+                              className="px-3 py-1.5 bg-dark-bg-primary border border-dark-border-subtle rounded-lg text-dark-text-primary text-lg font-semibold focus:outline-none focus:ring-2 focus:ring-primary-500"
+                              autoFocus
+                              onKeyDown={(e) => {
+                                if (e.key === 'Enter') handleSaveTeamName()
+                                if (e.key === 'Escape') setIsEditingTeamName(false)
+                              }}
+                            />
+                            <Button size="sm" onClick={handleSaveTeamName} disabled={isSavingTeamName}>
+                              {isSavingTeamName ? 'Saving...' : 'Save'}
+                            </Button>
+                            <Button size="sm" variant="secondary" onClick={() => setIsEditingTeamName(false)} disabled={isSavingTeamName}>
+                              Cancel
+                            </Button>
+                          </div>
+                        ) : (
+                          <div className="flex items-center gap-2">
+                            <p className="text-lg font-semibold text-dark-text-primary">{team.name}</p>
+                            <button
+                              onClick={() => { setEditTeamName(team.name); setIsEditingTeamName(true) }}
+                              className="p-1 text-dark-text-tertiary hover:text-dark-text-primary transition-colors rounded"
+                              title="Edit team name"
+                            >
+                              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" />
+                              </svg>
+                            </button>
+                          </div>
+                        )}
                       </div>
                       <div className="text-right">
                         <p className="text-sm text-dark-text-secondary">Members</p>
@@ -1630,22 +1886,107 @@ print(response.json())`}
                   </div>
                 )}
 
-                {/* Invite Member Form */}
-                <form onSubmit={handleInviteMember} className="mb-6">
-                  <div className="flex gap-3 items-end">
-                    <div className="flex-1">
-                      <TextInput
-                        label="Invite Team Member"
-                        type="email"
-                        value={inviteEmail}
-                        onChange={(e) => setInviteEmail(e.target.value)}
-                        placeholder="email@example.com"
-                        required
-                      />
+                {/* Project Invitations */}
+                {(projectInvitations.length > 0 || projectInviteSuccess || projectInviteError) && (
+                  <div className="mb-6">
+                    <h3 className="text-sm font-semibold text-dark-text-primary mb-3">Project Invitations</h3>
+                    {projectInviteSuccess && (
+                      <div className="mb-3 p-3 bg-success-500/10 border border-success-500/30 rounded-lg text-sm text-success-300">
+                        {projectInviteSuccess}
+                      </div>
+                    )}
+                    {projectInviteError && (
+                      <div className="mb-3 p-3 bg-danger-500/10 border border-danger-500/30 rounded-lg text-sm text-danger-300">
+                        {projectInviteError}
+                      </div>
+                    )}
+                    {projectInvitations.length === 0 ? (
+                      <p className="text-sm text-dark-text-tertiary">No pending project invitations</p>
+                    ) : (
+                      <div className="space-y-2">
+                        {projectInvitations.map((inv) => (
+                          <div key={inv.id} className="p-4 bg-primary-500/10 border border-primary-500/30 rounded-lg">
+                            <div className="flex items-center justify-between gap-3">
+                              <div className="min-w-0">
+                                <p className="font-medium text-dark-text-primary truncate">
+                                  {inv.project_name}
+                                </p>
+                                <p className="text-sm text-dark-text-secondary">
+                                  Invited by {inv.inviter_name} · <span className="capitalize">{inv.role}</span>
+                                </p>
+                              </div>
+                              <div className="flex gap-2 flex-shrink-0">
+                                <Button
+                                  size="sm"
+                                  onClick={() => handleAcceptProjectInvite(inv.id)}
+                                  disabled={isRespondingToProjectInvite === inv.id}
+                                >
+                                  {isRespondingToProjectInvite === inv.id ? 'Accepting...' : 'Accept'}
+                                </Button>
+                                <Button
+                                  size="sm"
+                                  variant="secondary"
+                                  onClick={() => handleRejectProjectInvite(inv.id)}
+                                  disabled={isRespondingToProjectInvite === inv.id}
+                                >
+                                  Decline
+                                </Button>
+                              </div>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {/* Invite / Add Member Form */}
+                <form onSubmit={handleInviteOrAdd} className="mb-6">
+                  <label className="block text-sm font-medium text-dark-text-secondary mb-1.5">Add or Invite Team Member</label>
+                  <div className="relative">
+                    <div className="flex gap-3 items-start">
+                      <div className="flex-1 relative">
+                        <input
+                          type="text"
+                          value={inviteEmail}
+                          onChange={(e) => { setInviteEmail(e.target.value); setSelectedUser(null) }}
+                          placeholder="Search by name or email..."
+                          className="w-full px-3 py-2 bg-dark-bg-secondary border border-dark-border-subtle rounded-lg text-dark-text-primary placeholder-dark-text-tertiary focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent"
+                        />
+                        {isSearching && (
+                          <div className="absolute right-3 top-2.5">
+                            <svg className="w-4 h-4 animate-spin text-dark-text-tertiary" fill="none" viewBox="0 0 24 24">
+                              <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                              <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+                            </svg>
+                          </div>
+                        )}
+                        {showSearchDropdown && searchResults.length > 0 && (
+                          <div className="absolute z-10 mt-1 w-full bg-dark-bg-secondary border border-dark-border-subtle rounded-lg shadow-lg max-h-48 overflow-y-auto">
+                            {searchResults.map((u) => (
+                              <button
+                                key={u.id}
+                                type="button"
+                                onClick={() => handleSelectUser(u)}
+                                className="w-full px-3 py-2 text-left hover:bg-dark-bg-tertiary transition-colors first:rounded-t-lg last:rounded-b-lg"
+                              >
+                                <p className="text-sm font-medium text-dark-text-primary">{u.name || u.email}</p>
+                                {u.name && <p className="text-xs text-dark-text-tertiary">{u.email}</p>}
+                              </button>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                      <Button type="submit" disabled={isInviting || !inviteEmail.trim()}>
+                        {isInviting ? 'Adding...' : selectedUser ? 'Add to Team' : 'Send Invite'}
+                      </Button>
                     </div>
-                    <Button type="submit" disabled={isInviting}>
-                      {isInviting ? 'Inviting...' : 'Send Invite'}
-                    </Button>
+                    {selectedUser && (
+                      <p className="mt-1 text-xs text-primary-400">Will add {selectedUser.name || selectedUser.email} directly to the team</p>
+                    )}
+                    {!selectedUser && inviteEmail.trim() && !isSearching && searchResults.length === 0 && inviteEmail.trim().length >= 2 && (
+                      <p className="mt-1 text-xs text-dark-text-tertiary">No matching users found — will send an email invitation</p>
+                    )}
                   </div>
                 </form>
 
@@ -1702,6 +2043,30 @@ print(response.json())`}
                     </div>
                   )}
                 </div>
+
+                {/* Sent Invitations (Pending) */}
+                {sentInvitations.length > 0 && (
+                  <div className="mt-6">
+                    <h3 className="text-sm font-semibold text-dark-text-primary mb-3">Pending Sent Invitations</h3>
+                    <div className="space-y-2">
+                      {sentInvitations.map((inv) => (
+                        <div key={inv.id} className="p-3 bg-amber-500/5 border border-amber-500/20 rounded-lg">
+                          <div className="flex items-center justify-between">
+                            <div className="flex items-center gap-2">
+                              <span className="text-sm text-dark-text-primary">{inv.invitee_email}</span>
+                              <span className="px-2 py-0.5 text-xs font-medium bg-amber-500/10 text-amber-400 rounded">
+                                Invited
+                              </span>
+                            </div>
+                            <span className="text-xs text-dark-text-tertiary">
+                              {new Date(inv.created_at).toLocaleDateString()}
+                            </span>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
 
                 <div className="mt-6 bg-green-500/10 border border-green-500/30 rounded-lg p-4">
                   <div className="flex gap-3">

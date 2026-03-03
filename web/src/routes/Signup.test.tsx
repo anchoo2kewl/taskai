@@ -93,12 +93,14 @@ describe('Signup', () => {
     render(<Signup />)
 
     const inviteInput = screen.getByLabelText(/invite code/i)
+    const firstNameInput = screen.getByLabelText(/first name/i)
     const emailInput = screen.getByLabelText(/email address/i)
     // Use the specific input ids to target password fields
     const passwordInput = document.getElementById('password')!
     const confirmPasswordInput = document.getElementById('confirm-password')!
 
     await user.type(inviteInput, 'VALID-CODE')
+    await user.type(firstNameInput, 'John')
     await user.type(emailInput, 'new@example.com')
     await user.type(passwordInput, 'password1')
     await user.type(confirmPasswordInput, 'password1')
@@ -109,6 +111,8 @@ describe('Signup', () => {
         email: 'new@example.com',
         password: 'password1',
         invite_code: 'VALID-CODE',
+        first_name: 'John',
+        last_name: '',
       })
     })
     expect(mockClearError).toHaveBeenCalled()
@@ -118,11 +122,13 @@ describe('Signup', () => {
     const user = userEvent.setup()
     render(<Signup />)
 
+    const firstNameInput = screen.getByLabelText(/first name/i)
     const emailInput = screen.getByLabelText(/email address/i)
     const passwordInput = document.getElementById('password')!
     const confirmPasswordInput = document.getElementById('confirm-password')!
 
     // Fill in valid form fields but leave invite code empty
+    await user.type(firstNameInput, 'John')
     await user.type(emailInput, 'new@example.com')
     await user.type(passwordInput, 'password1')
     await user.type(confirmPasswordInput, 'password1')

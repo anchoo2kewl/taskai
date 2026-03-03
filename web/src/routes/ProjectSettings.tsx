@@ -4,7 +4,8 @@ import Card from '../components/ui/Card'
 import Button from '../components/ui/Button'
 import TextInput from '../components/ui/TextInput'
 import FormError from '../components/ui/FormError'
-import { apiClient, type SwimLane, type Project } from '../lib/api'
+import SearchSelect from '../components/ui/SearchSelect'
+import { apiClient, type SwimLane, type Project, type ProjectInvitation } from '../lib/api'
 
 interface ProjectMember {
   id: number
@@ -43,6 +44,7 @@ export default function ProjectSettings() {
 
   // Members state
   const [members, setMembers] = useState<ProjectMember[]>([])
+  const [invitations, setInvitations] = useState<ProjectInvitation[]>([])
   const [teamMembers, setTeamMembers] = useState<TeamMember[]>([])
   const [selectedUserId, setSelectedUserId] = useState('')
   const [newMemberRole, setNewMemberRole] = useState('member')
@@ -81,6 +83,7 @@ export default function ProjectSettings() {
   useEffect(() => {
     loadProject()
     loadMembers()
+    loadInvitations()
     loadTeamMembers()
     loadGitHubSettings()
     loadSwimLanes()
@@ -92,7 +95,7 @@ export default function ProjectSettings() {
       const proj = await apiClient.getProject(projectId)
       setProject(proj)
     } catch (error: unknown) {
-      // non-critical load failure
+      console.error('Failed to load data:', error)
     }
   }
 
@@ -101,7 +104,16 @@ export default function ProjectSettings() {
       const data = await apiClient.getProjectMembers(projectId)
       setMembers(data)
     } catch (error: unknown) {
-      // non-critical load failure
+      console.error('Failed to load data:', error)
+    }
+  }
+
+  const loadInvitations = async () => {
+    try {
+      const data = await apiClient.getProjectInvitations(projectId)
+      setInvitations(data)
+    } catch {
+      // Not owner/admin — ignore
     }
   }
 
@@ -110,7 +122,7 @@ export default function ProjectSettings() {
       const data = await apiClient.getTeamMembers()
       setTeamMembers(data)
     } catch (error: unknown) {
-      // non-critical load failure
+      console.error('Failed to load data:', error)
     }
   }
 
@@ -119,7 +131,7 @@ export default function ProjectSettings() {
       const data = await apiClient.getProjectGitHub(projectId)
       setGithubSettings(data)
     } catch (error: unknown) {
-      // non-critical load failure
+      console.error('Failed to load data:', error)
     }
   }
 
@@ -128,7 +140,7 @@ export default function ProjectSettings() {
       const data = await apiClient.getSwimLanes(projectId)
       setSwimLanes(data)
     } catch (error: unknown) {
-      // non-critical load failure
+      console.error('Failed to load data:', error)
     }
   }
 
@@ -138,7 +150,7 @@ export default function ProjectSettings() {
       const data = await apiClient.getStorageUsage(projectId)
       setStorageUsage(data || [])
     } catch (error) {
-      // non-critical load failure
+      console.error('Failed to load storage usage:', error)
     } finally {
       setLoadingStorage(false)
     }
@@ -246,7 +258,7 @@ export default function ProjectSettings() {
     }
   }
 
-  const handleAddMember = async (e: React.FormEvent) => {
+  const handleInviteMember = async (e: React.FormEvent) => {
     e.preventDefault()
     setMemberError('')
     setMemberSuccess('')
@@ -259,28 +271,46 @@ export default function ProjectSettings() {
     setIsAddingMember(true)
 
     try {
-      const userId = parseInt(selectedUserId)
-      const selectedMember = teamMembers.find(m => m.user_id === userId)
-
-      await apiClient.addProjectMember(projectId, {
-        email: selectedMember?.email || '',
+      await apiClient.inviteProjectMember(projectId, {
+        user_id: parseInt(selectedUserId),
         role: newMemberRole,
       })
 
-      setMemberSuccess('Member added successfully')
+      setMemberSuccess('Invitation sent')
       setSelectedUserId('')
       setNewMemberRole('member')
-      loadMembers()
+      loadInvitations()
     } catch (error: unknown) {
-      setMemberError(error instanceof Error ? error.message : 'Failed to add member')
+      setMemberError(error instanceof Error ? error.message : 'Failed to send invitation')
     } finally {
       setIsAddingMember(false)
     }
   }
 
-  // Filter team members that aren't already project members
+  const handleWithdrawInvitation = async (invId: number) => {
+    try {
+      await apiClient.withdrawProjectInvitation(invId)
+      setMemberSuccess('Invitation withdrawn')
+      loadInvitations()
+    } catch (error: unknown) {
+      setMemberError(error instanceof Error ? error.message : 'Failed to withdraw invitation')
+    }
+  }
+
+  const handleResendInvitation = async (invId: number) => {
+    try {
+      await apiClient.resendProjectInvitation(invId)
+      setMemberSuccess('Invitation resent')
+      loadInvitations()
+    } catch (error: unknown) {
+      setMemberError(error instanceof Error ? error.message : 'Failed to resend invitation')
+    }
+  }
+
+  // Filter team members that aren't already project members and don't have a pending invitation
   const availableTeamMembers = teamMembers.filter(
-    tm => !members.some(pm => pm.user_id === tm.user_id)
+    tm => !members.some(pm => pm.user_id === tm.user_id) &&
+          !invitations.some(inv => inv.invitee_user_id === tm.user_id && inv.status === 'pending')
   )
 
   const handleUpdateMemberRole = async (memberId: number, role: string) => {
@@ -413,49 +443,46 @@ export default function ProjectSettings() {
               {memberError && <FormError message={memberError} className="mb-4" />}
 
               {/* Add Member Form */}
-              <form onSubmit={handleAddMember} className="mb-6 p-4 bg-dark-bg-secondary border border-dark-border-subtle rounded-lg">
-                <h3 className="font-semibold text-dark-text-primary mb-4">Grant Project Access</h3>
+              <form onSubmit={handleInviteMember} className="mb-6 p-4 bg-dark-bg-secondary border border-dark-border-subtle rounded-lg">
+                <h3 className="font-semibold text-dark-text-primary mb-4">Invite to Project</h3>
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
                   <div className="md:col-span-2">
                     <label className="block text-sm font-medium text-dark-text-primary mb-1">
                       Team Member <span className="text-danger-400">*</span>
                     </label>
-                    <select
+                    <SearchSelect
                       value={selectedUserId}
-                      onChange={(e) => setSelectedUserId(e.target.value)}
-                      required
-                      className="w-full px-3 py-2 bg-dark-bg-secondary border border-dark-border-subtle text-dark-text-primary rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-primary-500 outline-none transition-colors"
-                    >
-                      <option value="">Select a team member...</option>
-                      {availableTeamMembers.map(member => (
-                        <option key={member.user_id} value={member.user_id}>
-                          {member.name || member.email}
-                        </option>
-                      ))}
-                    </select>
+                      onChange={setSelectedUserId}
+                      placeholder="Select a team member..."
+                      options={availableTeamMembers.map(member => ({
+                        value: String(member.user_id),
+                        label: member.name || member.email,
+                        description: member.name ? member.email : undefined,
+                      }))}
+                    />
                   </div>
                   <div>
                     <label className="block text-sm font-medium text-dark-text-primary mb-1">
                       Role <span className="text-danger-400">*</span>
                     </label>
-                    <select
+                    <SearchSelect
                       value={newMemberRole}
-                      onChange={(e) => setNewMemberRole(e.target.value)}
-                      className="w-full px-3 py-2 bg-dark-bg-secondary border border-dark-border-subtle text-dark-text-primary rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-primary-500 outline-none transition-colors"
-                    >
-                      <option value="viewer">Viewer</option>
-                      <option value="member">Member</option>
-                      <option value="editor">Editor</option>
-                      <option value="owner">Owner</option>
-                    </select>
+                      onChange={setNewMemberRole}
+                      options={[
+                        { value: 'viewer', label: 'Viewer' },
+                        { value: 'member', label: 'Member' },
+                        { value: 'editor', label: 'Editor' },
+                        { value: 'owner', label: 'Owner' },
+                      ]}
+                    />
                   </div>
                 </div>
                 <div className="mt-4">
                   <Button type="submit" disabled={isAddingMember || availableTeamMembers.length === 0} size="sm">
-                    {isAddingMember ? 'Adding...' : 'Grant Access'}
+                    {isAddingMember ? 'Sending...' : 'Send Invite'}
                   </Button>
                   {availableTeamMembers.length === 0 && (
-                    <p className="text-sm text-dark-text-tertiary mt-2">All team members already have access</p>
+                    <p className="text-sm text-dark-text-tertiary mt-2">All team members already have access or a pending invitation</p>
                   )}
                 </div>
               </form>
@@ -488,16 +515,17 @@ export default function ProjectSettings() {
                           </div>
                         </div>
                         <div className="flex items-center gap-3">
-                          <select
+                          <SearchSelect
+                            variant="inline"
                             value={member.role}
-                            onChange={(e) => handleUpdateMemberRole(member.id, e.target.value)}
-                            className="px-3 py-1.5 text-sm bg-dark-bg-secondary text-dark-text-primary border border-dark-border-subtle rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-primary-500 outline-none"
-                          >
-                            <option value="viewer">Viewer</option>
-                            <option value="member">Member</option>
-                            <option value="editor">Editor</option>
-                            <option value="owner">Owner</option>
-                          </select>
+                            onChange={(v) => handleUpdateMemberRole(member.id, v)}
+                            options={[
+                              { value: 'viewer', label: 'Viewer' },
+                              { value: 'member', label: 'Member' },
+                              { value: 'editor', label: 'Editor' },
+                              { value: 'owner', label: 'Owner' },
+                            ]}
+                          />
                           <button
                             onClick={() => handleRemoveMember(member.id)}
                             className="p-2 text-danger-300 hover:bg-danger-500/10 rounded-lg transition-colors"
@@ -513,6 +541,55 @@ export default function ProjectSettings() {
                   </div>
                 )}
               </div>
+
+              {/* Pending Invitations */}
+              {invitations.filter(inv => ['pending', 'rejected', 'withdrawn'].includes(inv.status)).length > 0 && (
+                <div className="mt-6">
+                  <h3 className="font-semibold text-dark-text-primary mb-3">Invitations</h3>
+                  <div className="space-y-2">
+                    {invitations.filter(inv => ['pending', 'rejected', 'withdrawn'].includes(inv.status)).map((inv) => (
+                      <div key={inv.id} className="flex items-center justify-between p-4 bg-dark-bg-secondary border border-dark-border-subtle rounded-lg">
+                        <div className="flex items-center gap-3">
+                          <div className="w-10 h-10 bg-gradient-to-br from-indigo-500/30 to-purple-600/30 rounded-full flex items-center justify-center text-white font-semibold text-sm">
+                            {(inv.invitee_email || '?').charAt(0).toUpperCase()}
+                          </div>
+                          <div>
+                            <p className="font-medium text-dark-text-primary">{inv.invitee_name || inv.invitee_email}</p>
+                            <p className="text-xs text-dark-text-tertiary">Invited {new Date(inv.invited_at).toLocaleDateString()} · {inv.role}</p>
+                          </div>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          {inv.status === 'pending' && (
+                            <>
+                              <span className="px-2 py-1 text-xs font-medium bg-warning-500/10 text-warning-400 border border-warning-500/20 rounded-full">Pending</span>
+                              <button
+                                onClick={() => handleResendInvitation(inv.id)}
+                                disabled={!inv.can_resend}
+                                title={inv.can_resend ? 'Resend invitation' : 'Can resend in 2 days'}
+                                className="px-2 py-1 text-xs text-dark-text-tertiary hover:text-dark-text-primary disabled:opacity-40 disabled:cursor-not-allowed border border-dark-border-subtle rounded transition-colors"
+                              >
+                                Resend
+                              </button>
+                              <button
+                                onClick={() => handleWithdrawInvitation(inv.id)}
+                                className="px-2 py-1 text-xs text-danger-400 hover:text-danger-300 border border-danger-500/20 rounded transition-colors"
+                              >
+                                Withdraw
+                              </button>
+                            </>
+                          )}
+                          {inv.status === 'rejected' && (
+                            <span className="px-2 py-1 text-xs font-medium bg-dark-bg-tertiary text-dark-text-tertiary border border-dark-border-subtle rounded-full">Rejected</span>
+                          )}
+                          {inv.status === 'withdrawn' && (
+                            <span className="px-2 py-1 text-xs font-medium bg-dark-bg-tertiary text-dark-text-tertiary border border-dark-border-subtle rounded-full">Withdrawn</span>
+                          )}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
 
               {/* Role Descriptions */}
               <div className="mt-6 p-4 bg-primary-500/10 border border-primary-500/30 rounded-lg">
@@ -588,15 +665,15 @@ export default function ProjectSettings() {
                     <label className="block text-sm font-medium text-dark-text-primary mb-1">
                       Status Category <span className="text-danger-400">*</span>
                     </label>
-                    <select
+                    <SearchSelect
                       value={newLaneStatusCategory}
-                      onChange={(e) => setNewLaneStatusCategory(e.target.value as 'todo' | 'in_progress' | 'done')}
-                      className="w-full md:w-48 px-3 py-2 bg-dark-bg-secondary border border-dark-border-subtle text-dark-text-primary rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-primary-500 outline-none transition-colors"
-                    >
-                      <option value="todo">To Do</option>
-                      <option value="in_progress">In Progress</option>
-                      <option value="done">Done</option>
-                    </select>
+                      onChange={(v) => setNewLaneStatusCategory(v as 'todo' | 'in_progress' | 'done')}
+                      options={[
+                        { value: 'todo', label: 'To Do' },
+                        { value: 'in_progress', label: 'In Progress' },
+                        { value: 'done', label: 'Done' },
+                      ]}
+                    />
                   </div>
                   <div className="mt-4">
                     <Button onClick={handleAddSwimLane} disabled={!newLaneName.trim()} size="sm">

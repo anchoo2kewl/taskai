@@ -5,13 +5,13 @@ import (
 	"encoding/json"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/go-chi/chi/v5"
 	"go.uber.org/zap"
 
 	"taskai/ent"
-	"taskai/ent/project"
 	"taskai/ent/team"
 	"taskai/ent/teammember"
 	"taskai/ent/teaminvitation"
@@ -60,6 +60,27 @@ type InviteTeamMemberRequest struct {
 
 type UpdateTeamMemberRequest struct {
 	Role string `json:"role"`
+}
+
+type UpdateTeamRequest struct {
+	Name string `json:"name"`
+}
+
+type AddTeamMemberRequest struct {
+	UserID int64 `json:"user_id"`
+}
+
+type UserSearchResult struct {
+	ID    int64   `json:"id"`
+	Email string  `json:"email"`
+	Name  *string `json:"name,omitempty"`
+}
+
+type SentInvitation struct {
+	ID           int64     `json:"id"`
+	InviteeEmail string    `json:"invitee_email"`
+	Status       string    `json:"status"`
+	CreatedAt    time.Time `json:"created_at"`
 }
 
 // HandleGetMyTeam returns the current user's team
@@ -135,7 +156,7 @@ func (s *Server) HandleGetTeamMembers(w http.ResponseWriter, r *http.Request) {
 		}
 
 		if em.Edges.User != nil {
-			m.UserName = em.Edges.User.Name
+			m.UserName = userDisplayNamePtr(em.Edges.User)
 			m.Email = em.Edges.User.Email
 		}
 
@@ -271,11 +292,7 @@ func (s *Server) HandleInviteTeamMember(w http.ResponseWriter, r *http.Request) 
 		inviter, err := s.db.Client.User.Get(ctx, userID)
 		inviterName := ""
 		if err == nil {
-			if inviter.Name != nil {
-				inviterName = *inviter.Name
-			} else {
-				inviterName = inviter.Email
-			}
+			inviterName = userDisplayName(inviter)
 		}
 
 		// Get team name
@@ -370,7 +387,7 @@ func (s *Server) HandleGetMyInvitations(w http.ResponseWriter, r *http.Request) 
 			inv.TeamName = entInv.Edges.Team.Name
 		}
 		if entInv.Edges.Inviter != nil {
-			inv.InviterName = entInv.Edges.Inviter.Name
+			inv.InviterName = userDisplayNamePtr(entInv.Edges.Inviter)
 		}
 
 		invitations = append(invitations, inv)
@@ -450,32 +467,6 @@ func (s *Server) HandleAcceptInvitation(w http.ResponseWriter, r *http.Request) 
 		s.logger.Error("Failed to add team member", zap.Error(err))
 		respondError(w, http.StatusInternalServerError, "failed to add team member", "internal_error")
 		return
-	}
-
-	// Add user to all existing team projects
-	// Get all projects for this team
-	projects, err := tx.Project.Query().
-		Where(project.TeamID(entInv.TeamID)).
-		All(ctx)
-	if err != nil {
-		s.logger.Error("Failed to get team projects", zap.Error(err))
-		respondError(w, http.StatusInternalServerError, "failed to get team projects", "internal_error")
-		return
-	}
-
-	// Add user as member to each project
-	for _, proj := range projects {
-		_, err := tx.ProjectMember.Create().
-			SetProjectID(proj.ID).
-			SetUserID(userID).
-			SetRole("member").
-			SetGrantedBy(proj.OwnerID).
-			Save(ctx)
-		if err != nil {
-			s.logger.Error("Failed to add user to project", zap.Error(err), zap.Int64("project_id", proj.ID))
-			respondError(w, http.StatusInternalServerError, "failed to add to team projects", "internal_error")
-			return
-		}
 	}
 
 	if err := tx.Commit(); err != nil {
@@ -621,6 +612,268 @@ func (s *Server) HandleRemoveTeamMember(w http.ResponseWriter, r *http.Request) 
 	respondJSON(w, http.StatusOK, map[string]string{"message": "member removed"})
 }
 
+// HandleUpdateTeam updates the team name
+func (s *Server) HandleUpdateTeam(w http.ResponseWriter, r *http.Request) {
+	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
+	defer cancel()
+
+	userID := r.Context().Value(UserIDKey).(int64)
+
+	var req UpdateTeamRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		respondError(w, http.StatusBadRequest, "invalid request body", "invalid_input")
+		return
+	}
+
+	name := strings.TrimSpace(req.Name)
+	if name == "" {
+		respondError(w, http.StatusBadRequest, "team name is required", "invalid_input")
+		return
+	}
+	if len(name) > 100 {
+		respondError(w, http.StatusBadRequest, "team name must be 100 characters or less", "invalid_input")
+		return
+	}
+
+	// Get user's team ID
+	teamID, err := s.getUserTeamID(ctx, userID)
+	if err != nil {
+		respondError(w, http.StatusNotFound, "no active team found", "not_found")
+		return
+	}
+
+	// Check if user is owner or admin
+	role, err := s.getUserTeamRole(ctx, userID, teamID)
+	if err != nil || (role != "owner" && role != "admin") {
+		respondError(w, http.StatusForbidden, "only team owners and admins can update the team", "forbidden")
+		return
+	}
+
+	// Update team name
+	entTeam, err := s.db.Client.Team.UpdateOneID(teamID).
+		SetName(name).
+		Save(ctx)
+	if err != nil {
+		s.logger.Error("Failed to update team", zap.Error(err), zap.Int64("team_id", teamID))
+		respondError(w, http.StatusInternalServerError, "failed to update team", "internal_error")
+		return
+	}
+
+	s.logger.Info("Team updated",
+		zap.Int64("team_id", teamID),
+		zap.String("new_name", name),
+		zap.Int64("updated_by", userID),
+	)
+
+	respondJSON(w, http.StatusOK, Team{
+		ID:        entTeam.ID,
+		Name:      entTeam.Name,
+		OwnerID:   entTeam.OwnerID,
+		CreatedAt: entTeam.CreatedAt,
+		UpdatedAt: entTeam.UpdatedAt,
+	})
+}
+
+// HandleGetTeamSentInvitations returns all pending invitations sent by the team
+func (s *Server) HandleGetTeamSentInvitations(w http.ResponseWriter, r *http.Request) {
+	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
+	defer cancel()
+
+	userID := r.Context().Value(UserIDKey).(int64)
+
+	// Get user's team ID
+	teamID, err := s.getUserTeamID(ctx, userID)
+	if err != nil {
+		respondError(w, http.StatusNotFound, "no active team found", "not_found")
+		return
+	}
+
+	// Get all pending invitations for this team
+	entInvitations, err := s.db.Client.TeamInvitation.Query().
+		Where(
+			teaminvitation.TeamID(teamID),
+			teaminvitation.Status("pending"),
+		).
+		Order(ent.Desc(teaminvitation.FieldCreatedAt)).
+		All(ctx)
+	if err != nil {
+		s.logger.Error("Failed to get sent invitations", zap.Error(err), zap.Int64("team_id", teamID))
+		respondError(w, http.StatusInternalServerError, "failed to fetch invitations", "internal_error")
+		return
+	}
+
+	invitations := make([]SentInvitation, 0, len(entInvitations))
+	for _, entInv := range entInvitations {
+		invitations = append(invitations, SentInvitation{
+			ID:           entInv.ID,
+			InviteeEmail: entInv.InviteeEmail,
+			Status:       entInv.Status,
+			CreatedAt:    entInv.CreatedAt,
+		})
+	}
+
+	respondJSON(w, http.StatusOK, invitations)
+}
+
+// HandleSearchUsers searches for users not already in the team
+func (s *Server) HandleSearchUsers(w http.ResponseWriter, r *http.Request) {
+	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
+	defer cancel()
+
+	userID := r.Context().Value(UserIDKey).(int64)
+
+	q := strings.TrimSpace(r.URL.Query().Get("q"))
+	if q == "" || len(q) < 2 {
+		respondJSON(w, http.StatusOK, []UserSearchResult{})
+		return
+	}
+
+	// Get user's team ID
+	teamID, err := s.getUserTeamID(ctx, userID)
+	if err != nil {
+		respondError(w, http.StatusNotFound, "no active team found", "not_found")
+		return
+	}
+
+	// Check if user is owner or admin
+	role, err := s.getUserTeamRole(ctx, userID, teamID)
+	if err != nil || (role != "owner" && role != "admin") {
+		respondError(w, http.StatusForbidden, "only team owners and admins can search users", "forbidden")
+		return
+	}
+
+	// Search users by email or name, excluding current team members
+	users, err := s.db.Client.User.Query().
+		Where(
+			user.Or(
+				user.EmailContainsFold(q),
+				user.NameContainsFold(q),
+				user.FirstNameContainsFold(q),
+				user.LastNameContainsFold(q),
+			),
+			user.Not(user.HasTeamMembershipsWith(
+				teammember.TeamID(teamID),
+			)),
+		).
+		Limit(10).
+		All(ctx)
+	if err != nil {
+		s.logger.Error("Failed to search users", zap.Error(err))
+		respondError(w, http.StatusInternalServerError, "failed to search users", "internal_error")
+		return
+	}
+
+	results := make([]UserSearchResult, 0, len(users))
+	for _, u := range users {
+		results = append(results, UserSearchResult{
+			ID:    u.ID,
+			Email: u.Email,
+			Name:  userDisplayNamePtr(u),
+		})
+	}
+
+	respondJSON(w, http.StatusOK, results)
+}
+
+// HandleAddTeamMember directly adds an existing user to the team
+func (s *Server) HandleAddTeamMember(w http.ResponseWriter, r *http.Request) {
+	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
+	defer cancel()
+
+	userID := r.Context().Value(UserIDKey).(int64)
+
+	var req AddTeamMemberRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		respondError(w, http.StatusBadRequest, "invalid request body", "invalid_input")
+		return
+	}
+
+	if req.UserID <= 0 {
+		respondError(w, http.StatusBadRequest, "valid user_id is required", "invalid_input")
+		return
+	}
+
+	// Get user's team ID
+	teamID, err := s.getUserTeamID(ctx, userID)
+	if err != nil {
+		respondError(w, http.StatusNotFound, "no active team found", "not_found")
+		return
+	}
+
+	// Check if user is owner or admin
+	role, err := s.getUserTeamRole(ctx, userID, teamID)
+	if err != nil || (role != "owner" && role != "admin") {
+		respondError(w, http.StatusForbidden, "only team owners and admins can add members", "forbidden")
+		return
+	}
+
+	// Verify the target user exists
+	targetUser, err := s.db.Client.User.Get(ctx, req.UserID)
+	if err != nil {
+		if ent.IsNotFound(err) {
+			respondError(w, http.StatusNotFound, "user not found", "not_found")
+			return
+		}
+		s.logger.Error("Failed to get user", zap.Error(err))
+		respondError(w, http.StatusInternalServerError, "failed to get user", "internal_error")
+		return
+	}
+
+	// Check if user is already a member
+	exists, err := s.db.Client.TeamMember.Query().
+		Where(
+			teammember.TeamID(teamID),
+			teammember.UserID(req.UserID),
+		).
+		Exist(ctx)
+	if err != nil {
+		s.logger.Error("Failed to check existing member", zap.Error(err))
+		respondError(w, http.StatusInternalServerError, "failed to check membership", "internal_error")
+		return
+	}
+	if exists {
+		respondError(w, http.StatusConflict, "user is already a team member", "already_member")
+		return
+	}
+
+	// Begin transaction
+	tx, err := s.db.Client.Tx(ctx)
+	if err != nil {
+		s.logger.Error("Failed to begin transaction", zap.Error(err))
+		respondError(w, http.StatusInternalServerError, "failed to add member", "internal_error")
+		return
+	}
+	defer tx.Rollback()
+
+	// Add user as team member
+	_, err = tx.TeamMember.Create().
+		SetTeamID(teamID).
+		SetUserID(req.UserID).
+		SetRole("member").
+		SetStatus("active").
+		Save(ctx)
+	if err != nil {
+		s.logger.Error("Failed to add team member", zap.Error(err))
+		respondError(w, http.StatusInternalServerError, "failed to add team member", "internal_error")
+		return
+	}
+
+	if err := tx.Commit(); err != nil {
+		s.logger.Error("Failed to commit transaction", zap.Error(err))
+		respondError(w, http.StatusInternalServerError, "failed to add member", "internal_error")
+		return
+	}
+
+	s.logger.Info("Team member added directly",
+		zap.Int64("team_id", teamID),
+		zap.Int64("added_user_id", req.UserID),
+		zap.String("added_user_email", targetUser.Email),
+		zap.Int64("added_by", userID),
+	)
+
+	respondJSON(w, http.StatusCreated, map[string]string{"message": "member added"})
+}
+
 // Helper functions
 
 func (s *Server) getUserTeamID(ctx context.Context, userID int64) (int64, error) {
@@ -675,7 +928,7 @@ func (s *Server) getInvitation(ctx context.Context, invitationID int64) (*TeamIn
 		inv.TeamName = entInv.Edges.Team.Name
 	}
 	if entInv.Edges.Inviter != nil {
-		inv.InviterName = entInv.Edges.Inviter.Name
+		inv.InviterName = userDisplayNamePtr(entInv.Edges.Inviter)
 	}
 
 	return &inv, nil
@@ -749,13 +1002,7 @@ func (s *Server) HandleGetInvitationByToken(w http.ResponseWriter, r *http.Reque
 	}
 
 	if entInv.Edges.Inviter != nil {
-		inviterName := ""
-		if entInv.Edges.Inviter.Name != nil {
-			inviterName = *entInv.Edges.Inviter.Name
-		} else {
-			inviterName = entInv.Edges.Inviter.Email
-		}
-		resp.InviterName = inviterName
+		resp.InviterName = userDisplayName(entInv.Edges.Inviter)
 	}
 
 	if resp.RequiresSignup && entInv.InviteCode != nil {
@@ -846,30 +1093,6 @@ func (s *Server) HandleAcceptInvitationByToken(w http.ResponseWriter, r *http.Re
 		s.logger.Error("Failed to add team member", zap.Error(err))
 		respondError(w, http.StatusInternalServerError, "failed to add team member", "internal_error")
 		return
-	}
-
-	// Add user to all existing team projects
-	projects, err := tx.Project.Query().
-		Where(project.TeamID(entInv.TeamID)).
-		All(ctx)
-	if err != nil {
-		s.logger.Error("Failed to get team projects", zap.Error(err))
-		respondError(w, http.StatusInternalServerError, "failed to get team projects", "internal_error")
-		return
-	}
-
-	for _, proj := range projects {
-		_, err := tx.ProjectMember.Create().
-			SetProjectID(proj.ID).
-			SetUserID(userID).
-			SetRole("member").
-			SetGrantedBy(proj.OwnerID).
-			Save(ctx)
-		if err != nil {
-			s.logger.Error("Failed to add user to project", zap.Error(err), zap.Int64("project_id", proj.ID))
-			respondError(w, http.StatusInternalServerError, "failed to add to team projects", "internal_error")
-			return
-		}
 	}
 
 	if err := tx.Commit(); err != nil {

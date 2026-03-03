@@ -91,6 +91,23 @@ export interface ProjectMember {
   granted_at: string
 }
 
+export interface ProjectInvitation {
+  id: number
+  project_id: number
+  project_name?: string
+  inviter_id: number
+  inviter_name?: string
+  invitee_user_id: number
+  invitee_name?: string
+  invitee_email?: string
+  role: string
+  status: string
+  invited_at: string
+  responded_at?: string
+  last_sent_at: string
+  can_resend: boolean
+}
+
 export interface WikiPage {
   id: number
   project_id: number
@@ -203,6 +220,19 @@ export interface TeamInvitation {
   id: number
   team_name: string
   inviter_name?: string
+}
+
+export interface SentInvitation {
+  id: number
+  invitee_email: string
+  status: string
+  created_at: string
+}
+
+export interface UserSearchResult {
+  id: number
+  email: string
+  name?: string
 }
 
 export interface TokenInvitationInfo {
@@ -461,6 +491,13 @@ class ApiClient {
     return this.request<GetCurrentUserResponse>('/api/me')
   }
 
+  async updateProfile(data: { first_name: string; last_name: string }): Promise<GetCurrentUserResponse> {
+    return this.request<GetCurrentUserResponse>('/api/me', {
+      method: 'PATCH',
+      body: JSON.stringify(data),
+    })
+  }
+
   // Health check
   async healthCheck(): Promise<{ status: string; database?: string }> {
     return this.request('/healthz')
@@ -559,6 +596,42 @@ class ApiClient {
     return this.request<void>(`/api/projects/${projectId}/members/${memberId}`, {
       method: 'DELETE',
     })
+  }
+
+  // Project invitations
+  async inviteProjectMember(projectId: number, data: { user_id: number; role: string }): Promise<{ message: string; invitation_id: number }> {
+    return this.request(`/api/projects/${projectId}/invitations`, {
+      method: 'POST',
+      body: JSON.stringify(data),
+    })
+  }
+
+  async getProjectInvitations(projectId: number): Promise<ProjectInvitation[]> {
+    return this.request<ProjectInvitation[]>(`/api/projects/${projectId}/invitations`)
+  }
+
+  async acceptProjectInvitation(invitationId: number): Promise<void> {
+    return this.request<void>(`/api/project-invitations/${invitationId}/accept`, { method: 'POST' })
+  }
+
+  async rejectProjectInvitation(invitationId: number): Promise<void> {
+    return this.request<void>(`/api/project-invitations/${invitationId}/reject`, { method: 'POST' })
+  }
+
+  async withdrawProjectInvitation(invitationId: number): Promise<void> {
+    return this.request<void>(`/api/project-invitations/${invitationId}`, { method: 'DELETE' })
+  }
+
+  async resendProjectInvitation(invitationId: number): Promise<void> {
+    return this.request<void>(`/api/project-invitations/${invitationId}/resend`, { method: 'POST' })
+  }
+
+  async getMyProjectInvitations(): Promise<ProjectInvitation[]> {
+    return this.request<ProjectInvitation[]>('/api/my/project-invitations')
+  }
+
+  async getMyProjectInvitationCount(): Promise<{ count: number }> {
+    return this.request<{ count: number }>('/api/my/project-invitations/count')
   }
 
   // Project settings - GitHub
@@ -735,6 +808,28 @@ class ApiClient {
     return this.request<{ message: string }>('/api/team/invitations/accept-by-token', {
       method: 'POST',
       body: JSON.stringify({ token }),
+    })
+  }
+
+  async updateTeam(name: string): Promise<Team> {
+    return this.request<Team>('/api/team', {
+      method: 'PATCH',
+      body: JSON.stringify({ name }),
+    })
+  }
+
+  async getTeamSentInvitations(): Promise<SentInvitation[]> {
+    return this.request<SentInvitation[]>('/api/team/invitations/sent')
+  }
+
+  async searchTeamUsers(query: string): Promise<UserSearchResult[]> {
+    return this.request<UserSearchResult[]>(`/api/team/users/search?q=${encodeURIComponent(query)}`)
+  }
+
+  async addTeamMember(userId: number): Promise<{ message: string }> {
+    return this.request<{ message: string }>('/api/team/members', {
+      method: 'POST',
+      body: JSON.stringify({ user_id: userId }),
     })
   }
 

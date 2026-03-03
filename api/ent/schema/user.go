@@ -21,6 +21,8 @@ func (User) Fields() []ent.Field {
 		field.String("email").Unique().NotEmpty(),
 		field.String("password_hash").NotEmpty().Sensitive(),
 		field.String("name").Optional().Nillable(),
+		field.String("first_name").Optional().Nillable(),
+		field.String("last_name").Optional().Nillable(),
 		field.Bool("is_admin").Default(false),
 		field.String("totp_secret").Optional().Nillable().Sensitive(),
 		field.Bool("totp_enabled").Default(false),

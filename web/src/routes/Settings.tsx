@@ -109,7 +109,7 @@ export default function Settings() {
     loadCloudinaryCredentials()
     loadInvites()
     loadProjectInvitations()
-  }, [])
+  }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
   const loadProfile = async () => {
     try {

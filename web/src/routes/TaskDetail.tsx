@@ -56,14 +56,14 @@ export default function TaskDetail({ isModal, onClose }: TaskDetailProps) {
     loadSprints()
     loadSwimLanes()
     loadMembers()
-  }, [projectId, taskNumber])
+  }, [projectId, taskNumber]) // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     if (task?.id) {
       loadComments(task.id)
       loadAttachments(task.id)
     }
-  }, [task?.id])
+  }, [task?.id]) // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     if (editingField === 'title') titleRef.current?.focus()

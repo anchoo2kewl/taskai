@@ -23,7 +23,7 @@ export default function Wiki() {
       loadProject()
       loadPages()
     }
-  }, [projectId])
+  }, [projectId]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const loadProject = async () => {
     try {

@@ -62,7 +62,7 @@ export default function Sidebar({ onCreateProject, isOpen, onClose, isPinned, on
     return () => {
       delete w.__addProject
     }
-  }, [projects])
+  }, [projects]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const navItems = [
     {

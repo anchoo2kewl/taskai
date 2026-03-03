@@ -12,6 +12,7 @@ import type { SearchTaskResult, GlobalSearchWikiResult } from '../lib/api'
 
 // Detect Mac vs Windows/Linux for keyboard shortcut display
 const isMac = typeof navigator !== 'undefined' && /Mac|iPod|iPhone|iPad/.test(navigator.userAgent)
+// eslint-disable-next-line react-refresh/only-export-components
 export const searchShortcutLabel = isMac ? '⌘K' : 'Ctrl+K'
 
 interface Command {
@@ -242,7 +243,7 @@ export default function CommandPalette() {
   }, [query, staticCommands])
 
   // Group all commands
-  const allCommands = [...filteredStaticCommands, ...searchCommands]
+  const allCommands = useMemo(() => [...filteredStaticCommands, ...searchCommands], [filteredStaticCommands, searchCommands])
 
   const groupedCommands = useMemo(() => {
     const groups: Record<string, Command[]> = {

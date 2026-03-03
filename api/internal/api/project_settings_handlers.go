@@ -31,6 +31,7 @@ type ProjectGitHubSettings struct {
 	RepoName     string     `json:"github_repo_name"`
 	Branch       string     `json:"github_branch"`
 	SyncEnabled  bool       `json:"github_sync_enabled"`
+	PushEnabled  bool       `json:"github_push_enabled"`
 	LastSync     *time.Time `json:"github_last_sync"`
 	TokenSet     bool       `json:"github_token_set"`
 	Login        *string    `json:"github_login"`
@@ -54,6 +55,7 @@ type UpdateProjectGitHubRequest struct {
 	RepoName    string `json:"github_repo_name"`
 	Branch      string `json:"github_branch"`
 	SyncEnabled bool   `json:"github_sync_enabled"`
+	PushEnabled bool   `json:"github_push_enabled"`
 	Token       string `json:"github_token"`
 }
 
@@ -404,6 +406,7 @@ func (s *Server) HandleGetProjectGitHubSettings(w http.ResponseWriter, r *http.R
 			COALESCE(github_repo_name, ''),
 			COALESCE(github_branch, 'main'),
 			github_sync_enabled,
+			COALESCE(github_push_enabled, 0),
 			github_last_sync,
 			github_token,
 			github_login
@@ -415,6 +418,7 @@ func (s *Server) HandleGetProjectGitHubSettings(w http.ResponseWriter, r *http.R
 		&settings.RepoName,
 		&settings.Branch,
 		&settings.SyncEnabled,
+		&settings.PushEnabled,
 		&lastSync,
 		&token,
 		&loginNull,
@@ -476,9 +480,10 @@ func (s *Server) HandleUpdateProjectGitHubSettings(w http.ResponseWriter, r *htt
 				github_repo_name = $3,
 				github_branch = $4,
 				github_sync_enabled = $5,
-				github_token = $6
-			WHERE id = $7
-		`, req.RepoURL, req.Owner, req.RepoName, req.Branch, req.SyncEnabled, req.Token, projectID)
+				github_push_enabled = $6,
+				github_token = $7
+			WHERE id = $8
+		`, req.RepoURL, req.Owner, req.RepoName, req.Branch, req.SyncEnabled, req.PushEnabled, req.Token, projectID)
 	} else {
 		_, err = s.db.Exec(`
 			UPDATE projects
@@ -487,9 +492,10 @@ func (s *Server) HandleUpdateProjectGitHubSettings(w http.ResponseWriter, r *htt
 				github_owner = $2,
 				github_repo_name = $3,
 				github_branch = $4,
-				github_sync_enabled = $5
-			WHERE id = $6
-		`, req.RepoURL, req.Owner, req.RepoName, req.Branch, req.SyncEnabled, projectID)
+				github_sync_enabled = $5,
+				github_push_enabled = $6
+			WHERE id = $7
+		`, req.RepoURL, req.Owner, req.RepoName, req.Branch, req.SyncEnabled, req.PushEnabled, projectID)
 	}
 
 	if err != nil {

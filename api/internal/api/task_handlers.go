@@ -677,6 +677,11 @@ func (s *Server) HandleUpdateTask(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Best-effort push swim lane change to GitHub Projects V2
+	if finalSwimLaneID != nil {
+		go s.tryPushSwimLaneToGitHub(context.Background(), taskID, finalSwimLaneID)
+	}
+
 	// Handle tag updates if provided
 	if req.TagIDs != nil {
 		// Delete existing task_tags

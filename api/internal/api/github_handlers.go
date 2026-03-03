@@ -222,24 +222,47 @@ func fetchGitHubGraphQL(ctx context.Context, token, query string, variables map[
 }
 
 // fetchProjectStatusColumns fetches GitHub Projects V2 status columns for a repo.
+// Checks both repo-linked projects AND owner-level projects (user or org).
 // Returns project info (id, status field id, options) from the first project found, or nil if none.
 func fetchProjectStatusColumns(ctx context.Context, token, owner, repo string) (*ghProjectInfo, error) {
 	if token == "" {
 		return nil, nil
 	}
+	// Query both repo-linked projects and owner-level projects (handles org and user owners)
 	const q = `
 query($owner: String!, $repo: String!) {
   repository(owner: $owner, name: $repo) {
-    projectsV2(first: 5) {
+    projectsV2(first: 10) {
       nodes {
         id
-        title
         fields(first: 20) {
           nodes {
-            ... on ProjectV2SingleSelectField {
-              id
-              name
-              options { id name }
+            ... on ProjectV2SingleSelectField { id name options { id name } }
+          }
+        }
+      }
+    }
+    owner {
+      ... on Organization {
+        projectsV2(first: 10) {
+          nodes {
+            id
+            fields(first: 20) {
+              nodes {
+                ... on ProjectV2SingleSelectField { id name options { id name } }
+              }
+            }
+          }
+        }
+      }
+      ... on User {
+        projectsV2(first: 10) {
+          nodes {
+            id
+            fields(first: 20) {
+              nodes {
+                ... on ProjectV2SingleSelectField { id name options { id name } }
+              }
             }
           }
         }
@@ -253,6 +276,11 @@ query($owner: String!, $repo: String!) {
 				ProjectsV2 struct {
 					Nodes []ghProjectV2 `json:"nodes"`
 				} `json:"projectsV2"`
+				Owner struct {
+					ProjectsV2 struct {
+						Nodes []ghProjectV2 `json:"nodes"`
+					} `json:"projectsV2"`
+				} `json:"owner"`
 			} `json:"repository"`
 		} `json:"data"`
 		Errors []struct {
@@ -265,8 +293,25 @@ query($owner: String!, $repo: String!) {
 	if len(result.Errors) > 0 {
 		return nil, fmt.Errorf("graphql: %s", result.Errors[0].Message)
 	}
-	for _, proj := range result.Data.Repository.ProjectsV2.Nodes {
-		// Try to find a status-like single-select field by name first
+
+	// Combine repo-linked and owner-level projects, deduplicated by project ID
+	seen := map[string]bool{}
+	var allProjects []ghProjectV2
+	for _, p := range result.Data.Repository.ProjectsV2.Nodes {
+		if !seen[p.ID] {
+			seen[p.ID] = true
+			allProjects = append(allProjects, p)
+		}
+	}
+	for _, p := range result.Data.Repository.Owner.ProjectsV2.Nodes {
+		if !seen[p.ID] {
+			seen[p.ID] = true
+			allProjects = append(allProjects, p)
+		}
+	}
+
+	for _, proj := range allProjects {
+		// Prefer a field named after common status names, fall back to first single-select field
 		var best *ghProjectField
 		for i := range proj.Fields.Nodes {
 			f := &proj.Fields.Nodes[i]
@@ -280,7 +325,6 @@ query($owner: String!, $repo: String!) {
 				best = f
 				break
 			}
-			// Fallback: first single-select field in this project
 			if best == nil {
 				best = f
 			}

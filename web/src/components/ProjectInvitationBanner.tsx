@@ -1,37 +1,22 @@
 import { useState, useEffect, useRef } from 'react'
-import { Link } from 'react-router-dom'
+import { useNavigate } from 'react-router-dom'
 import { apiClient } from '../lib/api'
 
-const DISMISSED_KEY = 'project_invitation_banner_dismissed_count'
-
-export default function ProjectInvitationBanner() {
+export default function NotificationBell() {
   const [count, setCount] = useState(0)
-  const [dismissed, setDismissed] = useState(false)
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null)
+  const navigate = useNavigate()
 
   const fetchCount = async () => {
     try {
       const { count: c } = await apiClient.getMyProjectInvitationCount()
-      setCount(prev => {
-        // Re-show banner if count increased since last dismiss
-        if (c > prev) {
-          setDismissed(false)
-          sessionStorage.removeItem(DISMISSED_KEY)
-        }
-        return c
-      })
+      setCount(c)
     } catch {
       // ignore
     }
   }
 
   useEffect(() => {
-    // Check if previously dismissed for this count
-    const dismissedCountStr = sessionStorage.getItem(DISMISSED_KEY)
-    if (dismissedCountStr) {
-      setDismissed(true)
-    }
-
     fetchCount()
     intervalRef.current = setInterval(fetchCount, 60_000)
     return () => {
@@ -39,35 +24,21 @@ export default function ProjectInvitationBanner() {
     }
   }, [])
 
-  const handleDismiss = () => {
-    setDismissed(true)
-    sessionStorage.setItem(DISMISSED_KEY, String(count))
-  }
-
-  if (count === 0 || dismissed) return null
-
   return (
-    <div className="bg-primary-500/10 border-b border-primary-500/20 px-4 py-2 flex items-center justify-between gap-4">
-      <div className="flex items-center gap-2 text-sm text-primary-300">
-        <svg className="w-4 h-4 flex-shrink-0" fill="currentColor" viewBox="0 0 20 20">
-          <path d="M10 2a6 6 0 00-6 6v3.586l-.707.707A1 1 0 004 14h12a1 1 0 00.707-1.707L16 11.586V8a6 6 0 00-6-6zM10 18a3 3 0 01-3-3h6a3 3 0 01-3 3z" />
-        </svg>
-        <span>
-          You have <strong>{count}</strong> pending project invitation{count !== 1 ? 's' : ''}.{' '}
-          <Link to="/app/settings" className="underline hover:text-primary-200 transition-colors">
-            View &amp; respond
-          </Link>
+    <button
+      onClick={() => navigate('/app/settings')}
+      className="relative p-1.5 text-dark-text-tertiary hover:text-dark-text-primary hover:bg-dark-bg-tertiary rounded-md transition-colors"
+      aria-label={count > 0 ? `${count} pending project invitation${count !== 1 ? 's' : ''}` : 'Notifications'}
+      title={count > 0 ? `${count} pending project invitation${count !== 1 ? 's' : ''} — click to view` : 'Notifications'}
+    >
+      <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9" />
+      </svg>
+      {count > 0 && (
+        <span className="absolute -top-0.5 -right-0.5 min-w-[16px] h-4 px-0.5 bg-danger-500 text-white text-[10px] font-bold rounded-full flex items-center justify-center leading-none">
+          {count > 9 ? '9+' : count}
         </span>
-      </div>
-      <button
-        onClick={handleDismiss}
-        className="flex-shrink-0 p-1 text-primary-400 hover:text-primary-200 transition-colors"
-        aria-label="Dismiss"
-      >
-        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-        </svg>
-      </button>
-    </div>
+      )}
+    </button>
   )
 }

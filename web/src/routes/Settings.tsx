@@ -1769,6 +1769,97 @@ print(response.json())`}
             </div>
           </Card>
 
+          {/* Project Invitations Section */}
+          <Card className="shadow-md" id="project-invitations">
+            <div className="p-6 sm:p-8">
+              <div className="flex items-start gap-4 mb-6">
+                <div className="flex-shrink-0 w-10 h-10 bg-primary-500/10 rounded-lg flex items-center justify-center">
+                  <svg className="w-5 h-5 text-primary-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9" />
+                  </svg>
+                </div>
+                <div className="flex-1">
+                  <div className="flex items-center gap-3">
+                    <h2 className="text-xl font-semibold text-dark-text-primary">Project Invitations</h2>
+                    {projectInvitations.length > 0 && (
+                      <span className="px-2 py-0.5 text-xs font-bold bg-danger-500 text-white rounded-full">
+                        {projectInvitations.length}
+                      </span>
+                    )}
+                  </div>
+                  <p className="text-sm text-dark-text-secondary mt-1">
+                    Accept or decline project access invitations from your teammates
+                  </p>
+                </div>
+              </div>
+
+              {projectInviteSuccess && (
+                <div className="mb-4 p-3 bg-success-500/10 border border-success-500/30 rounded-lg text-sm text-success-300 flex items-center gap-2">
+                  <svg className="w-4 h-4 flex-shrink-0" fill="currentColor" viewBox="0 0 20 20">
+                    <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" />
+                  </svg>
+                  {projectInviteSuccess}
+                </div>
+              )}
+              {projectInviteError && (
+                <div className="mb-4 p-3 bg-danger-500/10 border border-danger-500/30 rounded-lg text-sm text-danger-300">
+                  {projectInviteError}
+                </div>
+              )}
+
+              {projectInvitations.length === 0 ? (
+                <div className="flex flex-col items-center justify-center py-10 text-center">
+                  <div className="w-12 h-12 bg-dark-bg-secondary rounded-full flex items-center justify-center mb-3">
+                    <svg className="w-6 h-6 text-dark-text-quaternary" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9" />
+                    </svg>
+                  </div>
+                  <p className="text-sm text-dark-text-tertiary">No pending project invitations</p>
+                  <p className="text-xs text-dark-text-quaternary mt-1">When a project owner invites you, it will appear here</p>
+                </div>
+              ) : (
+                <div className="space-y-3">
+                  {projectInvitations.map((inv) => (
+                    <div key={inv.id} className="flex items-center justify-between gap-4 p-4 bg-dark-bg-secondary border border-dark-border-subtle rounded-lg hover:border-primary-500/30 transition-colors">
+                      <div className="flex items-center gap-3 min-w-0">
+                        <div className="w-10 h-10 bg-gradient-to-br from-indigo-500/20 to-purple-600/20 rounded-full flex items-center justify-center flex-shrink-0">
+                          <svg className="w-5 h-5 text-primary-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z" />
+                          </svg>
+                        </div>
+                        <div className="min-w-0">
+                          <p className="font-semibold text-dark-text-primary truncate">{inv.project_name}</p>
+                          <p className="text-xs text-dark-text-tertiary mt-0.5">
+                            Invited by <span className="text-dark-text-secondary">{inv.inviter_name}</span>
+                            {' · '}
+                            <span className="capitalize px-1.5 py-0.5 bg-dark-bg-tertiary rounded text-dark-text-secondary text-[11px]">{inv.role}</span>
+                          </p>
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-2 flex-shrink-0">
+                        <Button
+                          size="sm"
+                          onClick={() => handleAcceptProjectInvite(inv.id)}
+                          disabled={isRespondingToProjectInvite === inv.id}
+                        >
+                          {isRespondingToProjectInvite === inv.id ? 'Joining...' : 'Join Project'}
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant="secondary"
+                          onClick={() => handleRejectProjectInvite(inv.id)}
+                          disabled={isRespondingToProjectInvite === inv.id}
+                        >
+                          Decline
+                        </Button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </Card>
+
           {/* Team Management Section */}
           <Card className="shadow-md">
             <div className="p-6 sm:p-8 flex items-start gap-4">
@@ -1883,60 +1974,6 @@ print(response.json())`}
                         </div>
                       ))}
                     </div>
-                  </div>
-                )}
-
-                {/* Project Invitations */}
-                {(projectInvitations.length > 0 || projectInviteSuccess || projectInviteError) && (
-                  <div className="mb-6">
-                    <h3 className="text-sm font-semibold text-dark-text-primary mb-3">Project Invitations</h3>
-                    {projectInviteSuccess && (
-                      <div className="mb-3 p-3 bg-success-500/10 border border-success-500/30 rounded-lg text-sm text-success-300">
-                        {projectInviteSuccess}
-                      </div>
-                    )}
-                    {projectInviteError && (
-                      <div className="mb-3 p-3 bg-danger-500/10 border border-danger-500/30 rounded-lg text-sm text-danger-300">
-                        {projectInviteError}
-                      </div>
-                    )}
-                    {projectInvitations.length === 0 ? (
-                      <p className="text-sm text-dark-text-tertiary">No pending project invitations</p>
-                    ) : (
-                      <div className="space-y-2">
-                        {projectInvitations.map((inv) => (
-                          <div key={inv.id} className="p-4 bg-primary-500/10 border border-primary-500/30 rounded-lg">
-                            <div className="flex items-center justify-between gap-3">
-                              <div className="min-w-0">
-                                <p className="font-medium text-dark-text-primary truncate">
-                                  {inv.project_name}
-                                </p>
-                                <p className="text-sm text-dark-text-secondary">
-                                  Invited by {inv.inviter_name} · <span className="capitalize">{inv.role}</span>
-                                </p>
-                              </div>
-                              <div className="flex gap-2 flex-shrink-0">
-                                <Button
-                                  size="sm"
-                                  onClick={() => handleAcceptProjectInvite(inv.id)}
-                                  disabled={isRespondingToProjectInvite === inv.id}
-                                >
-                                  {isRespondingToProjectInvite === inv.id ? 'Accepting...' : 'Accept'}
-                                </Button>
-                                <Button
-                                  size="sm"
-                                  variant="secondary"
-                                  onClick={() => handleRejectProjectInvite(inv.id)}
-                                  disabled={isRespondingToProjectInvite === inv.id}
-                                >
-                                  Decline
-                                </Button>
-                              </div>
-                            </div>
-                          </div>
-                        ))}
-                      </div>
-                    )}
                   </div>
                 )}
 

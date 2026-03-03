@@ -5,7 +5,7 @@ import Sidebar from '../components/Sidebar'
 import ProjectModal from '../components/ProjectModal'
 import SyncStatus from '../components/SyncStatus'
 import CommandPalette, { searchShortcutLabel } from '../components/CommandPalette'
-import ProjectInvitationBanner from '../components/ProjectInvitationBanner'
+import NotificationBell from '../components/ProjectInvitationBanner'
 import { Project } from '../lib/api'
 
 export default function Dashboard() {
@@ -55,6 +55,7 @@ export default function Dashboard() {
 
           <div className="flex items-center gap-2 md:gap-4">
             <SyncStatus />
+            <NotificationBell />
             <button
               onClick={() => document.dispatchEvent(new KeyboardEvent('keydown', { key: 'k', metaKey: true }))}
               className="hidden md:inline-flex items-center gap-2 px-3 py-1.5 text-xs text-dark-text-quaternary hover:text-dark-text-tertiary bg-dark-bg-secondary hover:bg-dark-bg-tertiary border border-dark-border-subtle rounded-md transition-all duration-150 cursor-pointer"
@@ -97,9 +98,6 @@ export default function Dashboard() {
           </div>
         </div>
       </header>
-
-      {/* Project invitation banner */}
-      <ProjectInvitationBanner />
 
       {/* Main Layout */}
       <div className="flex flex-1 overflow-hidden">

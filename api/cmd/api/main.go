@@ -294,6 +294,9 @@ func main() {
 			r.Delete("/projects/{id}/members/{memberId}", server.HandleRemoveProjectMember)
 			r.Get("/projects/{id}/github", server.HandleGetProjectGitHubSettings)
 			r.Patch("/projects/{id}/github", server.HandleUpdateProjectGitHubSettings)
+			r.Post("/projects/{id}/github/preview", server.HandleGitHubPreview)
+			r.Post("/projects/{id}/github/pull", server.HandleGitHubPull)
+			r.Post("/projects/{id}/github/sync", server.HandleGitHubSync)
 
 			// Project invitation routes
 			r.Post("/projects/{id}/invitations", server.HandleInviteProjectMember)

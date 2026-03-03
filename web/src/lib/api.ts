@@ -176,6 +176,36 @@ export interface ProjectGitHubSettings {
   github_branch: string
   github_sync_enabled: boolean
   github_last_sync: string | null
+  github_token_set: boolean
+}
+
+export interface GitHubUserMatch {
+  login: string
+  name: string
+  matched_user_id: number | null
+  matched_name: string
+}
+
+export interface GitHubPreviewResponse {
+  milestone_count: number
+  label_count: number
+  issue_count: number
+  github_users: GitHubUserMatch[]
+}
+
+export interface GitHubPullRequest {
+  token?: string
+  pull_sprints: boolean
+  pull_tags: boolean
+  pull_tasks: boolean
+  user_assignments: Record<string, number>
+}
+
+export interface GitHubPullResponse {
+  created_sprints: number
+  created_tags: number
+  created_tasks: number
+  skipped_tasks: number
 }
 
 export interface UserWithStats {
@@ -650,10 +680,31 @@ class ApiClient {
     return this.request<ProjectGitHubSettings>(`/api/projects/${projectId}/github`)
   }
 
-  async updateProjectGitHub(projectId: number, data: Partial<ProjectGitHubSettings>): Promise<ProjectGitHubSettings> {
-    return this.request<ProjectGitHubSettings>(`/api/projects/${projectId}/github`, {
+  async updateProjectGitHub(projectId: number, data: Partial<ProjectGitHubSettings> & { github_token?: string }): Promise<MessageResponse> {
+    return this.request<MessageResponse>(`/api/projects/${projectId}/github`, {
       method: 'PATCH',
       body: JSON.stringify(data),
+    })
+  }
+
+  async githubPreview(projectId: number, token?: string): Promise<GitHubPreviewResponse> {
+    return this.request<GitHubPreviewResponse>(`/api/projects/${projectId}/github/preview`, {
+      method: 'POST',
+      body: JSON.stringify({ token: token || '' }),
+    })
+  }
+
+  async githubPull(projectId: number, data: GitHubPullRequest): Promise<GitHubPullResponse> {
+    return this.request<GitHubPullResponse>(`/api/projects/${projectId}/github/pull`, {
+      method: 'POST',
+      body: JSON.stringify(data),
+    })
+  }
+
+  async githubSync(projectId: number): Promise<GitHubPullResponse> {
+    return this.request<GitHubPullResponse>(`/api/projects/${projectId}/github/sync`, {
+      method: 'POST',
+      body: JSON.stringify({ pull_sprints: true, pull_tags: true, pull_tasks: true, user_assignments: {} }),
     })
   }
 

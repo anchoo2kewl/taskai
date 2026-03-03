@@ -82,9 +82,14 @@ jobs:
             export VERSION='$VERSION'
             export GIT_COMMIT='$GIT_COMMIT'
             export BUILD_TIME='$BUILD_TIME'
-            export GITHUB_CLIENT_ID='$GH_OAUTH_CLIENT_ID'
-            export GITHUB_CLIENT_SECRET='$GH_OAUTH_CLIENT_SECRET'
             export APP_URL='$APP_URL'
+            # Only override GitHub OAuth vars if the secret is actually set (not empty/placeholder)
+            GH_ID='$GH_OAUTH_CLIENT_ID'
+            GH_SECRET='$GH_OAUTH_CLIENT_SECRET'
+            if [ -n "\$GH_ID" ] && [ "\$GH_ID" != "-" ]; then
+              export GITHUB_CLIENT_ID="\$GH_ID"
+              export GITHUB_CLIENT_SECRET="\$GH_SECRET"
+            fi
 
             # Login to Docker Hub to avoid rate limiting
             echo '$DOCKERHUB_TOKEN' | docker login -u '$DOCKERHUB_USERNAME' --password-stdin

@@ -1,6 +1,7 @@
 package api
 
 import (
+	"bytes"
 	"context"
 	"database/sql"
 	"encoding/json"
@@ -35,14 +36,54 @@ type ghUser struct {
 }
 
 type ghIssue struct {
-	Number    int           `json:"number"`
-	Title     string        `json:"title"`
-	Body      string        `json:"body"`
-	State     string        `json:"state"`
-	Assignee  *ghUser       `json:"assignee"`
-	Assignees []ghUser      `json:"assignees"`
-	Labels    []ghLabel     `json:"labels"`
-	Milestone *ghMilestone  `json:"milestone"`
+	Number      int          `json:"number"`
+	Title       string       `json:"title"`
+	Body        string       `json:"body"`
+	State       string       `json:"state"`
+	Assignee    *ghUser      `json:"assignee"`
+	Assignees   []ghUser     `json:"assignees"`
+	Labels      []ghLabel    `json:"labels"`
+	Milestone   *ghMilestone `json:"milestone"`
+	PullRequest *struct{}    `json:"pull_request"` // non-nil means this is a PR, not an issue
+}
+
+// --- GitHub Projects V2 GraphQL types ---
+
+type ghProjectV2 struct {
+	ID     string `json:"id"`
+	Title  string `json:"title"`
+	Fields struct {
+		Nodes []ghProjectField `json:"nodes"`
+	} `json:"fields"`
+}
+
+type ghProjectField struct {
+	ID      string            `json:"id"`
+	Name    string            `json:"name"`
+	Options []ghProjectOption `json:"options"` // only present for single-select fields
+}
+
+type ghProjectOption struct {
+	ID   string `json:"id"`
+	Name string `json:"name"`
+}
+
+type ghProjectItem struct {
+	Content     *ghProjectItemContent `json:"content"`
+	FieldValues struct {
+		Nodes []ghProjectFieldValue `json:"nodes"`
+	} `json:"fieldValues"`
+}
+
+type ghProjectItemContent struct {
+	Number int `json:"number"` // issue number
+}
+
+type ghProjectFieldValue struct {
+	Name  string `json:"name"`  // selected option name (for single-select fields)
+	Field struct {
+		Name string `json:"name"` // field name (e.g. "Status")
+	} `json:"field"`
 }
 
 // --- Request / Response types for our handlers ---
@@ -60,21 +101,30 @@ type GitHubUserMatch struct {
 	MatchedName   string  `json:"matched_name"`
 }
 
+// GitHubColumnMatch represents a GitHub Projects V2 status column with optional swim lane mapping.
+type GitHubColumnMatch struct {
+	Name          string `json:"name"`
+	MatchedLaneID *int64 `json:"matched_lane_id"`
+	MatchedName   string `json:"matched_name"`
+}
+
 // GitHubPreviewResponse is returned by HandleGitHubPreview.
 type GitHubPreviewResponse struct {
-	MilestoneCount int               `json:"milestone_count"`
-	LabelCount     int               `json:"label_count"`
-	IssueCount     int               `json:"issue_count"`
-	GitHubUsers    []GitHubUserMatch `json:"github_users"`
+	MilestoneCount int                 `json:"milestone_count"`
+	LabelCount     int                 `json:"label_count"`
+	IssueCount     int                 `json:"issue_count"`
+	GitHubUsers    []GitHubUserMatch   `json:"github_users"`
+	ProjectColumns []GitHubColumnMatch `json:"project_columns"` // GitHub Projects V2 status columns
 }
 
 // GitHubPullRequest is the body for HandleGitHubPull / HandleGitHubSync.
 type GitHubPullRequest struct {
-	Token           string           `json:"token"`
-	PullSprints     bool             `json:"pull_sprints"`
-	PullTags        bool             `json:"pull_tags"`
-	PullTasks       bool             `json:"pull_tasks"`
-	UserAssignments map[string]int64 `json:"user_assignments"` // login → TaskAI user_id (0 = unassigned)
+	Token             string           `json:"token"`
+	PullSprints       bool             `json:"pull_sprints"`
+	PullTags          bool             `json:"pull_tags"`
+	PullTasks         bool             `json:"pull_tasks"`
+	UserAssignments   map[string]int64 `json:"user_assignments"`   // login → TaskAI user_id (0 = unassigned)
+	ColumnAssignments map[string]int64 `json:"column_assignments"` // GitHub column name → TaskAI swim_lane_id (0 = use default)
 }
 
 // GitHubPullResponse is returned by HandleGitHubPull / HandleGitHubSync.
@@ -110,6 +160,234 @@ func fetchGitHubJSON(ctx context.Context, token, url string, dest interface{}) e
 	}
 
 	return json.NewDecoder(resp.Body).Decode(dest)
+}
+
+// fetchGitHubGraphQL sends a GraphQL query to the GitHub API.
+func fetchGitHubGraphQL(ctx context.Context, token, query string, variables map[string]interface{}, dest interface{}) error {
+	payload := map[string]interface{}{"query": query}
+	if variables != nil {
+		payload["variables"] = variables
+	}
+	body, err := json.Marshal(payload)
+	if err != nil {
+		return err
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, "https://api.github.com/graphql", bytes.NewReader(body))
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer "+token)
+	req.Header.Set("X-GitHub-Api-Version", "2022-11-28")
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode >= 400 {
+		b, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("github graphql error %d: %s", resp.StatusCode, strings.TrimSpace(string(b)))
+	}
+	return json.NewDecoder(resp.Body).Decode(dest)
+}
+
+// fetchProjectStatusColumns fetches GitHub Projects V2 status columns for a repo.
+// Returns columns from the first project found, or nil if none.
+func fetchProjectStatusColumns(ctx context.Context, token, owner, repo string) ([]ghProjectOption, string, error) {
+	if token == "" {
+		return nil, "", nil
+	}
+	const q = `
+query($owner: String!, $repo: String!) {
+  repository(owner: $owner, name: $repo) {
+    projectsV2(first: 5) {
+      nodes {
+        id
+        title
+        fields(first: 20) {
+          nodes {
+            ... on ProjectV2SingleSelectField {
+              id
+              name
+              options { id name }
+            }
+          }
+        }
+      }
+    }
+  }
+}`
+	var result struct {
+		Data struct {
+			Repository struct {
+				ProjectsV2 struct {
+					Nodes []ghProjectV2 `json:"nodes"`
+				} `json:"projectsV2"`
+			} `json:"repository"`
+		} `json:"data"`
+		Errors []struct {
+			Message string `json:"message"`
+		} `json:"errors"`
+	}
+	if err := fetchGitHubGraphQL(ctx, token, q, map[string]interface{}{"owner": owner, "repo": repo}, &result); err != nil {
+		return nil, "", err
+	}
+	if len(result.Errors) > 0 {
+		return nil, "", fmt.Errorf("graphql: %s", result.Errors[0].Message)
+	}
+	for _, proj := range result.Data.Repository.ProjectsV2.Nodes {
+		for _, field := range proj.Fields.Nodes {
+			if strings.EqualFold(field.Name, "status") && len(field.Options) > 0 {
+				return field.Options, proj.ID, nil
+			}
+		}
+	}
+	return nil, "", nil
+}
+
+// fetchProjectIssueStatuses builds a map of issue_number → status column name
+// by paginating through all items of the given project.
+func fetchProjectIssueStatuses(ctx context.Context, token, projectID string) (map[int]string, error) {
+	result := map[int]string{}
+	if token == "" || projectID == "" {
+		return result, nil
+	}
+	const q = `
+query($projectId: ID!, $cursor: String) {
+  node(id: $projectId) {
+    ... on ProjectV2 {
+      items(first: 100, after: $cursor) {
+        pageInfo { hasNextPage endCursor }
+        nodes {
+          content {
+            ... on Issue { number }
+          }
+          fieldValues(first: 10) {
+            nodes {
+              ... on ProjectV2ItemFieldSingleSelectValue {
+                name
+                field { ... on ProjectV2SingleSelectField { name } }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}`
+	type pageResult struct {
+		Data struct {
+			Node struct {
+				Items struct {
+					PageInfo struct {
+						HasNextPage bool   `json:"hasNextPage"`
+						EndCursor   string `json:"endCursor"`
+					} `json:"pageInfo"`
+					Nodes []ghProjectItem `json:"nodes"`
+				} `json:"items"`
+			} `json:"node"`
+		} `json:"data"`
+		Errors []struct {
+			Message string `json:"message"`
+		} `json:"errors"`
+	}
+
+	var cursor *string
+	for page := 0; page < 20; page++ {
+		vars := map[string]interface{}{"projectId": projectID}
+		if cursor != nil {
+			vars["cursor"] = *cursor
+		}
+		var pr pageResult
+		if err := fetchGitHubGraphQL(ctx, token, q, vars, &pr); err != nil {
+			return result, err
+		}
+		if len(pr.Errors) > 0 {
+			return result, fmt.Errorf("graphql: %s", pr.Errors[0].Message)
+		}
+		for _, item := range pr.Data.Node.Items.Nodes {
+			if item.Content == nil || item.Content.Number == 0 {
+				continue
+			}
+			for _, fv := range item.FieldValues.Nodes {
+				if strings.EqualFold(fv.Field.Name, "status") && fv.Name != "" {
+					result[item.Content.Number] = fv.Name
+					break
+				}
+			}
+		}
+		if !pr.Data.Node.Items.PageInfo.HasNextPage {
+			break
+		}
+		c := pr.Data.Node.Items.PageInfo.EndCursor
+		cursor = &c
+	}
+	return result, nil
+}
+
+// fuzzyMatchColumn fuzzy-matches a GitHub column name to the best swim lane.
+// Returns the swim_lane_id or 0 if no match found.
+func fuzzyMatchColumn(columnName string, lanes []swimLaneInfo) (int64, string) {
+	col := strings.ToLower(strings.TrimSpace(columnName))
+	// Exact match first
+	for _, l := range lanes {
+		if strings.ToLower(l.Name) == col {
+			return l.ID, l.Name
+		}
+	}
+	// Substring: column name contains lane name or vice versa
+	for _, l := range lanes {
+		lname := strings.ToLower(l.Name)
+		if strings.Contains(col, lname) || strings.Contains(lname, col) {
+			return l.ID, l.Name
+		}
+	}
+	// Keyword-based category match
+	statusCat := ""
+	switch {
+	case strings.Contains(col, "todo") || strings.Contains(col, "to do") || col == "backlog" || strings.Contains(col, "triage"):
+		statusCat = "todo"
+	case strings.Contains(col, "progress") || strings.Contains(col, "doing") || strings.Contains(col, "review") || strings.Contains(col, "test") || strings.Contains(col, "qa"):
+		statusCat = "in_progress"
+	case strings.Contains(col, "done") || strings.Contains(col, "complete") || strings.Contains(col, "finish") || strings.Contains(col, "closed") || strings.Contains(col, "ship") || strings.Contains(col, "release"):
+		statusCat = "done"
+	}
+	if statusCat != "" {
+		for _, l := range lanes {
+			if l.StatusCategory == statusCat {
+				return l.ID, l.Name
+			}
+		}
+	}
+	return 0, ""
+}
+
+type swimLaneInfo struct {
+	ID             int64
+	Name           string
+	StatusCategory string
+}
+
+// loadSwimLaneInfos loads all swim lanes for a project as swimLaneInfo.
+func (s *Server) loadSwimLaneInfos(ctx context.Context, projectID int) ([]swimLaneInfo, error) {
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT id, name, status_category FROM swim_lanes WHERE project_id = $1 ORDER BY position ASC
+	`, projectID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var lanes []swimLaneInfo
+	for rows.Next() {
+		var l swimLaneInfo
+		if err := rows.Scan(&l.ID, &l.Name, &l.StatusCategory); err != nil {
+			continue
+		}
+		lanes = append(lanes, l)
+	}
+	return lanes, nil
 }
 
 // loadGitHubConfig loads owner, repo, and token for a project.
@@ -271,11 +549,26 @@ func (s *Server) HandleGitHubPreview(w http.ResponseWriter, r *http.Request) {
 		ghUsers = append(ghUsers, match)
 	}
 
+	// Fetch GitHub Projects V2 status columns and fuzzy-match to swim lanes
+	var projectColumns []GitHubColumnMatch
+	if colOptions, _, err := fetchProjectStatusColumns(ctx, token, owner, repo); err == nil && len(colOptions) > 0 {
+		lanes, _ := s.loadSwimLaneInfos(ctx, projectID)
+		for _, opt := range colOptions {
+			col := GitHubColumnMatch{Name: opt.Name}
+			if laneID, laneName := fuzzyMatchColumn(opt.Name, lanes); laneID != 0 {
+				col.MatchedLaneID = &laneID
+				col.MatchedName = laneName
+			}
+			projectColumns = append(projectColumns, col)
+		}
+	}
+
 	respondJSON(w, http.StatusOK, GitHubPreviewResponse{
 		MilestoneCount: len(milestones),
 		LabelCount:     len(labels),
 		IssueCount:     len(allIssues),
 		GitHubUsers:    ghUsers,
+		ProjectColumns: projectColumns,
 	})
 }
 
@@ -508,6 +801,33 @@ func (s *Server) handleGitHubImport(w http.ResponseWriter, r *http.Request, doUp
 			}
 		}
 
+		// Build status_category → swim_lane_id map for this project (fallback)
+		swimLaneByCategory := map[string]int64{}
+		slRows, err := s.db.QueryContext(ctx, `
+			SELECT status_category, id FROM swim_lanes WHERE project_id = $1 ORDER BY position ASC
+		`, projectID)
+		if err == nil {
+			defer slRows.Close()
+			for slRows.Next() {
+				var cat string
+				var slID int64
+				if err := slRows.Scan(&cat, &slID); err == nil {
+					if _, exists := swimLaneByCategory[cat]; !exists {
+						swimLaneByCategory[cat] = slID
+					}
+				}
+			}
+			slRows.Close()
+		}
+
+		// Fetch GitHub Projects V2 issue→column map (best-effort; ignore errors)
+		issueColumnMap := map[int]string{}
+		if _, projID, err := fetchProjectStatusColumns(ctx, token, owner, repo); err == nil && projID != "" {
+			if m, err := fetchProjectIssueStatuses(ctx, token, projID); err == nil {
+				issueColumnMap = m
+			}
+		}
+
 		// Get next task_number baseline
 		var maxNumber sql.NullInt64
 		_ = s.db.QueryRowContext(ctx, `SELECT MAX(task_number) FROM tasks WHERE project_id = $1`, projectID).Scan(&maxNumber)
@@ -546,6 +866,19 @@ func (s *Server) handleGitHubImport(w http.ResponseWriter, r *http.Request, doUp
 
 			description := issue.Body
 
+			// Resolve swim lane: prefer GitHub Projects V2 column mapping, fall back to status_category
+			var swimLaneID *int64
+			if colName, ok := issueColumnMap[issue.Number]; ok && colName != "" {
+				if laneID := req.ColumnAssignments[colName]; laneID != 0 {
+					swimLaneID = &laneID
+				}
+			}
+			if swimLaneID == nil {
+				if slID, ok := swimLaneByCategory[taskStatus]; ok {
+					swimLaneID = &slID
+				}
+			}
+
 			if doUpdate {
 				var existingID int64
 				err := s.db.QueryRowContext(ctx, `
@@ -555,11 +888,11 @@ func (s *Server) handleGitHubImport(w http.ResponseWriter, r *http.Request, doUp
 				if err == sql.ErrNoRows {
 					// Insert new task
 					err = s.db.QueryRowContext(ctx, `
-						INSERT INTO tasks (project_id, task_number, title, description, status, priority, assignee_id, sprint_id, github_issue_number)
-						VALUES ($1, $2, $3, $4, $5, 'medium', $6, $7, $8)
+						INSERT INTO tasks (project_id, task_number, title, description, status, priority, assignee_id, sprint_id, github_issue_number, swim_lane_id)
+						VALUES ($1, $2, $3, $4, $5, 'medium', $6, $7, $8, $9)
 						ON CONFLICT (project_id, github_issue_number) DO NOTHING
 						RETURNING id
-					`, projectID, nextNumber, issue.Title, description, taskStatus, assigneeID, sprintID, issue.Number).Scan(&existingID)
+					`, projectID, nextNumber, issue.Title, description, taskStatus, assigneeID, sprintID, issue.Number, swimLaneID).Scan(&existingID)
 					if err == nil {
 						nextNumber++
 						result.CreatedTasks++
@@ -570,9 +903,9 @@ func (s *Server) handleGitHubImport(w http.ResponseWriter, r *http.Request, doUp
 				} else if err == nil {
 					// Update existing
 					_, _ = s.db.ExecContext(ctx, `
-						UPDATE tasks SET title = $1, description = $2, status = $3, assignee_id = $4, sprint_id = $5
-						WHERE id = $6
-					`, issue.Title, description, taskStatus, assigneeID, sprintID, existingID)
+						UPDATE tasks SET title = $1, description = $2, status = $3, assignee_id = $4, sprint_id = $5, swim_lane_id = $6
+						WHERE id = $7
+					`, issue.Title, description, taskStatus, assigneeID, sprintID, swimLaneID, existingID)
 					// Refresh tags
 					_, _ = s.db.ExecContext(ctx, `DELETE FROM task_tags WHERE task_id = $1`, existingID)
 					s.insertTaskTags(ctx, existingID, issue.Labels, labelToTagID)
@@ -580,11 +913,11 @@ func (s *Server) handleGitHubImport(w http.ResponseWriter, r *http.Request, doUp
 			} else {
 				var newID int64
 				err := s.db.QueryRowContext(ctx, `
-					INSERT INTO tasks (project_id, task_number, title, description, status, priority, assignee_id, sprint_id, github_issue_number)
-					VALUES ($1, $2, $3, $4, $5, 'medium', $6, $7, $8)
+					INSERT INTO tasks (project_id, task_number, title, description, status, priority, assignee_id, sprint_id, github_issue_number, swim_lane_id)
+					VALUES ($1, $2, $3, $4, $5, 'medium', $6, $7, $8, $9)
 					ON CONFLICT (project_id, github_issue_number) DO NOTHING
 					RETURNING id
-				`, projectID, nextNumber, issue.Title, description, taskStatus, assigneeID, sprintID, issue.Number).Scan(&newID)
+				`, projectID, nextNumber, issue.Title, description, taskStatus, assigneeID, sprintID, issue.Number, swimLaneID).Scan(&newID)
 				if err == nil {
 					nextNumber++
 					result.CreatedTasks++

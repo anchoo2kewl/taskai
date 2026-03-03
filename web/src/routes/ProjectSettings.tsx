@@ -5,7 +5,7 @@ import Button from '../components/ui/Button'
 import TextInput from '../components/ui/TextInput'
 import FormError from '../components/ui/FormError'
 import SearchSelect from '../components/ui/SearchSelect'
-import { apiClient, type SwimLane, type Project, type ProjectInvitation, type GitHubPreviewResponse, type GitHubUserMatch, type GitHubRepo } from '../lib/api'
+import { apiClient, type SwimLane, type Project, type ProjectInvitation, type GitHubPreviewResponse, type GitHubUserMatch, type GitHubRepo, type GitHubColumnMatch } from '../lib/api'
 
 interface ProjectMember {
   id: number
@@ -83,6 +83,7 @@ export default function ProjectSettings() {
   const [importError, setImportError] = useState('')
   const [importSuccess, setImportSuccess] = useState('')
   const [userAssignments, setUserAssignments] = useState<Record<string, number>>({})
+  const [columnAssignments, setColumnAssignments] = useState<Record<string, number>>({})
   const [pullSprints, setPullSprints] = useState(true)
   const [pullTags, setPullTags] = useState(true)
   const [pullTasks, setPullTasks] = useState(true)
@@ -245,6 +246,12 @@ export default function ProjectSettings() {
         assignments[u.login] = u.matched_user_id ?? 0
       }
       setUserAssignments(assignments)
+      // Initialize column assignments from auto-matched columns
+      const colAssignments: Record<string, number> = {}
+      for (const c of (preview.project_columns ?? [])) {
+        colAssignments[c.name] = c.matched_lane_id ?? 0
+      }
+      setColumnAssignments(colAssignments)
     } catch (error: unknown) {
       setImportError(error instanceof Error ? error.message : 'Failed to fetch GitHub preview')
     } finally {
@@ -262,6 +269,7 @@ export default function ProjectSettings() {
         pull_tags: pullTags,
         pull_tasks: pullTasks,
         user_assignments: userAssignments,
+        column_assignments: columnAssignments,
       })
       setImportSuccess(`Imported: ${result.created_sprints} sprints, ${result.created_tags} tags, ${result.created_tasks} tasks (${result.skipped_tasks} skipped)`)
       loadGitHubSettings()
@@ -1226,6 +1234,33 @@ export default function ProjectSettings() {
                                     <option key={m.user_id} value={m.user_id}>
                                       {m.name || m.email}
                                     </option>
+                                  ))}
+                                </select>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+
+                      {/* GitHub Projects V2 column → swim lane mapping */}
+                      {(githubPreview.project_columns ?? []).length > 0 && (
+                        <div>
+                          <h4 className="text-sm font-medium text-dark-text-primary mb-2">Map GitHub project columns to swim lanes</h4>
+                          <div className="space-y-2">
+                            {(githubPreview.project_columns ?? []).map((col: GitHubColumnMatch) => (
+                              <div key={col.name} className="flex items-center gap-3 p-3 bg-dark-bg-secondary border border-dark-border-subtle rounded-lg">
+                                <div className="w-2 h-2 rounded-full bg-purple-400 flex-shrink-0" />
+                                <div className="flex-1 min-w-0">
+                                  <span className="text-sm font-medium text-dark-text-primary">{col.name}</span>
+                                </div>
+                                <select
+                                  value={columnAssignments[col.name] ?? 0}
+                                  onChange={(e) => setColumnAssignments(prev => ({ ...prev, [col.name]: Number(e.target.value) }))}
+                                  className="text-sm bg-dark-bg-primary border border-dark-border-subtle text-dark-text-primary rounded-md px-2 py-1 focus:outline-none focus:ring-1 focus:ring-primary-500"
+                                >
+                                  <option value={0}>Default (by status)</option>
+                                  {swimLanes.map(l => (
+                                    <option key={l.id} value={l.id}>{l.name}</option>
                                   ))}
                                 </select>
                               </div>

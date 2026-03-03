@@ -197,11 +197,18 @@ export interface GitHubUserMatch {
   matched_name: string
 }
 
+export interface GitHubColumnMatch {
+  name: string
+  matched_lane_id: number | null
+  matched_name: string
+}
+
 export interface GitHubPreviewResponse {
   milestone_count: number
   label_count: number
   issue_count: number
   github_users: GitHubUserMatch[]
+  project_columns: GitHubColumnMatch[]
 }
 
 export interface GitHubPullRequest {
@@ -210,6 +217,7 @@ export interface GitHubPullRequest {
   pull_tags: boolean
   pull_tasks: boolean
   user_assignments: Record<string, number>
+  column_assignments: Record<string, number>
 }
 
 export interface GitHubPullResponse {
@@ -712,10 +720,10 @@ class ApiClient {
     })
   }
 
-  async githubSync(projectId: number): Promise<GitHubPullResponse> {
+  async githubSync(projectId: number, columnAssignments?: Record<string, number>): Promise<GitHubPullResponse> {
     return this.request<GitHubPullResponse>(`/api/projects/${projectId}/github/sync`, {
       method: 'POST',
-      body: JSON.stringify({ pull_sprints: true, pull_tags: true, pull_tasks: true, user_assignments: {} }),
+      body: JSON.stringify({ pull_sprints: true, pull_tags: true, pull_tasks: true, user_assignments: {}, column_assignments: columnAssignments ?? {} }),
     })
   }
 

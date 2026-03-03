@@ -425,6 +425,7 @@ func (s *Server) HandleGetProjectGitHubSettings(w http.ResponseWriter, r *http.R
 	)
 
 	if err != nil {
+		s.logger.Error("Failed to fetch GitHub settings", zap.Int("project_id", projectID), zap.Error(err))
 		http.Error(w, "Failed to fetch GitHub settings", http.StatusInternalServerError)
 		return
 	}

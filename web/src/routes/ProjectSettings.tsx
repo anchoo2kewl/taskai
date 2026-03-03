@@ -88,7 +88,7 @@ export default function ProjectSettings() {
     loadGitHubSettings()
     loadSwimLanes()
     loadStorageUsage()
-  }, [projectId])
+  }, [projectId]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const loadProject = async () => {
     try {

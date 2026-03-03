@@ -89,7 +89,7 @@ export default function Admin() {
     if (urlTab && urlTab !== activeTab) {
       setActiveTab(urlTab)
     }
-  }, [searchParams])
+  }, [searchParams, activeTab])
 
   // Update URL when tab changes
   const handleTabChange = (tab: AdminTab) => {

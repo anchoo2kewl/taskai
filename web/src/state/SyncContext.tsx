@@ -68,7 +68,7 @@ export function SyncProvider({ children }: { children: ReactNode }) {
     } else if (!user && isInitialized) {
       destroySync()
     }
-  }, [user?.id])
+  }, [user?.id]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const value: SyncContextValue = {
     db: null,
@@ -83,6 +83,7 @@ export function SyncProvider({ children }: { children: ReactNode }) {
   return <SyncContext.Provider value={value}>{children}</SyncContext.Provider>
 }
 
+// eslint-disable-next-line react-refresh/only-export-components
 export function useSync() {
   const context = useContext(SyncContext)
   if (context === undefined) {

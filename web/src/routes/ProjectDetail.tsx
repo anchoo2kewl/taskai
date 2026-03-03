@@ -46,7 +46,7 @@ export default function ProjectDetail() {
       loadProject()
       loadSwimLanes()
     }
-  }, [projectId])
+  }, [projectId]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const loadProject = async () => {
     try {

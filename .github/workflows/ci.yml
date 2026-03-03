@@ -81,7 +81,7 @@ jobs:
       - name: Lint and type check
         working-directory: ./web
         run: |
-          npx eslint . --ext ts,tsx --report-unused-disable-directives --max-warnings 15
+          npx eslint . --ext ts,tsx --report-unused-disable-directives --max-warnings 5
           npx tsc --noEmit
 
       - name: Run tests with coverage

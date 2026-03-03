@@ -27,7 +27,7 @@ export default function ImagePickerModal({ onSelect, onClose, projectId, taskId,
 
   useEffect(() => {
     loadImages()
-  }, [])
+  }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
   const loadImages = async (query?: string) => {
     try {

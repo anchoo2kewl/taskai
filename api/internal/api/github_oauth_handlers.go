@@ -111,7 +111,7 @@ func (s *Server) HandleGitHubOAuthInit(w http.ResponseWriter, r *http.Request) {
 	_ = s.db.QueryRowContext(r.Context(), `SELECT COALESCE(github_login,'') FROM projects WHERE id = $1`, projectID).Scan(&ghLogin)
 
 	authURL := fmt.Sprintf(
-		"https://github.com/login/oauth/authorize?client_id=%s&redirect_uri=%s&scope=repo%%2Cread%%3Auser%%2Cread%%3Aorg%%2Cread%%3Aproject&state=%s",
+		"https://github.com/login/oauth/authorize?client_id=%s&redirect_uri=%s&scope=repo%%2Cread%%3Auser%%2Cread%%3Aorg%%2Cproject&state=%s",
 		url.QueryEscape(s.config.GitHubClientID),
 		url.QueryEscape(callbackURL),
 		url.QueryEscape(state),

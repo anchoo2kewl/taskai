@@ -175,6 +175,7 @@ export interface ProjectGitHubSettings {
   github_repo_name: string
   github_branch: string
   github_sync_enabled: boolean
+  github_push_enabled: boolean
   github_last_sync: string | null
   github_token_set: boolean
   github_login: string | null
@@ -216,6 +217,7 @@ export interface GitHubPullRequest {
   pull_sprints: boolean
   pull_tags: boolean
   pull_tasks: boolean
+  pull_comments: boolean
   user_assignments: Record<string, number>
   column_assignments: Record<string, number>
 }
@@ -225,6 +227,7 @@ export interface GitHubPullResponse {
   created_tags: number
   created_tasks: number
   skipped_tasks: number
+  created_comments: number
 }
 
 export interface UserWithStats {

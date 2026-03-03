@@ -31,6 +31,7 @@ interface GitHubSettings {
   github_repo_name: string
   github_branch: string
   github_sync_enabled: boolean
+  github_push_enabled: boolean
   github_last_sync: string | null
   github_token_set: boolean
   github_login: string | null
@@ -61,6 +62,7 @@ export default function ProjectSettings() {
     github_repo_name: '',
     github_branch: 'main',
     github_sync_enabled: false,
+    github_push_enabled: false,
     github_last_sync: null,
     github_token_set: false,
     github_login: null,
@@ -87,6 +89,7 @@ export default function ProjectSettings() {
   const [pullSprints, setPullSprints] = useState(true)
   const [pullTags, setPullTags] = useState(true)
   const [pullTasks, setPullTasks] = useState(true)
+  const [pullComments, setPullComments] = useState(true)
 
   // Storage usage state
   const [storageUsage, setStorageUsage] = useState<{ user_id: number; user_name: string; file_count: number; total_size: number }[]>([])
@@ -268,10 +271,13 @@ export default function ProjectSettings() {
         pull_sprints: pullSprints,
         pull_tags: pullTags,
         pull_tasks: pullTasks,
+        pull_comments: pullComments,
         user_assignments: userAssignments,
         column_assignments: columnAssignments,
       })
-      setImportSuccess(`Imported: ${result.created_sprints} sprints, ${result.created_tags} tags, ${result.created_tasks} tasks (${result.skipped_tasks} skipped)`)
+      const parts = [`${result.created_sprints} sprints`, `${result.created_tags} tags`, `${result.created_tasks} tasks (${result.skipped_tasks} skipped)`]
+      if (result.created_comments > 0) parts.push(`${result.created_comments} comments`)
+      setImportSuccess(`Imported: ${parts.join(', ')}`)
       loadGitHubSettings()
     } catch (error: unknown) {
       setImportError(error instanceof Error ? error.message : 'Import failed')
@@ -511,6 +517,7 @@ export default function ProjectSettings() {
         github_repo_name: githubSettings.github_repo_name,
         github_branch: githubSettings.github_branch,
         github_sync_enabled: githubSettings.github_sync_enabled,
+        github_push_enabled: githubSettings.github_push_enabled,
       })
       setGithubSuccess('GitHub settings saved successfully')
     } catch (error: unknown) {
@@ -1155,6 +1162,20 @@ export default function ProjectSettings() {
                     </label>
                   </div>
 
+                  <div className="flex items-center gap-3 p-4 bg-dark-bg-secondary border border-dark-border-subtle rounded-lg">
+                    <input
+                      type="checkbox"
+                      id="push-enabled"
+                      checked={githubSettings.github_push_enabled}
+                      onChange={(e) => setGithubSettings({ ...githubSettings, github_push_enabled: e.target.checked })}
+                      className="w-4 h-4 text-primary-600 border-dark-border-subtle rounded focus:ring-2 focus:ring-primary-500"
+                    />
+                    <label htmlFor="push-enabled" className="flex-1">
+                      <span className="font-medium text-dark-text-primary">Push changes to GitHub</span>
+                      <p className="text-sm text-dark-text-secondary mt-0.5">Send new comments and task status changes back to GitHub</p>
+                    </label>
+                  </div>
+
                   <Button type="submit" disabled={isSavingGitHub}>
                     {isSavingGitHub ? 'Saving...' : 'Save Settings'}
                   </Button>
@@ -1285,6 +1306,11 @@ export default function ProjectSettings() {
                           <input type="checkbox" checked={pullTasks} onChange={e => setPullTasks(e.target.checked)}
                             className="w-4 h-4 text-primary-600 border-dark-border-subtle rounded focus:ring-primary-500" />
                           Import Tasks (issues)
+                        </label>
+                        <label className="flex items-center gap-2 text-sm text-dark-text-primary cursor-pointer">
+                          <input type="checkbox" checked={pullComments} onChange={e => setPullComments(e.target.checked)}
+                            className="w-4 h-4 text-primary-600 border-dark-border-subtle rounded focus:ring-primary-500" />
+                          Import Comments
                         </label>
                       </div>
 

@@ -180,5 +180,12 @@ func (s *Server) HandleCreateTaskComment(w http.ResponseWriter, r *http.Request)
 		c.UserName = userDisplayNamePtr(commentWithUser.Edges.User)
 	}
 
+	// Best-effort push to GitHub (non-blocking)
+	displayName := ""
+	if c.UserName != nil {
+		displayName = *c.UserName
+	}
+	go s.tryPushCommentToGitHub(context.Background(), taskID, c.ID, c.Comment, displayName)
+
 	respondJSON(w, http.StatusCreated, c)
 }

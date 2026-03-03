@@ -500,6 +500,7 @@ func (s *Server) HandleUpdateProjectGitHubSettings(w http.ResponseWriter, r *htt
 	}
 
 	if err != nil {
+		s.logger.Error("Failed to update GitHub settings", zap.Int("project_id", projectID), zap.Error(err))
 		http.Error(w, "Failed to update GitHub settings", http.StatusInternalServerError)
 		return
 	}

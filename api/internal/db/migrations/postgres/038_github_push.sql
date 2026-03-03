@@ -1,7 +1,7 @@
 -- GitHub bidirectional sync: push comments and swim lane status back to GitHub
 
 -- Projects V2 GraphQL IDs needed for push operations
-ALTER TABLE projects ADD COLUMN github_push_enabled INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE projects ADD COLUMN github_push_enabled BOOLEAN NOT NULL DEFAULT false;
 ALTER TABLE projects ADD COLUMN github_project_id TEXT;
 ALTER TABLE projects ADD COLUMN github_status_field_id TEXT;
 

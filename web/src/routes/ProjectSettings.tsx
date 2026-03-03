@@ -86,7 +86,6 @@ export default function ProjectSettings() {
   const [pullSprints, setPullSprints] = useState(true)
   const [pullTags, setPullTags] = useState(true)
   const [pullTasks, setPullTasks] = useState(true)
-  const [projectMembers, setProjectMembers] = useState<{ user_id: number; email: string; name?: string }[]>([])
 
   // Storage usage state
   const [storageUsage, setStorageUsage] = useState<{ user_id: number; user_name: string; file_count: number; total_size: number }[]>([])
@@ -136,7 +135,6 @@ export default function ProjectSettings() {
     try {
       const data = await apiClient.getProjectMembers(projectId)
       setMembers(data)
-      setProjectMembers(data.map(m => ({ user_id: m.user_id, email: m.email, name: m.name })))
     } catch (error: unknown) {
       console.error('Failed to load data:', error)
     }

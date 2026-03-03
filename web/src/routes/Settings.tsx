@@ -653,7 +653,6 @@ export default function Settings() {
       handleSearchUsers(inviteEmail)
     }, 300)
     return () => clearTimeout(timer)
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [inviteEmail, selectedUser])
 
   return (

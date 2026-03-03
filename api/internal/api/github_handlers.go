@@ -132,11 +132,13 @@ type GitHubColumnMatch struct {
 
 // GitHubPreviewResponse is returned by HandleGitHubPreview.
 type GitHubPreviewResponse struct {
-	MilestoneCount int                 `json:"milestone_count"`
-	LabelCount     int                 `json:"label_count"`
-	IssueCount     int                 `json:"issue_count"`
-	GitHubUsers    []GitHubUserMatch   `json:"github_users"`
-	ProjectColumns []GitHubColumnMatch `json:"project_columns"` // GitHub Projects V2 status columns
+	MilestoneCount      int                 `json:"milestone_count"`
+	LabelCount          int                 `json:"label_count"`
+	IssueCount          int                 `json:"issue_count"`
+	GitHubUsers         []GitHubUserMatch   `json:"github_users"`
+	ProjectColumns      []GitHubColumnMatch `json:"project_columns"` // GitHub Projects V2 status columns
+	DefaultOpenLaneID   int64               `json:"default_open_lane_id"`
+	DefaultClosedLaneID int64               `json:"default_closed_lane_id"`
 }
 
 // GitHubPullRequest is the body for HandleGitHubPull / HandleGitHubSync.
@@ -148,6 +150,8 @@ type GitHubPullRequest struct {
 	PullComments      bool             `json:"pull_comments"`
 	UserAssignments   map[string]int64 `json:"user_assignments"`   // login → TaskAI user_id (0 = unassigned)
 	ColumnAssignments map[string]int64 `json:"column_assignments"` // GitHub column name → TaskAI swim_lane_id (0 = use default)
+	OpenLaneID        int64            `json:"open_lane_id"`       // explicit swim lane for open issues (0 = use category fallback)
+	ClosedLaneID      int64            `json:"closed_lane_id"`     // explicit swim lane for closed issues (0 = use category fallback)
 }
 
 // GitHubPullResponse is returned by HandleGitHubPull / HandleGitHubSync.
@@ -580,10 +584,12 @@ func (s *Server) HandleGitHubPreview(w http.ResponseWriter, r *http.Request) {
 		ghUsers = append(ghUsers, match)
 	}
 
+	// Load swim lanes for column matching and default lane IDs
+	lanes, _ := s.loadSwimLaneInfos(ctx, projectID)
+
 	// Fetch GitHub Projects V2 status columns and fuzzy-match to swim lanes
 	var projectColumns []GitHubColumnMatch
 	if projInfo, err := fetchProjectStatusColumns(ctx, token, owner, repo); err == nil && projInfo != nil {
-		lanes, _ := s.loadSwimLaneInfos(ctx, projectID)
 		for _, opt := range projInfo.Options {
 			col := GitHubColumnMatch{Name: opt.Name}
 			if laneID, laneName := fuzzyMatchColumn(opt.Name, lanes); laneID != 0 {
@@ -594,12 +600,25 @@ func (s *Server) HandleGitHubPreview(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// Determine default open/closed lane IDs from swim lane categories
+	var defaultOpenLaneID, defaultClosedLaneID int64
+	for _, l := range lanes {
+		if defaultOpenLaneID == 0 && l.StatusCategory == "todo" {
+			defaultOpenLaneID = l.ID
+		}
+		if defaultClosedLaneID == 0 && l.StatusCategory == "done" {
+			defaultClosedLaneID = l.ID
+		}
+	}
+
 	respondJSON(w, http.StatusOK, GitHubPreviewResponse{
-		MilestoneCount: len(milestones),
-		LabelCount:     len(labels),
-		IssueCount:     len(allIssues),
-		GitHubUsers:    ghUsers,
-		ProjectColumns: projectColumns,
+		MilestoneCount:      len(milestones),
+		LabelCount:          len(labels),
+		IssueCount:          len(allIssues),
+		GitHubUsers:         ghUsers,
+		ProjectColumns:      projectColumns,
+		DefaultOpenLaneID:   defaultOpenLaneID,
+		DefaultClosedLaneID: defaultClosedLaneID,
 	})
 }
 
@@ -911,7 +930,7 @@ func (s *Server) handleGitHubImport(w http.ResponseWriter, r *http.Request, doUp
 
 			description := issue.Body
 
-			// Resolve swim lane: prefer GitHub Projects V2 column mapping, fall back to status_category
+			// Resolve swim lane: prefer GitHub Projects V2 column mapping, then explicit open/closed lane, fall back to status_category
 			var swimLaneID *int64
 			ghItemID := ""
 			if itemStatus, ok := issueColumnMap[issue.Number]; ok {
@@ -920,6 +939,15 @@ func (s *Server) handleGitHubImport(w http.ResponseWriter, r *http.Request, doUp
 					if laneID := req.ColumnAssignments[itemStatus.StatusName]; laneID != 0 {
 						swimLaneID = &laneID
 					}
+				}
+			}
+			if swimLaneID == nil {
+				if issue.State == "open" && req.OpenLaneID != 0 {
+					lid := req.OpenLaneID
+					swimLaneID = &lid
+				} else if issue.State == "closed" && req.ClosedLaneID != 0 {
+					lid := req.ClosedLaneID
+					swimLaneID = &lid
 				}
 			}
 			if swimLaneID == nil {
@@ -1135,20 +1163,20 @@ mutation($projectId: ID!, $itemId: ID!, $fieldId: ID!, $optionId: String!) {
 // It's best-effort: errors are logged but do not affect the response.
 func (s *Server) tryPushCommentToGitHub(ctx context.Context, taskID, commentID int64, body, commenterName string) {
 	var (
-		issueNumber  int64
-		owner, repo  string
-		token        string
-		pushEnabled  int
+		issueNumber int64
+		owner, repo string
+		token       string
+		pushEnabled bool
 	)
 	err := s.db.QueryRowContext(ctx, `
 		SELECT COALESCE(t.github_issue_number,0),
 		       COALESCE(p.github_owner,''), COALESCE(p.github_repo_name,''),
-		       COALESCE(p.github_token,''), COALESCE(p.github_push_enabled,0)
+		       COALESCE(p.github_token,''), p.github_push_enabled
 		FROM tasks t
 		JOIN projects p ON p.id = t.project_id
 		WHERE t.id = $1
 	`, taskID).Scan(&issueNumber, &owner, &repo, &token, &pushEnabled)
-	if err != nil || pushEnabled == 0 || issueNumber == 0 || owner == "" || token == "" {
+	if err != nil || !pushEnabled || issueNumber == 0 || owner == "" || token == "" {
 		return
 	}
 	ghBody := body
@@ -1172,19 +1200,19 @@ func (s *Server) tryPushSwimLaneToGitHub(ctx context.Context, taskID int64, newL
 	var (
 		itemID, projectID, fieldID, optionID string
 		token                                 string
-		pushEnabled                           int
+		pushEnabled                           bool
 	)
 	err := s.db.QueryRowContext(ctx, `
 		SELECT COALESCE(t.github_project_item_id,''),
 		       COALESCE(p.github_project_id,''), COALESCE(p.github_status_field_id,''),
 		       COALESCE(sl.github_option_id,''),
-		       COALESCE(p.github_token,''), COALESCE(p.github_push_enabled,0)
+		       COALESCE(p.github_token,''), p.github_push_enabled
 		FROM tasks t
 		JOIN projects p ON p.id = t.project_id
 		JOIN swim_lanes sl ON sl.id = $2
 		WHERE t.id = $1
 	`, taskID, *newLaneID).Scan(&itemID, &projectID, &fieldID, &optionID, &token, &pushEnabled)
-	if err != nil || pushEnabled == 0 || itemID == "" || projectID == "" || fieldID == "" || optionID == "" || token == "" {
+	if err != nil || !pushEnabled || itemID == "" || projectID == "" || fieldID == "" || optionID == "" || token == "" {
 		return
 	}
 	if err := pushSwimLaneStatusToGitHub(ctx, token, projectID, fieldID, itemID, optionID); err != nil {

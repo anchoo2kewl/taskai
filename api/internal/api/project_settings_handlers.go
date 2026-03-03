@@ -32,6 +32,7 @@ type ProjectGitHubSettings struct {
 	Branch       string     `json:"github_branch"`
 	SyncEnabled  bool       `json:"github_sync_enabled"`
 	LastSync     *time.Time `json:"github_last_sync"`
+	TokenSet     bool       `json:"github_token_set"`
 }
 
 // AddMemberRequest represents a request to add a member to a project
@@ -52,6 +53,7 @@ type UpdateProjectGitHubRequest struct {
 	RepoName    string `json:"github_repo_name"`
 	Branch      string `json:"github_branch"`
 	SyncEnabled bool   `json:"github_sync_enabled"`
+	Token       string `json:"github_token"`
 }
 
 // HandleGetProjectMembers returns all members of a project
@@ -390,8 +392,8 @@ func (s *Server) HandleGetProjectGitHubSettings(w http.ResponseWriter, r *http.R
 	}
 
 	var settings ProjectGitHubSettings
-	var syncEnabled int
 	var lastSync sql.NullTime
+	var token sql.NullString
 
 	err = s.db.QueryRow(`
 		SELECT
@@ -400,7 +402,8 @@ func (s *Server) HandleGetProjectGitHubSettings(w http.ResponseWriter, r *http.R
 			COALESCE(github_repo_name, ''),
 			COALESCE(github_branch, 'main'),
 			github_sync_enabled,
-			github_last_sync
+			github_last_sync,
+			github_token
 		FROM projects
 		WHERE id = $1
 	`, projectID).Scan(
@@ -408,8 +411,9 @@ func (s *Server) HandleGetProjectGitHubSettings(w http.ResponseWriter, r *http.R
 		&settings.Owner,
 		&settings.RepoName,
 		&settings.Branch,
-		&syncEnabled,
+		&settings.SyncEnabled,
 		&lastSync,
+		&token,
 	)
 
 	if err != nil {
@@ -417,10 +421,10 @@ func (s *Server) HandleGetProjectGitHubSettings(w http.ResponseWriter, r *http.R
 		return
 	}
 
-	settings.SyncEnabled = syncEnabled == 1
 	if lastSync.Valid {
 		settings.LastSync = &lastSync.Time
 	}
+	settings.TokenSet = token.Valid && token.String != ""
 
 	respondJSON(w, http.StatusOK, settings)
 }
@@ -456,21 +460,30 @@ func (s *Server) HandleUpdateProjectGitHubSettings(w http.ResponseWriter, r *htt
 		return
 	}
 
-	syncEnabled := 0
-	if req.SyncEnabled {
-		syncEnabled = 1
+	if req.Token != "" {
+		_, err = s.db.Exec(`
+			UPDATE projects
+			SET
+				github_repo_url = $1,
+				github_owner = $2,
+				github_repo_name = $3,
+				github_branch = $4,
+				github_sync_enabled = $5,
+				github_token = $6
+			WHERE id = $7
+		`, req.RepoURL, req.Owner, req.RepoName, req.Branch, req.SyncEnabled, req.Token, projectID)
+	} else {
+		_, err = s.db.Exec(`
+			UPDATE projects
+			SET
+				github_repo_url = $1,
+				github_owner = $2,
+				github_repo_name = $3,
+				github_branch = $4,
+				github_sync_enabled = $5
+			WHERE id = $6
+		`, req.RepoURL, req.Owner, req.RepoName, req.Branch, req.SyncEnabled, projectID)
 	}
-
-	_, err = s.db.Exec(`
-		UPDATE projects
-		SET
-			github_repo_url = $1,
-			github_owner = $2,
-			github_repo_name = $3,
-			github_branch = $4,
-			github_sync_enabled = $5
-		WHERE id = $6
-	`, req.RepoURL, req.Owner, req.RepoName, req.Branch, syncEnabled, projectID)
 
 	if err != nil {
 		http.Error(w, "Failed to update GitHub settings", http.StatusInternalServerError)

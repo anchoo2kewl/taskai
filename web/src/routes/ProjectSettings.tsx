@@ -5,7 +5,7 @@ import Button from '../components/ui/Button'
 import TextInput from '../components/ui/TextInput'
 import FormError from '../components/ui/FormError'
 import SearchSelect from '../components/ui/SearchSelect'
-import { apiClient, type SwimLane, type Project, type ProjectInvitation } from '../lib/api'
+import { apiClient, type SwimLane, type Project, type ProjectInvitation, type GitHubPreviewResponse, type GitHubUserMatch } from '../lib/api'
 
 interface ProjectMember {
   id: number
@@ -32,6 +32,7 @@ interface GitHubSettings {
   github_branch: string
   github_sync_enabled: boolean
   github_last_sync: string | null
+  github_token_set: boolean
 }
 
 export default function ProjectSettings() {
@@ -60,10 +61,25 @@ export default function ProjectSettings() {
     github_branch: 'main',
     github_sync_enabled: false,
     github_last_sync: null,
+    github_token_set: false,
   })
+  const [githubToken, setGithubToken] = useState('')
   const [githubError, setGithubError] = useState('')
   const [githubSuccess, setGithubSuccess] = useState('')
   const [isSavingGitHub, setIsSavingGitHub] = useState(false)
+
+  // GitHub import state
+  const [githubPreview, setGithubPreview] = useState<GitHubPreviewResponse | null>(null)
+  const [isPreviewing, setIsPreviewing] = useState(false)
+  const [isPulling, setIsPulling] = useState(false)
+  const [isSyncing, setIsSyncing] = useState(false)
+  const [importError, setImportError] = useState('')
+  const [importSuccess, setImportSuccess] = useState('')
+  const [userAssignments, setUserAssignments] = useState<Record<string, number>>({})
+  const [pullSprints, setPullSprints] = useState(true)
+  const [pullTags, setPullTags] = useState(true)
+  const [pullTasks, setPullTasks] = useState(true)
+  const [projectMembers, setProjectMembers] = useState<{ user_id: number; email: string; name?: string }[]>([])
 
   // Storage usage state
   const [storageUsage, setStorageUsage] = useState<{ user_id: number; user_name: string; file_count: number; total_size: number }[]>([])
@@ -103,6 +119,7 @@ export default function ProjectSettings() {
     try {
       const data = await apiClient.getProjectMembers(projectId)
       setMembers(data)
+      setProjectMembers(data.map(m => ({ user_id: m.user_id, email: m.email, name: m.name })))
     } catch (error: unknown) {
       console.error('Failed to load data:', error)
     }
@@ -132,6 +149,62 @@ export default function ProjectSettings() {
       setGithubSettings(data)
     } catch (error: unknown) {
       console.error('Failed to load data:', error)
+    }
+  }
+
+  const handleFetchPreview = async () => {
+    setImportError('')
+    setImportSuccess('')
+    setIsPreviewing(true)
+    try {
+      const preview = await apiClient.githubPreview(projectId, githubToken || undefined)
+      setGithubPreview(preview)
+      // Initialize user assignments from auto-matched users
+      const assignments: Record<string, number> = {}
+      for (const u of preview.github_users) {
+        assignments[u.login] = u.matched_user_id ?? 0
+      }
+      setUserAssignments(assignments)
+    } catch (error: unknown) {
+      setImportError(error instanceof Error ? error.message : 'Failed to fetch GitHub preview')
+    } finally {
+      setIsPreviewing(false)
+    }
+  }
+
+  const handleImportFromGitHub = async () => {
+    setImportError('')
+    setImportSuccess('')
+    setIsPulling(true)
+    try {
+      const result = await apiClient.githubPull(projectId, {
+        token: githubToken || undefined,
+        pull_sprints: pullSprints,
+        pull_tags: pullTags,
+        pull_tasks: pullTasks,
+        user_assignments: userAssignments,
+      })
+      setImportSuccess(`Imported: ${result.created_sprints} sprints, ${result.created_tags} tags, ${result.created_tasks} tasks (${result.skipped_tasks} skipped)`)
+      loadGitHubSettings()
+    } catch (error: unknown) {
+      setImportError(error instanceof Error ? error.message : 'Import failed')
+    } finally {
+      setIsPulling(false)
+    }
+  }
+
+  const handleSyncNow = async () => {
+    setImportError('')
+    setImportSuccess('')
+    setIsSyncing(true)
+    try {
+      const result = await apiClient.githubSync(projectId)
+      setImportSuccess(`Synced: ${result.created_tasks} new tasks, updated existing`)
+      loadGitHubSettings()
+    } catch (error: unknown) {
+      setImportError(error instanceof Error ? error.message : 'Sync failed')
+    } finally {
+      setIsSyncing(false)
     }
   }
 
@@ -345,15 +418,22 @@ export default function ProjectSettings() {
     setIsSavingGitHub(true)
 
     try {
-      await apiClient.updateProjectGitHub(projectId, {
+      const payload: Record<string, unknown> = {
         github_repo_url: githubSettings.github_repo_url,
         github_owner: githubSettings.github_owner,
         github_repo_name: githubSettings.github_repo_name,
         github_branch: githubSettings.github_branch,
         github_sync_enabled: githubSettings.github_sync_enabled,
-      })
-
+      }
+      if (githubToken) {
+        payload.github_token = githubToken
+      }
+      await apiClient.updateProjectGitHub(projectId, payload as Parameters<typeof apiClient.updateProjectGitHub>[1])
       setGithubSuccess('GitHub settings saved successfully')
+      if (githubToken) {
+        setGithubToken('')
+        setGithubSettings(prev => ({ ...prev, github_token_set: true }))
+      }
     } catch (error: unknown) {
       setGithubError(error instanceof Error ? error.message : 'Failed to save GitHub settings')
     } finally {
@@ -946,6 +1026,21 @@ export default function ProjectSettings() {
                   helpText="The default branch to track (e.g., main, master, develop)"
                 />
 
+                <div>
+                  <label className="block text-sm font-medium text-dark-text-primary mb-1">
+                    GitHub Token {githubSettings.github_token_set && <span className="text-success-400 font-normal">(set)</span>}
+                  </label>
+                  <input
+                    type="password"
+                    value={githubToken}
+                    onChange={(e) => setGithubToken(e.target.value)}
+                    placeholder={githubSettings.github_token_set ? '••••••• (leave blank to keep existing)' : 'GitHub Personal Access Token'}
+                    className="w-full px-3 py-2 bg-dark-bg-secondary border border-dark-border-subtle text-dark-text-primary rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-primary-500 outline-none transition-colors"
+                    autoComplete="new-password"
+                  />
+                  <p className="mt-1 text-xs text-dark-text-tertiary">Required for private repos and higher API rate limits. Needs <code>repo</code> scope.</p>
+                </div>
+
                 <div className="flex items-center gap-3 p-4 bg-dark-bg-secondary border border-dark-border-subtle rounded-lg">
                   <input
                     type="checkbox"
@@ -960,16 +1055,132 @@ export default function ProjectSettings() {
                   </label>
                 </div>
 
-                {githubSettings.github_last_sync && (
-                  <div className="text-sm text-dark-text-secondary">
-                    Last synced: {new Date(githubSettings.github_last_sync).toLocaleString()}
-                  </div>
-                )}
-
                 <Button type="submit" disabled={isSavingGitHub}>
                   {isSavingGitHub ? 'Saving...' : 'Save GitHub Settings'}
                 </Button>
               </form>
+
+              {/* Import Section — shown when owner + repo are configured */}
+              {githubSettings.github_owner && githubSettings.github_repo_name && (
+                <div className="mt-8 pt-6 border-t border-dark-border-subtle">
+                  <h3 className="text-lg font-semibold text-dark-text-primary mb-1">Import from GitHub</h3>
+                  <p className="text-sm text-dark-text-secondary mb-4">
+                    Pull milestones → sprints, labels → tags, and issues → tasks into this project.
+                  </p>
+
+                  {importSuccess && (
+                    <div className="mb-4 p-4 bg-success-500/10 border-l-4 border-success-500/30 rounded-r-lg">
+                      <div className="flex items-center">
+                        <svg className="w-5 h-5 text-success-400 mr-2 flex-shrink-0" fill="currentColor" viewBox="0 0 20 20">
+                          <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" />
+                        </svg>
+                        <span className="text-success-300 font-medium">{importSuccess}</span>
+                      </div>
+                    </div>
+                  )}
+
+                  {importError && <FormError message={importError} className="mb-4" />}
+
+                  {!githubPreview ? (
+                    <Button onClick={handleFetchPreview} disabled={isPreviewing} variant="secondary">
+                      {isPreviewing ? 'Fetching...' : 'Fetch Preview'}
+                    </Button>
+                  ) : (
+                    <div className="space-y-4">
+                      {/* Counts */}
+                      <div className="flex flex-wrap gap-3">
+                        <div className="px-3 py-2 bg-dark-bg-secondary border border-dark-border-subtle rounded-lg text-sm">
+                          <span className="font-semibold text-dark-text-primary">{githubPreview.milestone_count}</span>
+                          <span className="text-dark-text-secondary ml-1">milestones</span>
+                        </div>
+                        <div className="px-3 py-2 bg-dark-bg-secondary border border-dark-border-subtle rounded-lg text-sm">
+                          <span className="font-semibold text-dark-text-primary">{githubPreview.label_count}</span>
+                          <span className="text-dark-text-secondary ml-1">labels</span>
+                        </div>
+                        <div className="px-3 py-2 bg-dark-bg-secondary border border-dark-border-subtle rounded-lg text-sm">
+                          <span className="font-semibold text-dark-text-primary">{githubPreview.issue_count}</span>
+                          <span className="text-dark-text-secondary ml-1">issues</span>
+                        </div>
+                        <button
+                          onClick={() => { setGithubPreview(null); setImportError(''); setImportSuccess('') }}
+                          className="px-3 py-2 text-xs text-dark-text-tertiary hover:text-dark-text-secondary border border-dark-border-subtle rounded-lg transition-colors"
+                        >
+                          Refresh
+                        </button>
+                      </div>
+
+                      {/* User mapping */}
+                      {githubPreview.github_users.length > 0 && (
+                        <div>
+                          <h4 className="text-sm font-medium text-dark-text-primary mb-2">Map GitHub users to TaskAI members</h4>
+                          <div className="space-y-2">
+                            {githubPreview.github_users.map((gu: GitHubUserMatch) => (
+                              <div key={gu.login} className="flex items-center gap-3 p-3 bg-dark-bg-secondary border border-dark-border-subtle rounded-lg">
+                                <div className="w-7 h-7 bg-gray-700 rounded-full flex items-center justify-center text-xs font-medium text-gray-300 flex-shrink-0">
+                                  {gu.login.charAt(0).toUpperCase()}
+                                </div>
+                                <div className="flex-1 min-w-0">
+                                  <span className="text-sm font-medium text-dark-text-primary">{gu.login}</span>
+                                  {gu.name && <span className="text-xs text-dark-text-tertiary ml-1">({gu.name})</span>}
+                                </div>
+                                <select
+                                  value={userAssignments[gu.login] ?? 0}
+                                  onChange={(e) => setUserAssignments(prev => ({ ...prev, [gu.login]: Number(e.target.value) }))}
+                                  className="text-sm bg-dark-bg-primary border border-dark-border-subtle text-dark-text-primary rounded-md px-2 py-1 focus:outline-none focus:ring-1 focus:ring-primary-500"
+                                >
+                                  <option value={0}>Unassigned</option>
+                                  {projectMembers.map(m => (
+                                    <option key={m.user_id} value={m.user_id}>
+                                      {m.name || m.email}
+                                    </option>
+                                  ))}
+                                </select>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+
+                      {/* Options */}
+                      <div className="flex flex-wrap gap-4">
+                        <label className="flex items-center gap-2 text-sm text-dark-text-primary cursor-pointer">
+                          <input type="checkbox" checked={pullSprints} onChange={e => setPullSprints(e.target.checked)}
+                            className="w-4 h-4 text-primary-600 border-dark-border-subtle rounded focus:ring-primary-500" />
+                          Import Sprints (milestones)
+                        </label>
+                        <label className="flex items-center gap-2 text-sm text-dark-text-primary cursor-pointer">
+                          <input type="checkbox" checked={pullTags} onChange={e => setPullTags(e.target.checked)}
+                            className="w-4 h-4 text-primary-600 border-dark-border-subtle rounded focus:ring-primary-500" />
+                          Import Tags (labels)
+                        </label>
+                        <label className="flex items-center gap-2 text-sm text-dark-text-primary cursor-pointer">
+                          <input type="checkbox" checked={pullTasks} onChange={e => setPullTasks(e.target.checked)}
+                            className="w-4 h-4 text-primary-600 border-dark-border-subtle rounded focus:ring-primary-500" />
+                          Import Tasks (issues)
+                        </label>
+                      </div>
+
+                      <div className="flex items-center gap-3">
+                        <Button onClick={handleImportFromGitHub} disabled={isPulling || (!pullSprints && !pullTags && !pullTasks)}>
+                          {isPulling ? 'Importing...' : 'Import from GitHub'}
+                        </Button>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Sync Now (shown after first sync) */}
+                  {githubSettings.github_last_sync && (
+                    <div className="mt-4 pt-4 border-t border-dark-border-subtle flex items-center gap-4">
+                      <span className="text-sm text-dark-text-secondary">
+                        Last synced: {new Date(githubSettings.github_last_sync).toLocaleString()}
+                      </span>
+                      <Button onClick={handleSyncNow} disabled={isSyncing} variant="secondary" size="sm">
+                        {isSyncing ? 'Syncing...' : 'Sync Now'}
+                      </Button>
+                    </div>
+                  )}
+                </div>
+              )}
             </div>
           </Card>
         </div>

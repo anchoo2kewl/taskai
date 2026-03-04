@@ -7,7 +7,7 @@ export type AuthResponse = components['schemas']['AuthResponse']
 export type SignupRequest = components['schemas']['SignupRequest']
 export type LoginRequest = components['schemas']['LoginRequest']
 export type Project = components['schemas']['Project']
-export type Task = components['schemas']['Task'] & { task_number?: number }
+export type Task = components['schemas']['Task'] & { task_number?: number; github_issue_number?: number | null }
 export type ApiError = components['schemas']['Error']
 // Types with required fields for commonly used API responses
 export interface TaskComment {
@@ -253,6 +253,11 @@ export interface GitHubPullResponse {
   created_tasks: number
   skipped_tasks: number
   created_comments: number
+}
+
+export interface GitHubPushTaskResponse {
+  issue_number: number
+  html_url: string
 }
 
 export interface GitHubProgressEvent {
@@ -835,6 +840,23 @@ class ApiClient {
     await this.request<void>(`/api/projects/${projectId}/github/token`, {
       method: 'DELETE',
     })
+  }
+
+  async githubPushTask(taskId: number): Promise<GitHubPushTaskResponse> {
+    return this.request<GitHubPushTaskResponse>(`/api/tasks/${taskId}/github/push`, {
+      method: 'POST',
+    })
+  }
+
+  async githubPushAll(
+    projectId: number,
+    onProgress?: (event: GitHubProgressEvent) => void
+  ): Promise<GitHubPullResponse> {
+    return this.streamGitHub(
+      `/api/projects/${projectId}/github/push-all`,
+      {},
+      onProgress ?? (() => {})
+    )
   }
 
   // Admin endpoints

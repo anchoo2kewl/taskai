@@ -43,10 +43,19 @@ type Config struct {
 	// Yjs Processor
 	YJSProcessorURL string
 
-	// GitHub OAuth
+	// GitHub OAuth (repo integration)
 	GitHubClientID     string
 	GitHubClientSecret string
 	AppURL             string
+
+	// OAuth Login (Google + GitHub login, separate from repo integration)
+	GoogleClientID          string
+	GoogleClientSecret      string
+	LoginGitHubClientID     string
+	LoginGitHubClientSecret string
+	OAuthStateSecret        string
+	OAuthSuccessURL         string
+	OAuthErrorURL           string
 }
 
 // Load reads configuration from environment variables
@@ -73,6 +82,13 @@ func Load() *Config {
 		GitHubClientID:          getEnv("GITHUB_CLIENT_ID", ""),
 		GitHubClientSecret:      getEnv("GITHUB_CLIENT_SECRET", ""),
 		AppURL:                  getEnv("APP_URL", "http://localhost:5173"),
+		GoogleClientID:          getEnv("GOOGLE_CLIENT_ID", ""),
+		GoogleClientSecret:      getEnv("GOOGLE_CLIENT_SECRET", ""),
+		LoginGitHubClientID:     getEnv("LOGIN_GITHUB_CLIENT_ID", ""),
+		LoginGitHubClientSecret: getEnv("LOGIN_GITHUB_CLIENT_SECRET", ""),
+		OAuthStateSecret:        getEnv("OAUTH_STATE_SECRET", ""),
+		OAuthSuccessURL:         getEnv("OAUTH_SUCCESS_URL", "http://localhost:5173/oauth/callback"),
+		OAuthErrorURL:           getEnv("OAUTH_ERROR_URL", "http://localhost:5173/login"),
 	}
 
 	// Validate critical configuration

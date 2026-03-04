@@ -9,6 +9,7 @@ interface AuthContextType {
   signup: (data: SignupRequest & { invite_code?: string }) => Promise<void>
   logout: () => void
   clearError: () => void
+  loginWithToken: (token: string) => Promise<void>
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined)
@@ -77,6 +78,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setError(null)
   }
 
+  const loginWithToken = async (token: string) => {
+    api.setToken(token)
+    const currentUser = await api.getCurrentUser()
+    setUser(currentUser)
+  }
+
   const value = {
     user,
     loading,
@@ -85,6 +92,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     signup,
     logout,
     clearError,
+    loginWithToken,
   }
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>

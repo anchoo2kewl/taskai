@@ -7,6 +7,7 @@ import Landing from './routes/Landing'
 import Login from './routes/Login'
 import Signup from './routes/Signup'
 import Dashboard from './routes/Dashboard'
+import OAuthCallback from './routes/OAuthCallback'
 
 // Lazy-loaded route components (code-split per route)
 const Projects = lazy(() => import('./routes/Projects'))
@@ -46,6 +47,7 @@ function AppRoutes() {
         <Route path="/" element={<HomeRoute />} />
         <Route path="/login" element={<Login />} />
         <Route path="/signup" element={<Signup />} />
+        <Route path="/oauth/callback" element={<OAuthCallback />} />
         <Route path="/accept-invite" element={<AcceptTeamInvite />} />
 
         {/* Protected routes */}

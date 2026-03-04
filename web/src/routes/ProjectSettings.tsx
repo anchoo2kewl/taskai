@@ -299,6 +299,8 @@ export default function ProjectSettings() {
   const [isPreviewing, setIsPreviewing] = useState(false)
   const [isPulling, setIsPulling] = useState(false)
   const [isSyncing, setIsSyncing] = useState(false)
+  const [isPushingAll, setIsPushingAll] = useState(false)
+  const [pushAllProgress, setPushAllProgress] = useState<GitHubProgressEvent | null>(null)
   const [importError, setImportError] = useState('')
   const [importSuccess, setImportSuccess] = useState('')
   const [importProgress, setImportProgress] = useState<GitHubProgressEvent | null>(null)
@@ -544,6 +546,26 @@ export default function ProjectSettings() {
       setImportProgress(null)
     } finally {
       setIsSyncing(false)
+    }
+  }
+
+  const handlePushAllToGitHub = async () => {
+    setImportError('')
+    setImportSuccess('')
+    setPushAllProgress(null)
+    setIsPushingAll(true)
+    try {
+      const result = await apiClient.githubPushAll(
+        projectId,
+        (evt) => setPushAllProgress(evt)
+      )
+      setImportSuccess(`Pushed ${result.created_tasks ?? 0} new tasks to GitHub`)
+      setPushAllProgress(null)
+    } catch (error: unknown) {
+      setImportError(error instanceof Error ? error.message : 'Push failed')
+      setPushAllProgress(null)
+    } finally {
+      setIsPushingAll(false)
     }
   }
 
@@ -1642,6 +1664,39 @@ export default function ProjectSettings() {
                               <div
                                 className="bg-primary-500 h-1.5 rounded-full transition-all duration-300"
                                 style={{ width: `${Math.round((importProgress.current / importProgress.total) * 100)}%` }}
+                              />
+                            </div>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  )}
+
+                  {/* Push All New Issues to GitHub */}
+                  {githubSettings.github_token_set && (isOwnerOrAdmin) && (
+                    <div className="mt-4 pt-4 border-t border-dark-border-subtle space-y-3">
+                      <div>
+                        <h4 className="text-sm font-medium text-dark-text-primary mb-1">Push New Issues to GitHub</h4>
+                        <p className="text-xs text-dark-text-tertiary mb-3">
+                          Create GitHub issues for all TaskAI tasks that haven't been linked to GitHub yet.
+                        </p>
+                        <Button onClick={handlePushAllToGitHub} disabled={isPushingAll} variant="secondary" size="sm">
+                          {isPushingAll ? 'Pushing...' : 'Push All New Issues to GitHub'}
+                        </Button>
+                      </div>
+                      {isPushingAll && pushAllProgress && (
+                        <div className="p-3 bg-dark-bg-secondary border border-dark-border-subtle rounded-lg">
+                          <div className="flex items-center justify-between text-sm mb-1.5">
+                            <span className="text-dark-text-primary font-medium">{pushAllProgress.message}</span>
+                            {pushAllProgress.total > 0 && (
+                              <span className="text-dark-text-tertiary text-xs">{pushAllProgress.current}/{pushAllProgress.total}</span>
+                            )}
+                          </div>
+                          {pushAllProgress.total > 0 && (
+                            <div className="w-full bg-dark-bg-primary rounded-full h-1.5">
+                              <div
+                                className="bg-primary-500 h-1.5 rounded-full transition-all duration-300"
+                                style={{ width: `${Math.round((pushAllProgress.current / pushAllProgress.total) * 100)}%` }}
                               />
                             </div>
                           )}

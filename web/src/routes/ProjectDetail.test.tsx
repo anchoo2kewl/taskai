@@ -45,6 +45,8 @@ vi.mock('../hooks/useLocalTasks', () => ({
 const apiMocks = vi.hoisted(() => ({
   getProject: vi.fn(),
   getSwimLanes: vi.fn(),
+  getSprints: vi.fn(),
+  getTags: vi.fn(),
 }))
 
 vi.mock('../lib/api', () => ({
@@ -71,6 +73,8 @@ describe('ProjectDetail', () => {
     vi.clearAllMocks()
     apiMocks.getProject.mockResolvedValue(project)
     apiMocks.getSwimLanes.mockResolvedValue(swimLanes)
+    apiMocks.getSprints.mockResolvedValue([])
+    apiMocks.getTags.mockResolvedValue([])
     hookState.tasks = [
       {
         id: 1,

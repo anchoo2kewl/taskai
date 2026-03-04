@@ -54,7 +54,18 @@ func (s *Server) HandleGetUsers(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
 	defer cancel()
 
-	// Get all users
+	// Get all non-deleted users
+	deletedRows, _ := s.db.QueryContext(ctx, `SELECT id FROM users WHERE deleted_at IS NOT NULL`)
+	deletedIDs := map[int64]bool{}
+	if deletedRows != nil {
+		for deletedRows.Next() {
+			var id int64
+			deletedRows.Scan(&id) //nolint:errcheck
+			deletedIDs[id] = true
+		}
+		deletedRows.Close()
+	}
+
 	entUsers, err := s.db.Client.User.Query().
 		Order(ent.Desc(user.FieldCreatedAt)).
 		All(ctx)
@@ -66,6 +77,9 @@ func (s *Server) HandleGetUsers(w http.ResponseWriter, r *http.Request) {
 
 	users := make([]UserWithStats, 0, len(entUsers))
 	for _, u := range entUsers {
+		if deletedIDs[u.ID] {
+			continue
+		}
 		userStats := UserWithStats{
 			ID:          u.ID,
 			Email:       u.Email,
@@ -232,7 +246,8 @@ func (s *Server) HandleUpdateUserAdmin(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// HandleDeleteUser deletes a user and all their data (admin only)
+// HandleDeleteUser soft-deletes a user: anonymizes their email (freeing it for re-invite)
+// and marks deleted_at, preserving invite/activity history (admin only).
 func (s *Server) HandleDeleteUser(w http.ResponseWriter, r *http.Request) {
 	userID, ok := GetUserID(r)
 	if !ok {
@@ -265,18 +280,42 @@ func (s *Server) HandleDeleteUser(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
 	defer cancel()
 
-	err := s.db.Client.User.DeleteOneID(targetUserID).Exec(ctx)
+	// Check user exists and isn't already deleted
+	var existingEmail string
+	var deletedAt *time.Time
+	err := s.db.QueryRowContext(ctx,
+		`SELECT email, deleted_at FROM users WHERE id = $1`, targetUserID,
+	).Scan(&existingEmail, &deletedAt)
 	if err != nil {
-		if ent.IsNotFound(err) {
-			respondError(w, http.StatusNotFound, "user not found", "not_found")
-			return
-		}
-		s.logger.Error("Failed to delete user", zap.Error(err), zap.Int64("target_user_id", targetUserID))
-		respondError(w, http.StatusInternalServerError, "failed to delete user", "internal_error")
+		respondError(w, http.StatusNotFound, "user not found", "not_found")
+		return
+	}
+	if deletedAt != nil {
+		respondError(w, http.StatusBadRequest, "user is already deleted", "validation_error")
 		return
 	}
 
-	s.logger.Info("Admin deleted user", zap.Int64("admin_id", userID), zap.Int64("deleted_user_id", targetUserID))
+	// Soft delete: anonymize email to free it for re-invite, clear credentials
+	anonymizedEmail := fmt.Sprintf("deleted-%d@deleted.invalid", targetUserID)
+	now := time.Now().UTC()
+	result, err := s.db.ExecContext(ctx,
+		`UPDATE users SET email = $1, password_hash = 'DELETED', is_admin = false,
+		 totp_secret = NULL, totp_enabled = false, backup_codes = NULL, deleted_at = $2
+		 WHERE id = $3`,
+		anonymizedEmail, now, targetUserID,
+	)
+	if err != nil {
+		s.logger.Error("Failed to soft-delete user", zap.Error(err), zap.Int64("target_user_id", targetUserID))
+		respondError(w, http.StatusInternalServerError, "failed to delete user", "internal_error")
+		return
+	}
+	rows, _ := result.RowsAffected()
+	if rows == 0 {
+		respondError(w, http.StatusNotFound, "user not found", "not_found")
+		return
+	}
+
+	s.logger.Info("Admin soft-deleted user", zap.Int64("admin_id", userID), zap.Int64("deleted_user_id", targetUserID))
 	respondJSON(w, http.StatusOK, map[string]interface{}{"id": targetUserID, "deleted": true})
 }
 

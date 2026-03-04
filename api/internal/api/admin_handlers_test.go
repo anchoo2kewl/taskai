@@ -276,11 +276,23 @@ func TestAdminHandlers(t *testing.T) {
 			t.Errorf("Expected status 200, got %d: %s", w.Code, w.Body.String())
 		}
 
-		// Verify user is gone
+		// Verify user is soft-deleted: deleted_at set, email anonymized
+		var email string
+		var deletedAt *time.Time
+		database.QueryRowContext(ctx, "SELECT email, deleted_at FROM users WHERE id = ?", deleteUserID).Scan(&email, &deletedAt)
+		if deletedAt == nil {
+			t.Error("User should have deleted_at set after deletion")
+		}
+		expectedEmail := fmt.Sprintf("deleted-%d@deleted.invalid", deleteUserID)
+		if email != expectedEmail {
+			t.Errorf("User email should be anonymized, got: %s", email)
+		}
+
+		// Original email should be freed
 		var count int
-		database.QueryRowContext(ctx, "SELECT COUNT(*) FROM users WHERE id = ?", deleteUserID).Scan(&count)
+		database.QueryRowContext(ctx, "SELECT COUNT(*) FROM users WHERE email = ?", "delete@test.com").Scan(&count)
 		if count != 0 {
-			t.Error("User should have been deleted")
+			t.Error("Original email should be freed after soft delete")
 		}
 	})
 }

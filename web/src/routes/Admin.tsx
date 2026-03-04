@@ -62,6 +62,8 @@ export default function Admin() {
   const [editingInvites, setEditingInvites] = useState<Record<number, number>>({})
   const [savingInvites, setSavingInvites] = useState<number | null>(null)
   const [deletingUserId, setDeletingUserId] = useState<number | null>(null)
+  const [deleteConfirm, setDeleteConfirm] = useState<{ id: number; email: string } | null>(null)
+  const [deleteError, setDeleteError] = useState<string | null>(null)
 
   // Email provider state
   const [emailProvider, setEmailProvider] = useState<EmailProviderResponse | null>(null)
@@ -150,7 +152,7 @@ export default function Admin() {
       await api.updateUserAdmin(userId, !currentStatus)
       await loadUsers()
     } catch (err) {
-      alert(err instanceof Error ? err.message : 'Failed to update admin status')
+      setDeleteError(err instanceof Error ? err.message : 'Failed to update admin status')
     }
   }
 
@@ -168,21 +170,28 @@ export default function Admin() {
         return next
       })
     } catch (err) {
-      alert(err instanceof Error ? err.message : 'Failed to update invites')
+      setDeleteError(err instanceof Error ? err.message : 'Failed to update invites')
     } finally {
       setSavingInvites(null)
     }
   }
 
-  const handleDeleteUser = async (e: React.MouseEvent, userId: number, email: string) => {
+  const handleDeleteUser = (e: React.MouseEvent, userId: number, email: string) => {
     e.stopPropagation()
-    if (!confirm(`Delete user "${email}"? This will permanently remove their account and all associated data.`)) return
+    setDeleteConfirm({ id: userId, email })
+  }
+
+  const confirmDeleteUser = async () => {
+    if (!deleteConfirm) return
+    const { id: userId } = deleteConfirm
+    setDeleteConfirm(null)
+    setDeleteError(null)
     try {
       setDeletingUserId(userId)
       await api.deleteUser(userId)
       setUsers(prev => prev.filter(u => u.id !== userId))
     } catch (err) {
-      alert(err instanceof Error ? err.message : 'Failed to delete user')
+      setDeleteError(err instanceof Error ? err.message : 'Failed to delete user')
     } finally {
       setDeletingUserId(null)
     }
@@ -411,6 +420,16 @@ export default function Admin() {
           {/* Users Tab */}
           {activeTab === 'users' && (
             <div className="space-y-2">
+              {deleteError && (
+                <div className="flex items-center justify-between p-3 bg-red-500/10 border border-red-500/30 rounded-lg">
+                  <span className="text-sm text-red-400">{deleteError}</span>
+                  <button onClick={() => setDeleteError(null)} className="text-red-400 hover:text-red-300 ml-3">
+                    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                    </svg>
+                  </button>
+                </div>
+              )}
               {users.map((u) => (
                 <div key={u.id} className="bg-dark-bg-secondary rounded-lg border border-dark-border-subtle overflow-hidden">
                   {/* User Row */}
@@ -969,6 +988,46 @@ export default function Admin() {
           )}
         </div>
       </div>
+
+      {/* Delete User Confirmation Modal */}
+      {deleteConfirm && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
+          <div className="bg-dark-bg-secondary border border-dark-border-subtle rounded-xl shadow-2xl p-6 max-w-md w-full mx-4">
+            <div className="flex items-start gap-4">
+              <div className="flex-shrink-0 w-10 h-10 rounded-full bg-red-500/10 border border-red-500/30 flex items-center justify-center">
+                <svg className="w-5 h-5 text-red-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+                </svg>
+              </div>
+              <div className="flex-1">
+                <h3 className="text-base font-semibold text-dark-text-primary">Delete user account</h3>
+                <p className="mt-1 text-sm text-dark-text-secondary">
+                  Are you sure you want to delete <span className="font-medium text-dark-text-primary">{deleteConfirm.email}</span>?
+                </p>
+                <ul className="mt-3 space-y-1 text-xs text-dark-text-tertiary">
+                  <li className="flex items-center gap-1.5"><span className="text-emerald-400">✓</span> Invite history is preserved</li>
+                  <li className="flex items-center gap-1.5"><span className="text-emerald-400">✓</span> Email freed up — user can be re-invited</li>
+                  <li className="flex items-center gap-1.5"><span className="text-red-400">✗</span> Login access permanently revoked</li>
+                </ul>
+              </div>
+            </div>
+            <div className="mt-5 flex gap-3 justify-end">
+              <button
+                onClick={() => setDeleteConfirm(null)}
+                className="px-4 py-2 text-sm font-medium text-dark-text-secondary bg-dark-bg-tertiary/50 border border-dark-border-subtle rounded-lg hover:text-dark-text-primary hover:bg-dark-bg-tertiary transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={confirmDeleteUser}
+                className="px-4 py-2 text-sm font-medium text-white bg-red-600 rounded-lg hover:bg-red-700 transition-colors"
+              >
+                Delete User
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }

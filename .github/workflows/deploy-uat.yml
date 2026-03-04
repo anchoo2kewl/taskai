@@ -64,6 +64,10 @@ jobs:
           DB_DRIVER: postgres
           DB_DSN: ${{ secrets.UAT_DB_DSN }}
           JWT_SECRET: ${{ secrets.UAT_JWT_SECRET }}
+          LOGIN_GH_CLIENT_ID: ${{ secrets.UAT_LOGIN_GITHUB_CLIENT_ID }}
+          LOGIN_GH_CLIENT_SECRET: ${{ secrets.UAT_LOGIN_GITHUB_CLIENT_SECRET }}
+          OAUTH_STATE_SECRET: ${{ secrets.UAT_OAUTH_STATE_SECRET }}
+          APP_URL: https://uat.taskai.cc
         run: |
           mkdir -p ~/.ssh
           echo "$SSH_PRIVATE_KEY" > ~/.ssh/deploy_key
@@ -86,6 +90,17 @@ jobs:
             export DB_DRIVER='$DB_DRIVER'
             export DB_DSN='$DB_DSN'
             export JWT_SECRET='$JWT_SECRET'
+            LOGIN_GH_ID='$LOGIN_GH_CLIENT_ID'
+            LOGIN_GH_SECRET='$LOGIN_GH_CLIENT_SECRET'
+            if [ -n "\$LOGIN_GH_ID" ] && [ "\$LOGIN_GH_ID" != "-" ]; then
+              export LOGIN_GITHUB_CLIENT_ID="\$LOGIN_GH_ID"
+              export LOGIN_GITHUB_CLIENT_SECRET="\$LOGIN_GH_SECRET"
+            fi
+            OAUTH_STATE='$OAUTH_STATE_SECRET'
+            if [ -n "\$OAUTH_STATE" ]; then
+              export OAUTH_STATE_SECRET="\$OAUTH_STATE"
+            fi
+            export APP_URL='https://uat.taskai.cc'
             export ENV=uat
 
             # Login to Docker Hub to avoid rate limiting

@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/pprof"
 	"os"
+	"strings"
 	"os/signal"
 	"syscall"
 	"time"
@@ -121,10 +122,19 @@ func main() {
 	r.Use(api.ZapLogger(logger))
 	r.Use(middleware.Recoverer)
 	// Timeout — skip for WebSocket upgrades (timeout wrapper strips http.Hijacker)
+	// Also skip for SSE endpoints (long-lived streaming connections)
 	r.Use(func(next http.Handler) http.Handler {
 		to := middleware.Timeout(30 * time.Second)
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			if r.Header.Get("Upgrade") == "websocket" {
+				next.ServeHTTP(w, r)
+				return
+			}
+			// SSE endpoints use streaming — no fixed timeout
+			if strings.HasSuffix(r.URL.Path, "/github/preview") ||
+				strings.HasSuffix(r.URL.Path, "/github/pull") ||
+				strings.HasSuffix(r.URL.Path, "/github/sync") ||
+				strings.HasSuffix(r.URL.Path, "/github/push-all") {
 				next.ServeHTTP(w, r)
 				return
 			}

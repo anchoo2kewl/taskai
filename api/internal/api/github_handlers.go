@@ -641,12 +641,16 @@ func (s *Server) HandleGitHubPreview(w http.ResponseWriter, r *http.Request) {
 		"message": "Fetching milestones...", "current": 0, "total": 0,
 	})
 
-	ctx := r.Context()
+	// Use a background context for GitHub API calls — independent of the HTTP request
+	// context so that client disconnects or proxy timeouts don't abort a long fetch.
+	fetchCtx, fetchCancel := context.WithTimeout(context.Background(), 5*time.Minute)
+	defer fetchCancel()
+
 	base := fmt.Sprintf("https://api.github.com/repos/%s/%s", owner, repo)
 
 	// Fetch milestones
 	var milestones []ghMilestone
-	if err := fetchGitHubJSON(ctx, token, base+"/milestones?state=all&per_page=100", &milestones); err != nil {
+	if err := fetchGitHubJSON(fetchCtx, token, base+"/milestones?state=all&per_page=100", &milestones); err != nil {
 		s.logger.Error("Failed to fetch GitHub milestones", zap.Error(err))
 		sendSSE(map[string]interface{}{"type": "error", "message": "Failed to fetch milestones: " + err.Error()})
 		return
@@ -658,7 +662,7 @@ func (s *Server) HandleGitHubPreview(w http.ResponseWriter, r *http.Request) {
 
 	// Fetch labels
 	var labels []ghLabel
-	if err := fetchGitHubJSON(ctx, token, base+"/labels?per_page=100", &labels); err != nil {
+	if err := fetchGitHubJSON(fetchCtx, token, base+"/labels?per_page=100", &labels); err != nil {
 		s.logger.Error("Failed to fetch GitHub labels", zap.Error(err))
 		sendSSE(map[string]interface{}{"type": "error", "message": "Failed to fetch labels: " + err.Error()})
 		return
@@ -673,7 +677,7 @@ func (s *Server) HandleGitHubPreview(w http.ResponseWriter, r *http.Request) {
 	for page := 1; page <= 10; page++ {
 		var pageIssues []ghIssue
 		url := fmt.Sprintf("%s/issues?state=all&per_page=100&page=%d", base, page)
-		if err := fetchGitHubJSON(ctx, token, url, &pageIssues); err != nil {
+		if err := fetchGitHubJSON(fetchCtx, token, url, &pageIssues); err != nil {
 			s.logger.Error("Failed to fetch GitHub issues", zap.Int("page", page), zap.Error(err))
 			sendSSE(map[string]interface{}{"type": "error", "message": "Failed to fetch issues: " + err.Error()})
 			return
@@ -709,16 +713,16 @@ func (s *Server) HandleGitHubPreview(w http.ResponseWriter, r *http.Request) {
 		FirstName string
 		LastName  string
 	}
-	rows, err := s.db.QueryContext(ctx, `
+	sendSSE(map[string]interface{}{
+		"type": "progress", "stage": "matching",
+		"message": fmt.Sprintf("Fetched %d issues — matching users...", len(allIssues)), "current": len(allIssues), "total": len(allIssues),
+	})
+	rows, err := s.db.QueryContext(fetchCtx, `
 		SELECT DISTINCT u.id, u.email, COALESCE(u.name,''), COALESCE(u.first_name,''), COALESCE(u.last_name,'')
 		FROM users u
 		JOIN team_members tm ON tm.user_id = u.id
 		WHERE tm.team_id = (SELECT team_id FROM projects WHERE id = $1)
 	`, projectID)
-	sendSSE(map[string]interface{}{
-		"type": "progress", "stage": "matching",
-		"message": fmt.Sprintf("Fetched %d issues — matching users...", len(allIssues)), "current": len(allIssues), "total": len(allIssues),
-	})
 	if err != nil {
 		sendSSE(map[string]interface{}{"type": "error", "message": "Failed to load team members"})
 		return
@@ -764,11 +768,11 @@ func (s *Server) HandleGitHubPreview(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Load swim lanes for auto-matching
-	lanes, _ := s.loadSwimLaneInfos(ctx, projectID)
+	lanes, _ := s.loadSwimLaneInfos(fetchCtx, projectID)
 
 	// Try to fetch GitHub Projects V2 column names (best-effort, ordered)
 	var projColNames []string
-	if projInfo, err := fetchProjectStatusColumns(ctx, token, owner, repo); err == nil && projInfo != nil {
+	if projInfo, err := fetchProjectStatusColumns(fetchCtx, token, owner, repo); err == nil && projInfo != nil {
 		for _, opt := range projInfo.Options {
 			projColNames = append(projColNames, opt.Name)
 		}

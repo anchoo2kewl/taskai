@@ -35,7 +35,7 @@ func NewOAuthStore(db *DB) *OAuthStore {
 func (s *OAuthStore) FindUserByProviderID(ctx context.Context, provider, providerUserID string) (*gologin.User, error) {
 	var userID int64
 	err := s.db.QueryRowContext(ctx,
-		`SELECT user_id FROM oauth_providers WHERE provider = ? AND provider_user_id = ? LIMIT 1`,
+		s.db.Rebind(`SELECT user_id FROM oauth_providers WHERE provider = ? AND provider_user_id = ? LIMIT 1`),
 		provider, providerUserID,
 	).Scan(&userID)
 	if err == sql.ErrNoRows {
@@ -74,7 +74,7 @@ func (s *OAuthStore) FindUserByEmail(ctx context.Context, email string) (*gologi
 func (s *OAuthStore) GetUserAuthProvider(ctx context.Context, userID int64) (string, error) {
 	var provider string
 	err := s.db.QueryRowContext(ctx,
-		`SELECT auth_provider FROM users WHERE id = ? LIMIT 1`, userID,
+		s.db.Rebind(`SELECT auth_provider FROM users WHERE id = ? LIMIT 1`), userID,
 	).Scan(&provider)
 	if err == sql.ErrNoRows {
 		return "password", nil
@@ -186,7 +186,7 @@ func (s *OAuthStore) CreateOAuthUser(ctx context.Context, info gologin.ProviderU
 
 	// Set auth_provider and insert oauth_providers row (raw SQL — not in Ent schema).
 	if _, err = s.db.ExecContext(ctx,
-		`UPDATE users SET auth_provider = ? WHERE id = ?`,
+		s.db.Rebind(`UPDATE users SET auth_provider = ? WHERE id = ?`),
 		provider, newUser.ID,
 	); err != nil {
 		s.logger.Error("oauth_store: failed to set auth_provider",
@@ -196,7 +196,7 @@ func (s *OAuthStore) CreateOAuthUser(ctx context.Context, info gologin.ProviderU
 	}
 
 	if _, err = s.db.ExecContext(ctx,
-		`INSERT INTO oauth_providers (user_id, provider, provider_user_id) VALUES (?, ?, ?)`,
+		s.db.Rebind(`INSERT INTO oauth_providers (user_id, provider, provider_user_id) VALUES (?, ?, ?)`),
 		newUser.ID, provider, info.ProviderUserID,
 	); err != nil {
 		s.logger.Error("oauth_store: failed to insert oauth_providers row",

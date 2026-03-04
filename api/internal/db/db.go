@@ -23,7 +23,27 @@ import (
 type DB struct {
 	*sql.DB        // Raw SQL connection for migrations
 	Client *ent.Client  // Ent ORM client for queries
+	Driver string      // "sqlite" or "postgres"
 	logger *zap.Logger
+}
+
+// Rebind converts SQLite-style ? placeholders to Postgres-style $1, $2, ...
+// when the driver is postgres. A no-op for SQLite.
+func (db *DB) Rebind(query string) string {
+	if db.Driver != "postgres" {
+		return query
+	}
+	var out []byte
+	n := 1
+	for i := 0; i < len(query); i++ {
+		if query[i] == '?' {
+			out = append(out, fmt.Sprintf("$%d", n)...)
+			n++
+		} else {
+			out = append(out, query[i])
+		}
+	}
+	return string(out)
 }
 
 // Config holds database configuration
@@ -131,6 +151,7 @@ func New(cfg Config, logger *zap.Logger) (*DB, error) {
 	db := &DB{
 		DB:     sqlDB,
 		Client: entClient,
+		Driver: driver,
 		logger: logger,
 	}
 

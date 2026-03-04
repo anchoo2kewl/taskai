@@ -66,6 +66,8 @@ jobs:
           LOGIN_GH_CLIENT_ID: ${{ secrets.STAGING_LOGIN_GITHUB_CLIENT_ID }}
           LOGIN_GH_CLIENT_SECRET: ${{ secrets.STAGING_LOGIN_GITHUB_CLIENT_SECRET }}
           OAUTH_STATE_SECRET: ${{ secrets.STAGING_OAUTH_STATE_SECRET }}
+          GOOGLE_CLIENT_ID: ${{ secrets.STAGING_GOOGLE_CLIENT_ID }}
+          GOOGLE_CLIENT_SECRET: ${{ secrets.STAGING_GOOGLE_CLIENT_SECRET }}
           APP_URL: https://staging.taskai.cc
         run: |
           mkdir -p ~/.ssh
@@ -102,6 +104,11 @@ jobs:
             OAUTH_STATE='$OAUTH_STATE_SECRET'
             if [ -n "\$OAUTH_STATE" ]; then
               export OAUTH_STATE_SECRET="\$OAUTH_STATE"
+            fi
+            GOOGLE_ID='$GOOGLE_CLIENT_ID'
+            if [ -n "\$GOOGLE_ID" ]; then
+              export GOOGLE_CLIENT_ID="\$GOOGLE_ID"
+              export GOOGLE_CLIENT_SECRET='$GOOGLE_CLIENT_SECRET'
             fi
 
             # Login to Docker Hub to avoid rate limiting

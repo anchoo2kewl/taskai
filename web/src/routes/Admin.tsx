@@ -61,6 +61,7 @@ export default function Admin() {
   const [activityLoading, setActivityLoading] = useState<number | null>(null)
   const [editingInvites, setEditingInvites] = useState<Record<number, number>>({})
   const [savingInvites, setSavingInvites] = useState<number | null>(null)
+  const [deletingUserId, setDeletingUserId] = useState<number | null>(null)
 
   // Email provider state
   const [emailProvider, setEmailProvider] = useState<EmailProviderResponse | null>(null)
@@ -170,6 +171,20 @@ export default function Admin() {
       alert(err instanceof Error ? err.message : 'Failed to update invites')
     } finally {
       setSavingInvites(null)
+    }
+  }
+
+  const handleDeleteUser = async (e: React.MouseEvent, userId: number, email: string) => {
+    e.stopPropagation()
+    if (!confirm(`Delete user "${email}"? This will permanently remove their account and all associated data.`)) return
+    try {
+      setDeletingUserId(userId)
+      await api.deleteUser(userId)
+      setUsers(prev => prev.filter(u => u.id !== userId))
+    } catch (err) {
+      alert(err instanceof Error ? err.message : 'Failed to delete user')
+    } finally {
+      setDeletingUserId(null)
     }
   }
 
@@ -436,6 +451,23 @@ export default function Admin() {
                         <div className={`absolute top-0.5 left-0.5 w-4 h-4 rounded-full bg-white transition-transform ${u.is_admin ? 'translate-x-4' : ''}`} />
                       </div>
                     </div>
+
+                    {u.id !== user?.id && (
+                      <button
+                        onClick={(e) => handleDeleteUser(e, u.id, u.email)}
+                        disabled={deletingUserId === u.id}
+                        title="Delete user"
+                        className="p-1.5 text-dark-text-tertiary hover:text-red-400 hover:bg-red-500/10 rounded transition-colors disabled:opacity-50 flex-shrink-0"
+                      >
+                        {deletingUserId === u.id ? (
+                          <div className="w-4 h-4 animate-spin rounded-full border-b-2 border-red-400" />
+                        ) : (
+                          <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                          </svg>
+                        )}
+                      </button>
+                    )}
                   </button>
 
                   {/* Expanded Panel */}

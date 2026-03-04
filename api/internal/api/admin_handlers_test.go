@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -222,6 +223,64 @@ func TestAdminHandlers(t *testing.T) {
 		}
 		if isAdmin {
 			t.Error("User should not be admin after revoke")
+		}
+	})
+
+	t.Run("Admin cannot delete themselves", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodDelete, "/api/admin/users/1", nil)
+		req.SetPathValue("id", "1")
+		req.Header.Set("Authorization", "Bearer "+adminToken)
+		w := httptest.NewRecorder()
+
+		handler := server.JWTAuth(http.HandlerFunc(server.HandleDeleteUser))
+		handler.ServeHTTP(w, req)
+
+		if w.Code != http.StatusBadRequest {
+			t.Errorf("Expected status 400, got %d: %s", w.Code, w.Body.String())
+		}
+	})
+
+	t.Run("Non-admin cannot delete users", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodDelete, "/api/admin/users/1", nil)
+		req.SetPathValue("id", "1")
+		req.Header.Set("Authorization", "Bearer "+userToken)
+		w := httptest.NewRecorder()
+
+		handler := server.JWTAuth(http.HandlerFunc(server.HandleDeleteUser))
+		handler.ServeHTTP(w, req)
+
+		if w.Code != http.StatusForbidden {
+			t.Errorf("Expected status 403, got %d: %s", w.Code, w.Body.String())
+		}
+	})
+
+	t.Run("Admin can delete a user", func(t *testing.T) {
+		// Create a third user to delete
+		deletePassword, _ := auth.HashPassword("delete123")
+		var deleteUserID int64
+		err := database.QueryRowContext(ctx, `INSERT INTO users (email, password_hash) VALUES (?, ?) RETURNING id`, "delete@test.com", deletePassword).Scan(&deleteUserID)
+		if err != nil {
+			t.Fatalf("Failed to create user to delete: %v", err)
+		}
+
+		idStr := fmt.Sprintf("%d", deleteUserID)
+		req := httptest.NewRequest(http.MethodDelete, "/api/admin/users/"+idStr, nil)
+		req.SetPathValue("id", idStr)
+		req.Header.Set("Authorization", "Bearer "+adminToken)
+		w := httptest.NewRecorder()
+
+		handler := server.JWTAuth(http.HandlerFunc(server.HandleDeleteUser))
+		handler.ServeHTTP(w, req)
+
+		if w.Code != http.StatusOK {
+			t.Errorf("Expected status 200, got %d: %s", w.Code, w.Body.String())
+		}
+
+		// Verify user is gone
+		var count int
+		database.QueryRowContext(ctx, "SELECT COUNT(*) FROM users WHERE id = ?", deleteUserID).Scan(&count)
+		if count != 0 {
+			t.Error("User should have been deleted")
 		}
 	})
 }

@@ -232,6 +232,54 @@ func (s *Server) HandleUpdateUserAdmin(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// HandleDeleteUser deletes a user and all their data (admin only)
+func (s *Server) HandleDeleteUser(w http.ResponseWriter, r *http.Request) {
+	userID, ok := GetUserID(r)
+	if !ok {
+		respondError(w, http.StatusUnauthorized, "user not authenticated", "unauthorized")
+		return
+	}
+
+	if !s.isAdmin(r.Context(), userID) {
+		respondError(w, http.StatusForbidden, "admin access required", "forbidden")
+		return
+	}
+
+	targetUserIDStr := r.PathValue("id")
+	if targetUserIDStr == "" {
+		respondError(w, http.StatusBadRequest, "user id required", "validation_error")
+		return
+	}
+
+	var targetUserID int64
+	if _, err := fmt.Sscanf(targetUserIDStr, "%d", &targetUserID); err != nil {
+		respondError(w, http.StatusBadRequest, "invalid user id", "validation_error")
+		return
+	}
+
+	if targetUserID == userID {
+		respondError(w, http.StatusBadRequest, "cannot delete your own account", "validation_error")
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
+	defer cancel()
+
+	err := s.db.Client.User.DeleteOneID(targetUserID).Exec(ctx)
+	if err != nil {
+		if ent.IsNotFound(err) {
+			respondError(w, http.StatusNotFound, "user not found", "not_found")
+			return
+		}
+		s.logger.Error("Failed to delete user", zap.Error(err), zap.Int64("target_user_id", targetUserID))
+		respondError(w, http.StatusInternalServerError, "failed to delete user", "internal_error")
+		return
+	}
+
+	s.logger.Info("Admin deleted user", zap.Int64("admin_id", userID), zap.Int64("deleted_user_id", targetUserID))
+	respondJSON(w, http.StatusOK, map[string]interface{}{"id": targetUserID, "deleted": true})
+}
+
 // isAdmin checks if a user is an admin
 func (s *Server) isAdmin(ctx context.Context, userID int64) bool {
 	userEntity, err := s.db.Client.User.Get(ctx, userID)

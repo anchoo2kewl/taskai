@@ -72,6 +72,9 @@ jobs:
           JWT_SECRET: ${{ secrets.PRODUCTION_JWT_SECRET }}
           GH_OAUTH_CLIENT_ID: ${{ secrets.PRODUCTION_GITHUB_CLIENT_ID }}
           GH_OAUTH_CLIENT_SECRET: ${{ secrets.PRODUCTION_GITHUB_CLIENT_SECRET }}
+          LOGIN_GH_CLIENT_ID: ${{ secrets.PRODUCTION_LOGIN_GITHUB_CLIENT_ID }}
+          LOGIN_GH_CLIENT_SECRET: ${{ secrets.PRODUCTION_LOGIN_GITHUB_CLIENT_SECRET }}
+          OAUTH_STATE_SECRET: ${{ secrets.PRODUCTION_OAUTH_STATE_SECRET }}
           APP_URL: https://taskai.cc
         run: |
           mkdir -p ~/.ssh
@@ -104,6 +107,9 @@ jobs:
             export JWT_SECRET="$JWT_SECRET"
             export GITHUB_CLIENT_ID="$GH_OAUTH_CLIENT_ID"
             export GITHUB_CLIENT_SECRET="$GH_OAUTH_CLIENT_SECRET"
+            export LOGIN_GITHUB_CLIENT_ID="$LOGIN_GH_CLIENT_ID"
+            export LOGIN_GITHUB_CLIENT_SECRET="$LOGIN_GH_CLIENT_SECRET"
+            export OAUTH_STATE_SECRET="$OAUTH_STATE_SECRET"
             export APP_URL="$APP_URL"
             export ENV=production
             echo "Version: \$VERSION, Commit: \$GIT_COMMIT, Build Time: \$BUILD_TIME"

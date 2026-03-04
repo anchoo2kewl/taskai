@@ -63,6 +63,9 @@ jobs:
           BUILD_TIME: ${{ steps.version.outputs.BUILD_TIME }}
           GH_OAUTH_CLIENT_ID: ${{ secrets.STAGING_GITHUB_CLIENT_ID }}
           GH_OAUTH_CLIENT_SECRET: ${{ secrets.STAGING_GITHUB_CLIENT_SECRET }}
+          LOGIN_GH_CLIENT_ID: ${{ secrets.STAGING_LOGIN_GITHUB_CLIENT_ID }}
+          LOGIN_GH_CLIENT_SECRET: ${{ secrets.STAGING_LOGIN_GITHUB_CLIENT_SECRET }}
+          OAUTH_STATE_SECRET: ${{ secrets.STAGING_OAUTH_STATE_SECRET }}
           APP_URL: https://staging.taskai.cc
         run: |
           mkdir -p ~/.ssh
@@ -89,6 +92,16 @@ jobs:
             if [ -n "\$GH_ID" ] && [ "\$GH_ID" != "-" ]; then
               export GITHUB_CLIENT_ID="\$GH_ID"
               export GITHUB_CLIENT_SECRET="\$GH_SECRET"
+            fi
+            LOGIN_GH_ID='$LOGIN_GH_CLIENT_ID'
+            LOGIN_GH_SECRET='$LOGIN_GH_CLIENT_SECRET'
+            if [ -n "\$LOGIN_GH_ID" ] && [ "\$LOGIN_GH_ID" != "-" ]; then
+              export LOGIN_GITHUB_CLIENT_ID="\$LOGIN_GH_ID"
+              export LOGIN_GITHUB_CLIENT_SECRET="\$LOGIN_GH_SECRET"
+            fi
+            OAUTH_STATE='$OAUTH_STATE_SECRET'
+            if [ -n "\$OAUTH_STATE" ]; then
+              export OAUTH_STATE_SECRET="\$OAUTH_STATE"
             fi
 
             # Login to Docker Hub to avoid rate limiting

@@ -207,12 +207,33 @@ export interface GitHubStatusMatch {
   matched_name: string
 }
 
+export interface GitHubMilestone {
+  number: number
+  title: string
+  state: string
+  due_on: string
+}
+
+export interface GitHubLabel {
+  name: string
+  color: string
+}
+
 export interface GitHubPreviewResponse {
   milestone_count: number
   label_count: number
   issue_count: number
   github_users: GitHubUserMatch[]
   statuses: GitHubStatusMatch[]
+  milestones: GitHubMilestone[]
+  labels: GitHubLabel[]
+}
+
+export interface GitHubImportFilter {
+  milestone_number?: number
+  assignee?: string
+  labels?: string[]
+  state?: 'all' | 'open' | 'closed'
 }
 
 export interface GitHubPullRequest {
@@ -223,6 +244,7 @@ export interface GitHubPullRequest {
   pull_comments: boolean
   user_assignments: Record<string, number>
   status_assignments: Record<string, number>
+  filter?: GitHubImportFilter
 }
 
 export interface GitHubPullResponse {
@@ -231,6 +253,14 @@ export interface GitHubPullResponse {
   created_tasks: number
   skipped_tasks: number
   created_comments: number
+}
+
+export interface GitHubProgressEvent {
+  type: 'progress'
+  stage: string
+  message: string
+  current: number
+  total: number
 }
 
 export interface UserWithStats {
@@ -719,25 +749,76 @@ class ApiClient {
     })
   }
 
-  async githubPull(projectId: number, data: GitHubPullRequest): Promise<GitHubPullResponse> {
-    return this.request<GitHubPullResponse>(`/api/projects/${projectId}/github/pull`, {
-      method: 'POST',
-      body: JSON.stringify(data),
-    })
+  // Stream a GitHub import/sync endpoint and report progress events.
+  private async streamGitHub(
+    endpoint: string,
+    data: object,
+    onProgress: (event: GitHubProgressEvent) => void
+  ): Promise<GitHubPullResponse> {
+    const url = `${this.baseURL}${endpoint}`
+    const headers: Record<string, string> = { 'Content-Type': 'application/json' }
+    if (this.token) headers['Authorization'] = `Bearer ${this.token}`
+
+    const response = await fetch(url, { method: 'POST', headers, body: JSON.stringify(data) })
+
+    if (!response.ok || !response.body) {
+      const text = await response.text()
+      throw new Error(`HTTP ${response.status}: ${text}`)
+    }
+
+    const reader = response.body.getReader()
+    const decoder = new TextDecoder()
+    let buffer = ''
+
+    while (true) {
+      const { done, value } = await reader.read()
+      if (done) break
+      buffer += decoder.decode(value, { stream: true })
+      const lines = buffer.split('\n')
+      buffer = lines.pop() ?? ''
+      for (const line of lines) {
+        if (!line.startsWith('data: ')) continue
+        const json = line.slice(6).trim()
+        if (!json) continue
+        let event: Record<string, unknown>
+        try { event = JSON.parse(json) } catch { continue }
+        if (event.type === 'done') return event.result as GitHubPullResponse
+        if (event.type === 'error') throw new Error(event.message as string)
+        if (event.type === 'progress') onProgress(event as unknown as GitHubProgressEvent)
+      }
+    }
+    throw new Error('Stream ended without result')
   }
 
-  async githubSync(projectId: number, statusAssignments?: Record<string, number>): Promise<GitHubPullResponse> {
-    return this.request<GitHubPullResponse>(`/api/projects/${projectId}/github/sync`, {
-      method: 'POST',
-      body: JSON.stringify({
+  async githubPull(
+    projectId: number,
+    data: GitHubPullRequest,
+    onProgress?: (event: GitHubProgressEvent) => void
+  ): Promise<GitHubPullResponse> {
+    return this.streamGitHub(
+      `/api/projects/${projectId}/github/pull`,
+      data,
+      onProgress ?? (() => {})
+    )
+  }
+
+  async githubSync(
+    projectId: number,
+    statusAssignments?: Record<string, number>,
+    onProgress?: (event: GitHubProgressEvent) => void
+  ): Promise<GitHubPullResponse> {
+    return this.streamGitHub(
+      `/api/projects/${projectId}/github/sync`,
+      {
         pull_sprints: true,
         pull_tags: true,
         pull_tasks: true,
         pull_comments: true,
         user_assignments: {},
         status_assignments: statusAssignments ?? {},
-      }),
-    })
+      },
+      onProgress ?? (() => {})
+    )
   }
 
   async githubOAuthInit(projectId: number): Promise<{ auth_url: string }> {

@@ -107,8 +107,12 @@ jobs:
             export DB_DRIVER="$DB_DRIVER"
             export DB_DSN="$DB_DSN"
             export JWT_SECRET="$JWT_SECRET"
-            export GITHUB_CLIENT_ID="$GH_OAUTH_CLIENT_ID"
-            export GITHUB_CLIENT_SECRET="$GH_OAUTH_CLIENT_SECRET"
+            GH_ID="$GH_OAUTH_CLIENT_ID"
+            GH_SECRET="$GH_OAUTH_CLIENT_SECRET"
+            if [ -n "$GH_ID" ] && [ "$GH_ID" != "-" ]; then
+              export GITHUB_CLIENT_ID="$GH_ID"
+              export GITHUB_CLIENT_SECRET="$GH_SECRET"
+            fi
             export LOGIN_GITHUB_CLIENT_ID="$LOGIN_GH_CLIENT_ID"
             export LOGIN_GITHUB_CLIENT_SECRET="$LOGIN_GH_CLIENT_SECRET"
             export OAUTH_STATE_SECRET="$OAUTH_STATE_SECRET"

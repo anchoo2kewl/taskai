@@ -20,25 +20,26 @@ import (
 )
 
 type Task struct {
-	ID             int64     `json:"id"`
-	ProjectID      int64     `json:"project_id"`
-	TaskNumber     int64     `json:"task_number"`
-	Title          string    `json:"title"`
-	Description    *string   `json:"description,omitempty"`
-	Status         string    `json:"status"`
-	SwimLaneID     *int64    `json:"swim_lane_id,omitempty"`
-	SwimLaneName   *string   `json:"swim_lane_name,omitempty"`
-	DueDate        *string   `json:"due_date,omitempty"`
-	SprintID       *int64    `json:"sprint_id,omitempty"`
-	SprintName     *string   `json:"sprint_name,omitempty"`
-	Priority       string    `json:"priority"`
-	AssigneeID     *int64    `json:"assignee_id,omitempty"`
-	AssigneeName   *string   `json:"assignee_name,omitempty"`
-	EstimatedHours *float64  `json:"estimated_hours,omitempty"`
-	ActualHours    *float64  `json:"actual_hours,omitempty"`
-	Tags           []Tag     `json:"tags,omitempty"`
-	CreatedAt      time.Time `json:"created_at"`
-	UpdatedAt      time.Time `json:"updated_at"`
+	ID                  int64     `json:"id"`
+	ProjectID           int64     `json:"project_id"`
+	TaskNumber          int64     `json:"task_number"`
+	Title               string    `json:"title"`
+	Description         *string   `json:"description,omitempty"`
+	Status              string    `json:"status"`
+	SwimLaneID          *int64    `json:"swim_lane_id,omitempty"`
+	SwimLaneName        *string   `json:"swim_lane_name,omitempty"`
+	DueDate             *string   `json:"due_date,omitempty"`
+	SprintID            *int64    `json:"sprint_id,omitempty"`
+	SprintName          *string   `json:"sprint_name,omitempty"`
+	Priority            string    `json:"priority"`
+	AssigneeID          *int64    `json:"assignee_id,omitempty"`
+	AssigneeName        *string   `json:"assignee_name,omitempty"`
+	EstimatedHours      *float64  `json:"estimated_hours,omitempty"`
+	ActualHours         *float64  `json:"actual_hours,omitempty"`
+	Tags                []Tag     `json:"tags,omitempty"`
+	GithubIssueNumber   *int64    `json:"github_issue_number,omitempty"`
+	CreatedAt           time.Time `json:"created_at"`
+	UpdatedAt           time.Time `json:"updated_at"`
 }
 
 type CreateTaskRequest struct {
@@ -1000,6 +1001,14 @@ func (s *Server) HandleGetTaskByNumber(w http.ResponseWriter, r *http.Request) {
 					CreatedAt: tt.Edges.Tag.CreatedAt,
 				})
 			}
+		}
+	}
+
+	// Load github_issue_number (not in ent schema, raw SQL)
+	var ghIssueNum sql.NullInt64
+	if err := s.db.QueryRowContext(ctx, `SELECT github_issue_number FROM tasks WHERE id = $1`, taskEntity.ID).Scan(&ghIssueNum); err == nil {
+		if ghIssueNum.Valid {
+			t.GithubIssueNumber = &ghIssueNum.Int64
 		}
 	}
 

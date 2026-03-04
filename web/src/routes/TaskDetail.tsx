@@ -5,7 +5,7 @@ import remarkGfm from 'remark-gfm'
 import Button from '../components/ui/Button'
 import SearchSelect from '../components/ui/SearchSelect'
 import ImagePickerModal from '../components/ImagePickerModal'
-import { apiClient, Task, type UpdateTaskRequest, type SwimLane, type Sprint, type ProjectMember, type Attachment, type TaskComment } from '../lib/api'
+import { apiClient, Task, type UpdateTaskRequest, type SwimLane, type Sprint, type ProjectMember, type Attachment, type TaskComment, type GitHubPushTaskResponse } from '../lib/api'
 
 interface TaskDetailProps {
   isModal?: boolean
@@ -51,6 +51,10 @@ export default function TaskDetail({ isModal, onClose }: TaskDetailProps) {
   // Confirm modal
   const [confirmAction, setConfirmAction] = useState<{ message: string; onConfirm: () => void } | null>(null)
 
+  // GitHub push
+  const [pushingToGitHub, setPushingToGitHub] = useState(false)
+  const [githubPushResult, setGithubPushResult] = useState<GitHubPushTaskResponse | null>(null)
+
   useEffect(() => {
     loadTask()
     loadSprints()
@@ -76,11 +80,28 @@ export default function TaskDetail({ isModal, onClose }: TaskDetailProps) {
     }
   }, [editingField])
 
+  const handlePushToGitHub = async () => {
+    if (!task?.id) return
+    setPushingToGitHub(true)
+    try {
+      const result = await apiClient.githubPushTask(task.id)
+      setGithubPushResult(result)
+      setTask(prev => prev ? { ...prev, github_issue_number: result.issue_number } : prev)
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : 'Failed to push to GitHub')
+    } finally {
+      setPushingToGitHub(false)
+    }
+  }
+
   const loadTask = async () => {
     try {
       setLoading(true)
       const found = await apiClient.getTaskByNumber(Number(projectId), Number(taskNumber))
       setTask(found)
+      if (found.github_issue_number) {
+        setGithubPushResult({ issue_number: found.github_issue_number, html_url: '' })
+      }
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : 'Failed to load task')
     } finally {
@@ -894,6 +915,44 @@ export default function TaskDetail({ isModal, onClose }: TaskDetailProps) {
                     ))}
                   </div>
                 </SidebarField>
+              )}
+            </div>
+
+            {/* GitHub */}
+            <div className="mt-4">
+              {githubPushResult?.html_url ? (
+                <div className="flex items-center gap-2">
+                  <a
+                    href={githubPushResult.html_url}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="flex items-center gap-1.5 text-xs text-primary-400 hover:text-primary-300 transition-colors"
+                  >
+                    <svg className="w-3.5 h-3.5" fill="currentColor" viewBox="0 0 24 24">
+                      <path fillRule="evenodd" d="M12 2C6.477 2 2 6.484 2 12.017c0 4.425 2.865 8.18 6.839 9.504.5.092.682-.217.682-.483 0-.237-.008-.868-.013-1.703-2.782.605-3.369-1.343-3.369-1.343-.454-1.158-1.11-1.466-1.11-1.466-.908-.62.069-.608.069-.608 1.003.07 1.531 1.032 1.531 1.032.892 1.53 2.341 1.088 2.91.832.092-.647.35-1.088.636-1.338-2.22-.253-4.555-1.113-4.555-4.951 0-1.093.39-1.988 1.029-2.688-.103-.253-.446-1.272.098-2.65 0 0 .84-.27 2.75 1.026A9.564 9.564 0 0112 6.844c.85.004 1.705.115 2.504.337 1.909-1.296 2.747-1.027 2.747-1.027.546 1.379.202 2.398.1 2.651.64.7 1.028 1.595 1.028 2.688 0 3.848-2.339 4.695-4.566 4.943.359.309.678.92.678 1.855 0 1.338-.012 2.419-.012 2.747 0 .268.18.58.688.482A10.019 10.019 0 0022 12.017C22 6.484 17.522 2 12 2z" clipRule="evenodd" />
+                    </svg>
+                    #{task.github_issue_number} on GitHub
+                  </a>
+                  <button
+                    onClick={handlePushToGitHub}
+                    disabled={pushingToGitHub}
+                    className="text-xs text-dark-text-tertiary hover:text-dark-text-secondary transition-colors disabled:opacity-50"
+                    title="Sync to GitHub"
+                  >
+                    {pushingToGitHub ? 'Syncing...' : 'Sync'}
+                  </button>
+                </div>
+              ) : (
+                <button
+                  onClick={handlePushToGitHub}
+                  disabled={pushingToGitHub}
+                  className="flex items-center gap-1.5 text-xs text-dark-text-tertiary hover:text-dark-text-secondary transition-colors disabled:opacity-50"
+                >
+                  <svg className="w-3.5 h-3.5" fill="currentColor" viewBox="0 0 24 24">
+                    <path fillRule="evenodd" d="M12 2C6.477 2 2 6.484 2 12.017c0 4.425 2.865 8.18 6.839 9.504.5.092.682-.217.682-.483 0-.237-.008-.868-.013-1.703-2.782.605-3.369-1.343-3.369-1.343-.454-1.158-1.11-1.466-1.11-1.466-.908-.62.069-.608.069-.608 1.003.07 1.531 1.032 1.531 1.032.892 1.53 2.341 1.088 2.91.832.092-.647.35-1.088.636-1.338-2.22-.253-4.555-1.113-4.555-4.951 0-1.093.39-1.988 1.029-2.688-.103-.253-.446-1.272.098-2.65 0 0 .84-.27 2.75 1.026A9.564 9.564 0 0112 6.844c.85.004 1.705.115 2.504.337 1.909-1.296 2.747-1.027 2.747-1.027.546 1.379.202 2.398.1 2.651.64.7 1.028 1.595 1.028 2.688 0 3.848-2.339 4.695-4.566 4.943.359.309.678.92.678 1.855 0 1.338-.012 2.419-.012 2.747 0 .268.18.58.688.482A10.019 10.019 0 0022 12.017C22 6.484 17.522 2 12 2z" clipRule="evenodd" />
+                  </svg>
+                  {pushingToGitHub ? 'Pushing...' : 'Push to GitHub'}
+                </button>
               )}
             </div>
 

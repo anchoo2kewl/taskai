@@ -12,6 +12,7 @@ import (
 
 	godraw "github.com/anchoo2kewl/go-draw"
 	godrawstore "github.com/anchoo2kewl/go-draw/store"
+	gologin "github.com/anchoo2kewl/go-login"
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
 	"github.com/go-chi/cors"
@@ -202,6 +203,50 @@ func main() {
 			r.Post("/signup", server.HandleSignup)
 			r.Post("/login", server.HandleLogin)
 			r.Get("/github/callback", server.HandleGitHubCallback)
+
+			// OAuth login routes — mounted only when credentials are configured.
+			if cfg.GoogleClientID != "" || cfg.LoginGitHubClientID != "" {
+				oauthCfg := &gologin.Config{
+					SuccessURL:  cfg.OAuthSuccessURL,
+					ErrorURL:    cfg.OAuthErrorURL,
+					StateSecret: cfg.OAuthStateSecret,
+					JWTSecret:   cfg.JWTSecret,
+					JWTExpiry:   cfg.JWTExpiry(),
+					Logger:      logger,
+				}
+				if cfg.GoogleClientID != "" {
+					oauthCfg.Google = &gologin.OAuthProviderConfig{
+						ClientID:     cfg.GoogleClientID,
+						ClientSecret: cfg.GoogleClientSecret,
+						RedirectURL:  cfg.AppURL + "/api/auth/google/callback",
+					}
+				}
+				if cfg.LoginGitHubClientID != "" {
+					oauthCfg.GitHub = &gologin.OAuthProviderConfig{
+						ClientID:     cfg.LoginGitHubClientID,
+						ClientSecret: cfg.LoginGitHubClientSecret,
+						RedirectURL:  cfg.AppURL + "/api/auth/github/login/callback",
+					}
+				}
+				// Override StateSecret fallback — only register if properly configured.
+				if cfg.OAuthStateSecret == "" {
+					logger.Warn("OAUTH_STATE_SECRET not set — OAuth login routes not registered")
+				} else {
+					oauthStore := db.NewOAuthStore(database)
+					loginHandler, err := gologin.NewHandler(oauthCfg, oauthStore)
+					if err != nil {
+						logger.Fatal("failed to init OAuth login handler", zap.Error(err))
+					}
+					r.Get("/google", loginHandler.HandleGoogleInitiate)
+					r.Get("/google/callback", loginHandler.HandleGoogleCallback)
+					r.Get("/github/login", loginHandler.HandleGithubInitiate)
+					r.Get("/github/login/callback", loginHandler.HandleGithubCallback)
+					logger.Info("OAuth login routes registered",
+						zap.Bool("google", cfg.GoogleClientID != ""),
+						zap.Bool("github", cfg.LoginGitHubClientID != ""),
+					)
+				}
+			}
 		})
 
 		// Invite validation (public, rate limited)
@@ -272,6 +317,9 @@ func main() {
 			r.Get("/tasks/{taskId}/comments", server.HandleListTaskComments)
 			r.Post("/tasks/{taskId}/comments", server.HandleCreateTaskComment)
 
+			// Task GitHub push
+			r.Post("/tasks/{taskId}/github/push", server.HandleGitHubPushTask)
+
 			// Sprint routes (project-scoped)
 			r.Get("/projects/{id}/sprints", server.HandleListSprints)
 			r.Post("/projects/{id}/sprints", server.HandleCreateSprint)
@@ -301,6 +349,7 @@ func main() {
 			r.Post("/projects/{id}/github/oauth-init", server.HandleGitHubOAuthInit)
 			r.Get("/projects/{id}/github/repos", server.HandleGitHubListRepos)
 			r.Delete("/projects/{id}/github/token", server.HandleGitHubDisconnect)
+			r.Post("/projects/{id}/github/push-all", server.HandleGitHubPushAll)
 
 			// Project invitation routes
 			r.Post("/projects/{id}/invitations", server.HandleInviteProjectMember)

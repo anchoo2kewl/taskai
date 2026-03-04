@@ -1470,6 +1470,295 @@ func (s *Server) tryPushCommentToGitHub(ctx context.Context, taskID, commentID i
 	_, _ = s.db.ExecContext(ctx, `UPDATE task_comments SET github_comment_id = $1 WHERE id = $2`, ghCommentID, commentID)
 }
 
+// HandleGitHubPushTask creates or updates a GitHub issue for a TaskAI task.
+// POST /api/tasks/{taskId}/github/push
+func (s *Server) HandleGitHubPushTask(w http.ResponseWriter, r *http.Request) {
+	ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
+	defer cancel()
+
+	userID, ok := GetUserID(r)
+	if !ok {
+		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+		return
+	}
+
+	taskID, err := strconv.ParseInt(chi.URLParam(r, "taskId"), 10, 64)
+	if err != nil {
+		respondError(w, http.StatusBadRequest, "invalid task ID", "invalid_input")
+		return
+	}
+
+	// Load task + project github config in one query
+	var (
+		title             string
+		description       sql.NullString
+		projectID         int64
+		githubIssueNumber sql.NullInt64
+		milestoneNumber   sql.NullInt64
+		owner, repo       string
+		tokenNull         sql.NullString
+	)
+	err = s.db.QueryRowContext(ctx, `
+		SELECT t.title, t.description, t.project_id, t.github_issue_number,
+		       (SELECT s.github_milestone_number FROM sprints s WHERE s.id = t.sprint_id LIMIT 1),
+		       COALESCE(p.github_owner,''), COALESCE(p.github_repo_name,''),
+		       p.github_token
+		FROM tasks t
+		JOIN projects p ON p.id = t.project_id
+		WHERE t.id = $1
+	`, taskID).Scan(&title, &description, &projectID, &githubIssueNumber, &milestoneNumber, &owner, &repo, &tokenNull)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			respondError(w, http.StatusNotFound, "task not found", "not_found")
+		} else {
+			respondError(w, http.StatusInternalServerError, "failed to load task", "internal_error")
+		}
+		return
+	}
+
+	token := ""
+	if tokenNull.Valid {
+		token = tokenNull.String
+	}
+
+	// Auth check
+	hasAccess, _ := s.checkProjectAccess(ctx, userID, projectID)
+	if !hasAccess {
+		respondError(w, http.StatusForbidden, "access denied", "forbidden")
+		return
+	}
+
+	if owner == "" || repo == "" || token == "" {
+		respondError(w, http.StatusBadRequest, "GitHub not configured for this project", "missing_config")
+		return
+	}
+
+	body := ""
+	if description.Valid {
+		body = description.String
+	}
+
+	payload := map[string]interface{}{
+		"title": title,
+		"body":  body,
+	}
+	if milestoneNumber.Valid {
+		payload["milestone"] = milestoneNumber.Int64
+	}
+
+	var issueNumber int64
+	var htmlURL string
+
+	if githubIssueNumber.Valid && githubIssueNumber.Int64 > 0 {
+		// Update existing issue
+		issueNumber = githubIssueNumber.Int64
+		apiURL := fmt.Sprintf("https://api.github.com/repos/%s/%s/issues/%d", owner, repo, issueNumber)
+		data, _ := json.Marshal(payload)
+		req2, _ := http.NewRequestWithContext(ctx, http.MethodPatch, apiURL, bytes.NewReader(data))
+		req2.Header.Set("Content-Type", "application/json")
+		req2.Header.Set("Authorization", "Bearer "+token)
+		req2.Header.Set("Accept", "application/vnd.github+json")
+		req2.Header.Set("X-GitHub-Api-Version", "2022-11-28")
+		resp, err := http.DefaultClient.Do(req2)
+		if err != nil {
+			respondError(w, http.StatusBadGateway, "failed to update GitHub issue: "+err.Error(), "github_error")
+			return
+		}
+		defer resp.Body.Close()
+		if resp.StatusCode >= 400 {
+			b, _ := io.ReadAll(resp.Body)
+			respondError(w, http.StatusBadGateway, "GitHub API error: "+strings.TrimSpace(string(b)), "github_error")
+			return
+		}
+		var result struct {
+			Number  int    `json:"number"`
+			HTMLURL string `json:"html_url"`
+		}
+		if err := json.NewDecoder(resp.Body).Decode(&result); err == nil {
+			htmlURL = result.HTMLURL
+		}
+	} else {
+		// Create new issue
+		apiURL := fmt.Sprintf("https://api.github.com/repos/%s/%s/issues", owner, repo)
+		data, _ := json.Marshal(payload)
+		req2, _ := http.NewRequestWithContext(ctx, http.MethodPost, apiURL, bytes.NewReader(data))
+		req2.Header.Set("Content-Type", "application/json")
+		req2.Header.Set("Authorization", "Bearer "+token)
+		req2.Header.Set("Accept", "application/vnd.github+json")
+		req2.Header.Set("X-GitHub-Api-Version", "2022-11-28")
+		resp, err := http.DefaultClient.Do(req2)
+		if err != nil {
+			respondError(w, http.StatusBadGateway, "failed to create GitHub issue: "+err.Error(), "github_error")
+			return
+		}
+		defer resp.Body.Close()
+		if resp.StatusCode >= 400 {
+			b, _ := io.ReadAll(resp.Body)
+			respondError(w, http.StatusBadGateway, "GitHub API error: "+strings.TrimSpace(string(b)), "github_error")
+			return
+		}
+		var result struct {
+			Number  int    `json:"number"`
+			HTMLURL string `json:"html_url"`
+		}
+		if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+			respondError(w, http.StatusInternalServerError, "failed to parse GitHub response", "internal_error")
+			return
+		}
+		issueNumber = int64(result.Number)
+		htmlURL = result.HTMLURL
+		// Save issue number back to task
+		_, _ = s.db.ExecContext(ctx, `UPDATE tasks SET github_issue_number = $1 WHERE id = $2`, issueNumber, taskID)
+	}
+
+	respondJSON(w, http.StatusOK, map[string]interface{}{
+		"issue_number": issueNumber,
+		"html_url":     htmlURL,
+	})
+}
+
+// HandleGitHubPushAll creates GitHub issues for all tasks without a linked issue.
+// POST /api/projects/{id}/github/push-all (SSE)
+func (s *Server) HandleGitHubPushAll(w http.ResponseWriter, r *http.Request) {
+	projectID, err := strconv.Atoi(chi.URLParam(r, "id"))
+	if err != nil {
+		http.Error(w, "Invalid project ID", http.StatusBadRequest)
+		return
+	}
+
+	userID, ok := GetUserID(r)
+	if !ok {
+		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+		return
+	}
+
+	isOwnerOrAdmin, err := s.userIsProjectOwnerOrAdmin(int(userID), projectID)
+	if err != nil || !isOwnerOrAdmin {
+		http.Error(w, "Forbidden", http.StatusForbidden)
+		return
+	}
+
+	owner, repo, token, err := s.loadGitHubConfig(projectID)
+	if err != nil || owner == "" || repo == "" || token == "" {
+		respondError(w, http.StatusBadRequest, "GitHub not configured for this project", "missing_config")
+		return
+	}
+
+	// Start SSE
+	w.Header().Set("Content-Type", "text/event-stream")
+	w.Header().Set("Cache-Control", "no-cache")
+	w.Header().Set("Connection", "keep-alive")
+	w.Header().Set("X-Accel-Buffering", "no")
+
+	flusher, canFlush := w.(http.Flusher)
+	if !canFlush {
+		http.Error(w, "Streaming not supported", http.StatusInternalServerError)
+		return
+	}
+	sendSSE := func(data map[string]interface{}) {
+		b, _ := json.Marshal(data)
+		fmt.Fprintf(w, "data: %s\n\n", b)
+		flusher.Flush()
+	}
+
+	ctx := r.Context()
+	type pushTask struct {
+		ID          int64
+		Title       string
+		Description sql.NullString
+		Milestone   sql.NullInt64
+	}
+
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT t.id, t.title, t.description,
+		       (SELECT s.github_milestone_number FROM sprints s WHERE s.id = t.sprint_id LIMIT 1)
+		FROM tasks t
+		WHERE t.project_id = $1 AND t.github_issue_number IS NULL
+		ORDER BY t.id
+	`, projectID)
+	if err != nil {
+		sendSSE(map[string]interface{}{"type": "error", "message": "Failed to load tasks: " + err.Error()})
+		return
+	}
+
+	var tasks []pushTask
+	for rows.Next() {
+		var t pushTask
+		if err := rows.Scan(&t.ID, &t.Title, &t.Description, &t.Milestone); err == nil {
+			tasks = append(tasks, t)
+		}
+	}
+	rows.Close()
+
+	total := len(tasks)
+	sendSSE(map[string]interface{}{
+		"type": "progress", "stage": "start",
+		"message": fmt.Sprintf("Found %d new tasks to push to GitHub", total),
+		"current": 0, "total": total,
+	})
+
+	created := 0
+	failed := 0
+	apiBase := fmt.Sprintf("https://api.github.com/repos/%s/%s/issues", owner, repo)
+
+	for i, t := range tasks {
+		payload := map[string]interface{}{
+			"title": t.Title,
+			"body":  "",
+		}
+		if t.Description.Valid {
+			payload["body"] = t.Description.String
+		}
+		if t.Milestone.Valid {
+			payload["milestone"] = t.Milestone.Int64
+		}
+
+		data, _ := json.Marshal(payload)
+		req2, _ := http.NewRequestWithContext(ctx, http.MethodPost, apiBase, bytes.NewReader(data))
+		req2.Header.Set("Content-Type", "application/json")
+		req2.Header.Set("Authorization", "Bearer "+token)
+		req2.Header.Set("Accept", "application/vnd.github+json")
+		req2.Header.Set("X-GitHub-Api-Version", "2022-11-28")
+		resp, err := http.DefaultClient.Do(req2)
+		if err != nil {
+			failed++
+		} else {
+			if resp.StatusCode >= 400 {
+				failed++
+				_, _ = io.Copy(io.Discard, resp.Body)
+			} else {
+				var result struct {
+					Number int `json:"number"`
+				}
+				_ = json.NewDecoder(resp.Body).Decode(&result)
+				if result.Number > 0 {
+					_, _ = s.db.ExecContext(ctx, `UPDATE tasks SET github_issue_number = $1 WHERE id = $2`, result.Number, t.ID)
+					created++
+				} else {
+					failed++
+				}
+			}
+			resp.Body.Close()
+		}
+
+		if (i+1)%5 == 0 || i+1 == total {
+			sendSSE(map[string]interface{}{
+				"type": "progress", "stage": "tasks",
+				"message": fmt.Sprintf("Pushed %d/%d tasks to GitHub...", i+1, total),
+				"current": i + 1, "total": total,
+			})
+		}
+	}
+
+	sendSSE(map[string]interface{}{
+		"type": "done",
+		"result": map[string]interface{}{
+			"created_tasks": created,
+			"skipped_tasks": failed,
+		},
+	})
+}
+
 // tryPushSwimLaneToGitHub pushes a task's new swim lane status to GitHub Projects V2.
 // It's best-effort: errors are logged but do not affect the response.
 func (s *Server) tryPushSwimLaneToGitHub(ctx context.Context, taskID int64, newLaneID *int64) {

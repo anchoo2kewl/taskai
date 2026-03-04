@@ -626,6 +626,9 @@ func (s *Server) HandleGitHubPreview(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Connection", "keep-alive")
 	w.Header().Set("X-Accel-Buffering", "no")
 	w.WriteHeader(http.StatusOK)
+	// Disable the HTTP server's write deadline for this SSE response — it can
+	// take minutes for large repos and the default 15s WriteTimeout would kill it.
+	http.NewResponseController(w).SetWriteDeadline(time.Time{}) //nolint:errcheck
 	flusher, canFlush := w.(http.Flusher)
 
 	sendSSE := func(data map[string]interface{}) {
@@ -943,6 +946,8 @@ func (s *Server) handleGitHubImport(w http.ResponseWriter, r *http.Request, doUp
 		http.Error(w, "Streaming not supported", http.StatusInternalServerError)
 		return
 	}
+	// Disable the HTTP server's write deadline — imports can take minutes.
+	http.NewResponseController(w).SetWriteDeadline(time.Time{}) //nolint:errcheck
 
 	sendSSE := func(data map[string]interface{}) {
 		b, _ := json.Marshal(data)
@@ -1704,6 +1709,8 @@ func (s *Server) HandleGitHubPushAll(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Streaming not supported", http.StatusInternalServerError)
 		return
 	}
+	// Disable the HTTP server's write deadline — push-all can take minutes.
+	http.NewResponseController(w).SetWriteDeadline(time.Time{}) //nolint:errcheck
 	sendSSE := func(data map[string]interface{}) {
 		b, _ := json.Marshal(data)
 		fmt.Fprintf(w, "data: %s\n\n", b)

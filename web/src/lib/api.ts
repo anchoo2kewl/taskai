@@ -748,19 +748,24 @@ class ApiClient {
     })
   }
 
-  async githubPreview(projectId: number, token?: string): Promise<GitHubPreviewResponse> {
-    return this.request<GitHubPreviewResponse>(`/api/projects/${projectId}/github/preview`, {
-      method: 'POST',
-      body: JSON.stringify({ token: token || '' }),
-    })
+  async githubPreview(
+    projectId: number,
+    token?: string,
+    onProgress?: (event: GitHubProgressEvent) => void
+  ): Promise<GitHubPreviewResponse> {
+    return this.streamGitHub<GitHubPreviewResponse>(
+      `/api/projects/${projectId}/github/preview`,
+      { token: token || '' },
+      onProgress ?? (() => {})
+    )
   }
 
-  // Stream a GitHub import/sync endpoint and report progress events.
-  private async streamGitHub(
+  // Stream a GitHub SSE endpoint and report progress events.
+  private async streamGitHub<T = GitHubPullResponse>(
     endpoint: string,
     data: object,
     onProgress: (event: GitHubProgressEvent) => void
-  ): Promise<GitHubPullResponse> {
+  ): Promise<T> {
     const url = `${this.baseURL}${endpoint}`
     const headers: Record<string, string> = { 'Content-Type': 'application/json' }
     if (this.token) headers['Authorization'] = `Bearer ${this.token}`
@@ -789,7 +794,7 @@ class ApiClient {
         if (!json) continue
         let event: Record<string, unknown>
         try { event = JSON.parse(json) } catch { continue }
-        if (event.type === 'done') return event.result as GitHubPullResponse
+        if (event.type === 'done') return event.result as T
         if (event.type === 'error') throw new Error(event.message as string)
         if (event.type === 'progress') onProgress(event as unknown as GitHubProgressEvent)
       }

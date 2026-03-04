@@ -583,6 +583,7 @@ func (s *Server) loadGitHubConfig(projectID int) (owner, repo, token string, err
 
 // HandleGitHubPreview fetches GitHub data without importing anything.
 // POST /api/projects/{id}/github/preview
+// Streams Server-Sent Events so the client can show a progress bar.
 func (s *Server) HandleGitHubPreview(w http.ResponseWriter, r *http.Request) {
 	projectID, err := strconv.Atoi(chi.URLParam(r, "id"))
 	if err != nil {
@@ -619,6 +620,27 @@ func (s *Server) HandleGitHubPreview(w http.ResponseWriter, r *http.Request) {
 		token = req.Token
 	}
 
+	// Stream progress via SSE (same pattern as pull/sync handlers)
+	w.Header().Set("Content-Type", "text/event-stream")
+	w.Header().Set("Cache-Control", "no-cache")
+	w.Header().Set("Connection", "keep-alive")
+	w.Header().Set("X-Accel-Buffering", "no")
+	w.WriteHeader(http.StatusOK)
+	flusher, canFlush := w.(http.Flusher)
+
+	sendSSE := func(data map[string]interface{}) {
+		b, _ := json.Marshal(data)
+		fmt.Fprintf(w, "data: %s\n\n", b)
+		if canFlush {
+			flusher.Flush()
+		}
+	}
+
+	sendSSE(map[string]interface{}{
+		"type": "progress", "stage": "milestones",
+		"message": "Fetching milestones...", "current": 0, "total": 0,
+	})
+
 	ctx := r.Context()
 	base := fmt.Sprintf("https://api.github.com/repos/%s/%s", owner, repo)
 
@@ -626,17 +648,25 @@ func (s *Server) HandleGitHubPreview(w http.ResponseWriter, r *http.Request) {
 	var milestones []ghMilestone
 	if err := fetchGitHubJSON(ctx, token, base+"/milestones?state=all&per_page=100", &milestones); err != nil {
 		s.logger.Error("Failed to fetch GitHub milestones", zap.Error(err))
-		respondError(w, http.StatusBadGateway, "Failed to fetch milestones from GitHub: "+err.Error(), "github_error")
+		sendSSE(map[string]interface{}{"type": "error", "message": "Failed to fetch milestones: " + err.Error()})
 		return
 	}
+	sendSSE(map[string]interface{}{
+		"type": "progress", "stage": "labels",
+		"message": fmt.Sprintf("Found %d milestones — fetching labels...", len(milestones)), "current": 1, "total": 0,
+	})
 
 	// Fetch labels
 	var labels []ghLabel
 	if err := fetchGitHubJSON(ctx, token, base+"/labels?per_page=100", &labels); err != nil {
 		s.logger.Error("Failed to fetch GitHub labels", zap.Error(err))
-		respondError(w, http.StatusBadGateway, "Failed to fetch labels from GitHub: "+err.Error(), "github_error")
+		sendSSE(map[string]interface{}{"type": "error", "message": "Failed to fetch labels: " + err.Error()})
 		return
 	}
+	sendSSE(map[string]interface{}{
+		"type": "progress", "stage": "issues",
+		"message": fmt.Sprintf("Found %d labels — fetching issues...", len(labels)), "current": 2, "total": 0,
+	})
 
 	// Fetch issues (paginate up to 10 pages)
 	var allIssues []ghIssue
@@ -645,13 +675,17 @@ func (s *Server) HandleGitHubPreview(w http.ResponseWriter, r *http.Request) {
 		url := fmt.Sprintf("%s/issues?state=all&per_page=100&page=%d", base, page)
 		if err := fetchGitHubJSON(ctx, token, url, &pageIssues); err != nil {
 			s.logger.Error("Failed to fetch GitHub issues", zap.Int("page", page), zap.Error(err))
-			respondError(w, http.StatusBadGateway, "Failed to fetch issues from GitHub: "+err.Error(), "github_error")
+			sendSSE(map[string]interface{}{"type": "error", "message": "Failed to fetch issues: " + err.Error()})
 			return
 		}
 		if len(pageIssues) == 0 {
 			break
 		}
 		allIssues = append(allIssues, pageIssues...)
+		sendSSE(map[string]interface{}{
+			"type": "progress", "stage": "issues",
+			"message": fmt.Sprintf("Fetched %d issues...", len(allIssues)), "current": len(allIssues), "total": 0,
+		})
 	}
 
 	// Collect unique assignee logins
@@ -681,8 +715,12 @@ func (s *Server) HandleGitHubPreview(w http.ResponseWriter, r *http.Request) {
 		JOIN team_members tm ON tm.user_id = u.id
 		WHERE tm.team_id = (SELECT team_id FROM projects WHERE id = $1)
 	`, projectID)
+	sendSSE(map[string]interface{}{
+		"type": "progress", "stage": "matching",
+		"message": fmt.Sprintf("Fetched %d issues — matching users...", len(allIssues)), "current": len(allIssues), "total": len(allIssues),
+	})
 	if err != nil {
-		http.Error(w, "Failed to load team members", http.StatusInternalServerError)
+		sendSSE(map[string]interface{}{"type": "error", "message": "Failed to load team members"})
 		return
 	}
 	defer rows.Close()
@@ -816,14 +854,17 @@ func (s *Server) HandleGitHubPreview(w http.ResponseWriter, r *http.Request) {
 		statuses = append(statuses, st)
 	}
 
-	respondJSON(w, http.StatusOK, GitHubPreviewResponse{
-		MilestoneCount: len(milestones),
-		LabelCount:     len(labels),
-		IssueCount:     len(allIssues),
-		GitHubUsers:    ghUsers,
-		Statuses:       statuses,
-		Milestones:     milestones,
-		Labels:         labels,
+	sendSSE(map[string]interface{}{
+		"type": "done",
+		"result": GitHubPreviewResponse{
+			MilestoneCount: len(milestones),
+			LabelCount:     len(labels),
+			IssueCount:     len(allIssues),
+			GitHubUsers:    ghUsers,
+			Statuses:       statuses,
+			Milestones:     milestones,
+			Labels:         labels,
+		},
 	})
 }
 

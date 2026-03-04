@@ -297,6 +297,7 @@ export default function ProjectSettings() {
   // GitHub import state
   const [githubPreview, setGithubPreview] = useState<GitHubPreviewResponse | null>(null)
   const [isPreviewing, setIsPreviewing] = useState(false)
+  const [previewProgress, setPreviewProgress] = useState<GitHubProgressEvent | null>(null)
   const [isPulling, setIsPulling] = useState(false)
   const [isSyncing, setIsSyncing] = useState(false)
   const [isPushingAll, setIsPushingAll] = useState(false)
@@ -499,8 +500,9 @@ export default function ProjectSettings() {
     setImportError('')
     setImportSuccess('')
     setIsPreviewing(true)
+    setPreviewProgress(null)
     try {
-      const preview = await apiClient.githubPreview(projectId)
+      const preview = await apiClient.githubPreview(projectId, undefined, (evt) => setPreviewProgress(evt))
       setGithubPreview(preview)
       // Initialize user assignments from auto-matched users
       const assignments: Record<string, number> = {}
@@ -523,6 +525,7 @@ export default function ProjectSettings() {
       setImportError(error instanceof Error ? error.message : 'Failed to fetch GitHub preview')
     } finally {
       setIsPreviewing(false)
+      setPreviewProgress(null)
     }
   }
 
@@ -1511,9 +1514,21 @@ export default function ProjectSettings() {
                   {importError && <FormError message={importError} className="mb-4" />}
 
                   {!githubPreview ? (
-                    <Button onClick={handleFetchPreview} disabled={isPreviewing} variant="secondary">
-                      {isPreviewing ? 'Fetching...' : 'Fetch Preview'}
-                    </Button>
+                    <div className="space-y-2">
+                      <Button onClick={handleFetchPreview} disabled={isPreviewing} variant="secondary">
+                        {isPreviewing ? 'Fetching...' : 'Fetch Preview'}
+                      </Button>
+                      {isPreviewing && (
+                        <div className="space-y-1">
+                          <div className="text-xs text-dark-text-secondary">
+                            {previewProgress?.message ?? 'Connecting...'}
+                          </div>
+                          <div className="w-full bg-dark-bg-secondary rounded-full h-1 overflow-hidden">
+                            <div className="h-1 bg-blue-500 rounded-full animate-pulse w-full" />
+                          </div>
+                        </div>
+                      )}
+                    </div>
                   ) : (
                     <div className="space-y-4">
                       {/* Counts */}

@@ -140,18 +140,29 @@ type GitHubPreviewResponse struct {
 	LabelCount     int                 `json:"label_count"`
 	IssueCount     int                 `json:"issue_count"`
 	GitHubUsers    []GitHubUserMatch   `json:"github_users"`
-	Statuses       []GitHubStatusMatch `json:"statuses"` // all unique statuses found: Projects V2 columns + issue states
+	Statuses       []GitHubStatusMatch `json:"statuses"`   // all unique statuses found: Projects V2 columns + issue states
+	Milestones     []ghMilestone       `json:"milestones"` // full list for filter UI
+	Labels         []ghLabel           `json:"labels"`     // full list for filter UI
+}
+
+// GitHubImportFilter allows filtering which issues are imported.
+type GitHubImportFilter struct {
+	MilestoneNumber *int     `json:"milestone_number"` // nil = all milestones
+	Assignee        string   `json:"assignee"`         // "" = all, "none" = unassigned
+	Labels          []string `json:"labels"`           // empty = all labels
+	State           string   `json:"state"`            // "all", "open", "closed" (default "all")
 }
 
 // GitHubPullRequest is the body for HandleGitHubPull / HandleGitHubSync.
 type GitHubPullRequest struct {
-	Token             string           `json:"token"`
-	PullSprints       bool             `json:"pull_sprints"`
-	PullTags          bool             `json:"pull_tags"`
-	PullTasks         bool             `json:"pull_tasks"`
-	PullComments      bool             `json:"pull_comments"`
-	UserAssignments   map[string]int64 `json:"user_assignments"`   // login → TaskAI user_id (0 = unassigned)
-	StatusAssignments map[string]int64 `json:"status_assignments"` // status key → swim_lane_id (0 = use category fallback)
+	Token             string              `json:"token"`
+	PullSprints       bool                `json:"pull_sprints"`
+	PullTags          bool                `json:"pull_tags"`
+	PullTasks         bool                `json:"pull_tasks"`
+	PullComments      bool                `json:"pull_comments"`
+	UserAssignments   map[string]int64    `json:"user_assignments"`   // login → TaskAI user_id (0 = unassigned)
+	StatusAssignments map[string]int64    `json:"status_assignments"` // status key → swim_lane_id (0 = use category fallback)
+	Filter            *GitHubImportFilter `json:"filter"`             // optional filter for issues
 }
 
 // GitHubPullResponse is returned by HandleGitHubPull / HandleGitHubSync.
@@ -811,6 +822,8 @@ func (s *Server) HandleGitHubPreview(w http.ResponseWriter, r *http.Request) {
 		IssueCount:     len(allIssues),
 		GitHubUsers:    ghUsers,
 		Statuses:       statuses,
+		Milestones:     milestones,
+		Labels:         labels,
 	})
 }
 
@@ -870,19 +883,66 @@ func (s *Server) handleGitHubImport(w http.ResponseWriter, r *http.Request, doUp
 		}
 	}
 
+	// --- Start SSE stream (must be before any writes) ---
+	w.Header().Set("Content-Type", "text/event-stream")
+	w.Header().Set("Cache-Control", "no-cache")
+	w.Header().Set("Connection", "keep-alive")
+	w.Header().Set("X-Accel-Buffering", "no") // prevents nginx buffering
+
+	flusher, canFlush := w.(http.Flusher)
+	if !canFlush {
+		http.Error(w, "Streaming not supported", http.StatusInternalServerError)
+		return
+	}
+
+	sendSSE := func(data map[string]interface{}) {
+		b, _ := json.Marshal(data)
+		fmt.Fprintf(w, "data: %s\n\n", b)
+		flusher.Flush()
+	}
+	progress := func(stage, message string, current, total int) {
+		sendSSE(map[string]interface{}{
+			"type": "progress", "stage": stage,
+			"message": message, "current": current, "total": total,
+		})
+	}
+
 	ctx := r.Context()
 	base := fmt.Sprintf("https://api.github.com/repos/%s/%s", owner, repo)
+
+	// buildIssueURL builds the GitHub issues endpoint URL with optional filter params.
+	buildIssueURL := func(page int) string {
+		state := "all"
+		if req.Filter != nil && (req.Filter.State == "open" || req.Filter.State == "closed") {
+			state = req.Filter.State
+		}
+		url := fmt.Sprintf("%s/issues?state=%s&per_page=100&page=%d", base, state, page)
+		if req.Filter != nil {
+			if req.Filter.MilestoneNumber != nil {
+				url += fmt.Sprintf("&milestone=%d", *req.Filter.MilestoneNumber)
+			}
+			if req.Filter.Assignee != "" {
+				url += "&assignee=" + req.Filter.Assignee
+			}
+			if len(req.Filter.Labels) > 0 {
+				url += "&labels=" + strings.Join(req.Filter.Labels, ",")
+			}
+		}
+		return url
+	}
 
 	var result GitHubPullResponse
 
 	// --- Import Sprints from Milestones ---
 	if req.PullSprints {
+		progress("milestones", "Fetching milestones...", 0, 0)
 		var milestones []ghMilestone
 		if err := fetchGitHubJSON(ctx, token, base+"/milestones?state=all&per_page=100", &milestones); err != nil {
 			s.logger.Error("Failed to fetch GitHub milestones", zap.Error(err))
-			respondError(w, http.StatusBadGateway, "Failed to fetch milestones: "+err.Error(), "github_error")
+			sendSSE(map[string]interface{}{"type": "error", "message": "Failed to fetch milestones: " + err.Error()})
 			return
 		}
+		progress("milestones", fmt.Sprintf("Importing %d milestones...", len(milestones)), 0, len(milestones))
 
 		for _, m := range milestones {
 			status := "active"
@@ -939,12 +999,14 @@ func (s *Server) handleGitHubImport(w http.ResponseWriter, r *http.Request, doUp
 
 	// --- Import Tags from Labels ---
 	if req.PullTags {
+		progress("labels", "Fetching labels...", 0, 0)
 		var labels []ghLabel
 		if err := fetchGitHubJSON(ctx, token, base+"/labels?per_page=100", &labels); err != nil {
 			s.logger.Error("Failed to fetch GitHub labels", zap.Error(err))
-			respondError(w, http.StatusBadGateway, "Failed to fetch labels: "+err.Error(), "github_error")
+			sendSSE(map[string]interface{}{"type": "error", "message": "Failed to fetch labels: " + err.Error()})
 			return
 		}
+		progress("labels", fmt.Sprintf("Importing %d labels...", len(labels)), 0, len(labels))
 
 		for _, l := range labels {
 			color := "#" + l.Color
@@ -988,13 +1050,13 @@ func (s *Server) handleGitHubImport(w http.ResponseWriter, r *http.Request, doUp
 
 	// --- Import Tasks from Issues ---
 	if req.PullTasks {
+		progress("issues", "Fetching issues...", 0, 0)
 		var allIssues []ghIssue
 		for page := 1; page <= 10; page++ {
 			var pageIssues []ghIssue
-			url := fmt.Sprintf("%s/issues?state=all&per_page=100&page=%d", base, page)
-			if err := fetchGitHubJSON(ctx, token, url, &pageIssues); err != nil {
+			if err := fetchGitHubJSON(ctx, token, buildIssueURL(page), &pageIssues); err != nil {
 				s.logger.Error("Failed to fetch GitHub issues", zap.Int("page", page), zap.Error(err))
-				respondError(w, http.StatusBadGateway, "Failed to fetch issues: "+err.Error(), "github_error")
+				sendSSE(map[string]interface{}{"type": "error", "message": "Failed to fetch issues: " + err.Error()})
 				return
 			}
 			if len(pageIssues) == 0 {
@@ -1002,6 +1064,7 @@ func (s *Server) handleGitHubImport(w http.ResponseWriter, r *http.Request, doUp
 			}
 			allIssues = append(allIssues, pageIssues...)
 		}
+		progress("issues", fmt.Sprintf("Processing %d issues...", len(allIssues)), 0, len(allIssues))
 
 		// Build a label→tag_id map from newly imported tags
 		labelToTagID := map[string]int64{}
@@ -1092,7 +1155,10 @@ func (s *Server) handleGitHubImport(w http.ResponseWriter, r *http.Request, doUp
 			nextNumber = maxNumber.Int64 + 1
 		}
 
-		for _, issue := range allIssues {
+		for i, issue := range allIssues {
+			if i%25 == 0 && i > 0 {
+				progress("issues", fmt.Sprintf("Processed %d/%d issues...", i, len(allIssues)), i, len(allIssues))
+			}
 			taskStatus := "todo"
 			if issue.State == "closed" {
 				taskStatus = "done"
@@ -1221,7 +1287,10 @@ func (s *Server) handleGitHubImport(w http.ResponseWriter, r *http.Request, doUp
 			WHERE project_id = $1 AND github_issue_number IS NOT NULL
 		`, projectID)
 		if err == nil {
-			type taskRef struct{ taskID int64; issueNum int }
+			type taskRef struct {
+				taskID   int64
+				issueNum int
+			}
 			var taskRefs []taskRef
 			for rows.Next() {
 				var tr taskRef
@@ -1233,7 +1302,11 @@ func (s *Server) handleGitHubImport(w http.ResponseWriter, r *http.Request, doUp
 			rows.Close()
 			_ = issueNumbers // suppress unused warning
 
-			for _, tr := range taskRefs {
+			progress("comments", fmt.Sprintf("Fetching comments for %d issues...", len(taskRefs)), 0, len(taskRefs))
+			for i, tr := range taskRefs {
+				if i%10 == 0 && i > 0 {
+					progress("comments", fmt.Sprintf("Fetched comments for %d/%d issues...", i, len(taskRefs)), i, len(taskRefs))
+				}
 				var ghComments []ghIssueComment
 				url := fmt.Sprintf("%s/issues/%d/comments?per_page=100", base, tr.issueNum)
 				if err := fetchGitHubJSON(ctx, token, url, &ghComments); err != nil {
@@ -1276,7 +1349,7 @@ func (s *Server) handleGitHubImport(w http.ResponseWriter, r *http.Request, doUp
 	// Update last sync timestamp
 	_, _ = s.db.ExecContext(ctx, `UPDATE projects SET github_last_sync = $1 WHERE id = $2`, time.Now(), projectID)
 
-	respondJSON(w, http.StatusOK, result)
+	sendSSE(map[string]interface{}{"type": "done", "result": result})
 }
 
 // insertTaskTags inserts tag associations for a task based on issue labels.

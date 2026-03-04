@@ -6,7 +6,7 @@ import Button from '../components/ui/Button'
 import TextInput from '../components/ui/TextInput'
 import FormError from '../components/ui/FormError'
 import SearchSelect from '../components/ui/SearchSelect'
-import { apiClient, type SwimLane, type Project, type ProjectInvitation, type GitHubPreviewResponse, type GitHubUserMatch, type GitHubRepo, type GitHubStatusMatch } from '../lib/api'
+import { apiClient, type SwimLane, type Project, type ProjectInvitation, type GitHubPreviewResponse, type GitHubUserMatch, type GitHubRepo, type GitHubStatusMatch, type GitHubProgressEvent } from '../lib/api'
 
 interface ProjectMember {
   id: number
@@ -90,12 +90,18 @@ export default function ProjectSettings() {
   const [isSyncing, setIsSyncing] = useState(false)
   const [importError, setImportError] = useState('')
   const [importSuccess, setImportSuccess] = useState('')
+  const [importProgress, setImportProgress] = useState<GitHubProgressEvent | null>(null)
   const [userAssignments, setUserAssignments] = useState<Record<string, number>>({})
   const [statusAssignments, setStatusAssignments] = useState<Record<string, number>>({})
   const [pullSprints, setPullSprints] = useState(true)
   const [pullTags, setPullTags] = useState(true)
   const [pullTasks, setPullTasks] = useState(true)
   const [pullComments, setPullComments] = useState(true)
+  // Import filters
+  const [filterMilestone, setFilterMilestone] = useState<number | undefined>(undefined)
+  const [filterAssignee, setFilterAssignee] = useState('')
+  const [filterLabels, setFilterLabels] = useState<string[]>([])
+  const [filterState, setFilterState] = useState<'all' | 'open' | 'closed'>('all')
 
   // Storage usage state
   const [storageUsage, setStorageUsage] = useState<{ user_id: number; user_name: string; file_count: number; total_size: number }[]>([])
@@ -271,22 +277,38 @@ export default function ProjectSettings() {
   const handleImportFromGitHub = async () => {
     setImportError('')
     setImportSuccess('')
+    setImportProgress(null)
     setIsPulling(true)
     try {
-      const result = await apiClient.githubPull(projectId, {
-        pull_sprints: pullSprints,
-        pull_tags: pullTags,
-        pull_tasks: pullTasks,
-        pull_comments: pullComments,
-        user_assignments: userAssignments,
-        status_assignments: statusAssignments,
-      })
+      const filter = (filterMilestone || filterAssignee || filterLabels.length || filterState !== 'all')
+        ? {
+            milestone_number: filterMilestone,
+            assignee: filterAssignee || undefined,
+            labels: filterLabels.length ? filterLabels : undefined,
+            state: filterState !== 'all' ? filterState : undefined,
+          }
+        : undefined
+      const result = await apiClient.githubPull(
+        projectId,
+        {
+          pull_sprints: pullSprints,
+          pull_tags: pullTags,
+          pull_tasks: pullTasks,
+          pull_comments: pullComments,
+          user_assignments: userAssignments,
+          status_assignments: statusAssignments,
+          filter,
+        },
+        (evt) => setImportProgress(evt)
+      )
       const parts = [`${result.created_sprints} sprints`, `${result.created_tags} tags`, `${result.created_tasks} tasks (${result.skipped_tasks} skipped)`]
       if (result.created_comments > 0) parts.push(`${result.created_comments} comments`)
       setImportSuccess(`Imported: ${parts.join(', ')}`)
+      setImportProgress(null)
       loadGitHubSettings()
     } catch (error: unknown) {
       setImportError(error instanceof Error ? error.message : 'Import failed')
+      setImportProgress(null)
     } finally {
       setIsPulling(false)
     }
@@ -295,13 +317,20 @@ export default function ProjectSettings() {
   const handleSyncNow = async () => {
     setImportError('')
     setImportSuccess('')
+    setImportProgress(null)
     setIsSyncing(true)
     try {
-      const result = await apiClient.githubSync(projectId, statusAssignments)
+      const result = await apiClient.githubSync(
+        projectId,
+        statusAssignments,
+        (evt) => setImportProgress(evt)
+      )
       setImportSuccess(`Synced: ${result.created_tasks} new tasks, updated existing`)
+      setImportProgress(null)
       loadGitHubSettings()
     } catch (error: unknown) {
       setImportError(error instanceof Error ? error.message : 'Sync failed')
+      setImportProgress(null)
     } finally {
       setIsSyncing(false)
     }
@@ -1309,6 +1338,77 @@ export default function ProjectSettings() {
                         </div>
                       )}
 
+                      {/* Filters */}
+                      <div>
+                        <h4 className="text-sm font-medium text-dark-text-primary mb-2">Filter issues to import</h4>
+                        <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+                          {/* Milestone filter */}
+                          <div>
+                            <label className="block text-xs text-dark-text-tertiary mb-1">Milestone</label>
+                            <select
+                              value={filterMilestone ?? ''}
+                              onChange={e => setFilterMilestone(e.target.value ? Number(e.target.value) : undefined)}
+                              className="w-full text-sm bg-dark-bg-primary border border-dark-border-subtle text-dark-text-primary rounded-md px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-primary-500"
+                            >
+                              <option value="">All milestones</option>
+                              {(githubPreview.milestones ?? []).map(m => (
+                                <option key={m.number} value={m.number}>{m.title}</option>
+                              ))}
+                            </select>
+                          </div>
+                          {/* Assignee filter */}
+                          <div>
+                            <label className="block text-xs text-dark-text-tertiary mb-1">Assignee</label>
+                            <select
+                              value={filterAssignee}
+                              onChange={e => setFilterAssignee(e.target.value)}
+                              className="w-full text-sm bg-dark-bg-primary border border-dark-border-subtle text-dark-text-primary rounded-md px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-primary-500"
+                            >
+                              <option value="">Anyone</option>
+                              <option value="none">Unassigned</option>
+                              {(githubPreview.github_users ?? []).map(u => (
+                                <option key={u.login} value={u.login}>{u.login}{u.name ? ` (${u.name})` : ''}</option>
+                              ))}
+                            </select>
+                          </div>
+                          {/* Label filter */}
+                          <div>
+                            <label className="block text-xs text-dark-text-tertiary mb-1">Label</label>
+                            <select
+                              value={filterLabels[0] ?? ''}
+                              onChange={e => setFilterLabels(e.target.value ? [e.target.value] : [])}
+                              className="w-full text-sm bg-dark-bg-primary border border-dark-border-subtle text-dark-text-primary rounded-md px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-primary-500"
+                            >
+                              <option value="">Any label</option>
+                              {(githubPreview.labels ?? []).map(l => (
+                                <option key={l.name} value={l.name}>{l.name}</option>
+                              ))}
+                            </select>
+                          </div>
+                          {/* State filter */}
+                          <div>
+                            <label className="block text-xs text-dark-text-tertiary mb-1">State</label>
+                            <select
+                              value={filterState}
+                              onChange={e => setFilterState(e.target.value as 'all' | 'open' | 'closed')}
+                              className="w-full text-sm bg-dark-bg-primary border border-dark-border-subtle text-dark-text-primary rounded-md px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-primary-500"
+                            >
+                              <option value="all">All</option>
+                              <option value="open">Open</option>
+                              <option value="closed">Closed</option>
+                            </select>
+                          </div>
+                        </div>
+                        {(filterMilestone || filterAssignee || filterLabels.length > 0 || filterState !== 'all') && (
+                          <button
+                            onClick={() => { setFilterMilestone(undefined); setFilterAssignee(''); setFilterLabels([]); setFilterState('all') }}
+                            className="mt-2 text-xs text-primary-400 hover:text-primary-300"
+                          >
+                            Clear filters
+                          </button>
+                        )}
+                      </div>
+
                       {/* Options */}
                       <div className="flex flex-wrap gap-4">
                         <label className="flex items-center gap-2 text-sm text-dark-text-primary cursor-pointer">
@@ -1333,6 +1433,26 @@ export default function ProjectSettings() {
                         </label>
                       </div>
 
+                      {/* Progress indicator */}
+                      {importProgress && (
+                        <div className="p-3 bg-dark-bg-secondary border border-dark-border-subtle rounded-lg">
+                          <div className="flex items-center justify-between text-sm mb-1.5">
+                            <span className="text-dark-text-primary font-medium">{importProgress.message}</span>
+                            {importProgress.total > 0 && (
+                              <span className="text-dark-text-tertiary text-xs">{importProgress.current}/{importProgress.total}</span>
+                            )}
+                          </div>
+                          {importProgress.total > 0 && (
+                            <div className="w-full bg-dark-bg-primary rounded-full h-1.5">
+                              <div
+                                className="bg-primary-500 h-1.5 rounded-full transition-all duration-300"
+                                style={{ width: `${Math.round((importProgress.current / importProgress.total) * 100)}%` }}
+                              />
+                            </div>
+                          )}
+                        </div>
+                      )}
+
                       <div className="flex items-center gap-3">
                         <Button onClick={handleImportFromGitHub} disabled={isPulling || (!pullSprints && !pullTags && !pullTasks)}>
                           {isPulling ? 'Importing...' : 'Import from GitHub'}
@@ -1343,13 +1463,33 @@ export default function ProjectSettings() {
 
                   {/* Sync Now (shown after first sync, only for owners/admins) */}
                   {githubSettings.github_last_sync && (
-                    <div className="mt-4 pt-4 border-t border-dark-border-subtle flex items-center gap-4">
-                      <span className="text-sm text-dark-text-secondary">
-                        Last synced: {new Date(githubSettings.github_last_sync).toLocaleString()}
-                      </span>
-                      <Button onClick={handleSyncNow} disabled={isSyncing} variant="secondary" size="sm">
-                        {isSyncing ? 'Syncing...' : 'Sync Now'}
-                      </Button>
+                    <div className="mt-4 pt-4 border-t border-dark-border-subtle space-y-3">
+                      <div className="flex items-center gap-4">
+                        <span className="text-sm text-dark-text-secondary">
+                          Last synced: {new Date(githubSettings.github_last_sync).toLocaleString()}
+                        </span>
+                        <Button onClick={handleSyncNow} disabled={isSyncing} variant="secondary" size="sm">
+                          {isSyncing ? 'Syncing...' : 'Sync Now'}
+                        </Button>
+                      </div>
+                      {isSyncing && importProgress && (
+                        <div className="p-3 bg-dark-bg-secondary border border-dark-border-subtle rounded-lg">
+                          <div className="flex items-center justify-between text-sm mb-1.5">
+                            <span className="text-dark-text-primary font-medium">{importProgress.message}</span>
+                            {importProgress.total > 0 && (
+                              <span className="text-dark-text-tertiary text-xs">{importProgress.current}/{importProgress.total}</span>
+                            )}
+                          </div>
+                          {importProgress.total > 0 && (
+                            <div className="w-full bg-dark-bg-primary rounded-full h-1.5">
+                              <div
+                                className="bg-primary-500 h-1.5 rounded-full transition-all duration-300"
+                                style={{ width: `${Math.round((importProgress.current / importProgress.total) * 100)}%` }}
+                              />
+                            </div>
+                          )}
+                        </div>
+                      )}
                     </div>
                   )}
                 </div>

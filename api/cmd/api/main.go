@@ -432,6 +432,7 @@ func main() {
 			r.Get("/admin/users/{id}/activity", server.HandleGetUserActivity)
 			r.Patch("/admin/users/{id}/admin", server.HandleUpdateUserAdmin)
 			r.Patch("/admin/users/{id}/invites", server.HandleAdminBoostInvites)
+			r.Delete("/admin/users/{id}", server.HandleDeleteUser)
 
 			// Admin email provider routes
 			r.Get("/admin/settings/email", server.HandleGetEmailProvider)

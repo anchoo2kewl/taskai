@@ -875,6 +875,12 @@ class ApiClient {
     })
   }
 
+  async deleteUser(userId: number): Promise<{ id: number; deleted: boolean }> {
+    return this.request<{ id: number; deleted: boolean }>(`/api/admin/users/${userId}`, {
+      method: 'DELETE',
+    })
+  }
+
   // Security/Settings endpoints
   async changePassword(data: { current_password: string; new_password: string }): Promise<{ message: string }> {
     return this.request<{ message: string }>('/api/settings/password', {

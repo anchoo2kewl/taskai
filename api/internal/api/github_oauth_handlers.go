@@ -92,7 +92,7 @@ func (s *Server) HandleGitHubOAuthInit(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if s.config.GitHubClientID == "" {
+	if s.config.GitHubClientID == "" || s.config.GitHubClientID == "-" {
 		respondError(w, http.StatusServiceUnavailable, "GitHub OAuth is not configured", "not_configured")
 		return
 	}

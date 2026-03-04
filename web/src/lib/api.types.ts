@@ -1144,6 +1144,11 @@ export interface components {
             last_name?: string;
             /** @example false */
             is_admin?: boolean;
+            /**
+             * @description True if the user has a real password set (false for OAuth-only users who have not yet set a password)
+             * @example true
+             */
+            has_password?: boolean;
             /** Format: date-time */
             created_at?: string;
         };

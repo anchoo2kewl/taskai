@@ -2415,6 +2415,10 @@ components:
         is_admin:
           type: boolean
           example: false
+        has_password:
+          type: boolean
+          description: True if the user has a real password set (false for OAuth-only users who have not yet set a password)
+          example: true
         created_at:
           type: string
           format: date-time

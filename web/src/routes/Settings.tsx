@@ -18,6 +18,7 @@ export default function Settings() {
   const [isSavingProfile, setIsSavingProfile] = useState(false)
 
   // Password change state
+  const [hasPassword, setHasPassword] = useState(true) // false = OAuth-only user
   const [currentPassword, setCurrentPassword] = useState('')
   const [newPassword, setNewPassword] = useState('')
   const [confirmPassword, setConfirmPassword] = useState('')
@@ -116,6 +117,7 @@ export default function Settings() {
       const me = await apiClient.getCurrentUser()
       setProfileFirstName(me.first_name || '')
       setProfileLastName(me.last_name || '')
+      setHasPassword(me.has_password !== false) // default true; false only when explicitly set
     } catch {
       // non-critical load failure
     }
@@ -164,11 +166,12 @@ export default function Settings() {
 
     try {
       await apiClient.changePassword({
-        current_password: currentPassword,
+        current_password: hasPassword ? currentPassword : '',
         new_password: newPassword,
       })
 
-      setPasswordSuccess('Password changed successfully')
+      setPasswordSuccess(hasPassword ? 'Password changed successfully' : 'Password set successfully')
+      setHasPassword(true)
       setCurrentPassword('')
       setNewPassword('')
       setConfirmPassword('')
@@ -779,8 +782,14 @@ export default function Settings() {
                 </svg>
               </div>
               <div className="flex-1">
-                <h2 className="text-xl font-semibold text-dark-text-primary mb-1">Change Password</h2>
-                <p className="text-sm text-dark-text-secondary mb-6">Update your password to keep your account secure</p>
+                <h2 className="text-xl font-semibold text-dark-text-primary mb-1">
+                  {hasPassword ? 'Change Password' : 'Set a Password'}
+                </h2>
+                <p className="text-sm text-dark-text-secondary mb-6">
+                  {hasPassword
+                    ? 'Update your password to keep your account secure'
+                    : 'Your account uses social login. You can set a password to also sign in with email.'}
+                </p>
 
                 {passwordSuccess && (
                   <div className="mb-4 p-4 bg-success-500/10 border-l-4 border-success-400 rounded-r-lg">
@@ -799,8 +808,10 @@ export default function Settings() {
                     type="password"
                     value={currentPassword}
                     onChange={(e) => setCurrentPassword(e.target.value)}
-                    required
+                    required={hasPassword}
+                    disabled={!hasPassword}
                     autoComplete="current-password"
+                    helpText={!hasPassword ? 'Not set — your account uses social login' : undefined}
                   />
 
                   <TextInput
@@ -829,7 +840,9 @@ export default function Settings() {
                     disabled={isChangingPassword}
                     className="w-full sm:w-auto"
                   >
-                    {isChangingPassword ? 'Changing Password...' : 'Change Password'}
+                    {isChangingPassword
+                      ? (hasPassword ? 'Changing Password...' : 'Setting Password...')
+                      : (hasPassword ? 'Change Password' : 'Set Password')}
                   </Button>
                 </form>
               </div>

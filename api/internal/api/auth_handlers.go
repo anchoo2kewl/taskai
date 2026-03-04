@@ -38,13 +38,14 @@ type AuthResponse struct {
 
 // User represents a user
 type User struct {
-	ID        int64     `json:"id"`
-	Email     string    `json:"email"`
-	Name      string    `json:"name,omitempty"`
-	FirstName string    `json:"first_name,omitempty"`
-	LastName  string    `json:"last_name,omitempty"`
-	IsAdmin   bool      `json:"is_admin"`
-	CreatedAt time.Time `json:"created_at"`
+	ID          int64     `json:"id"`
+	Email       string    `json:"email"`
+	Name        string    `json:"name,omitempty"`
+	FirstName   string    `json:"first_name,omitempty"`
+	LastName    string    `json:"last_name,omitempty"`
+	IsAdmin     bool      `json:"is_admin"`
+	HasPassword bool      `json:"has_password"`
+	CreatedAt   time.Time `json:"created_at"`
 }
 
 // HandleSignup creates a new user account
@@ -296,7 +297,18 @@ func (s *Server) HandleMe(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	respondJSON(w, http.StatusOK, entUserToAPI(entUser))
+	apiUser := entUserToAPI(entUser)
+
+	// Determine whether the user has a real password (auth_provider = "password").
+	var authProvider string
+	if err := s.db.QueryRowContext(ctx,
+		s.db.Rebind(`SELECT auth_provider FROM users WHERE id = ? LIMIT 1`), userID,
+	).Scan(&authProvider); err != nil {
+		authProvider = "password" // safe default
+	}
+	apiUser.HasPassword = authProvider == "password"
+
+	respondJSON(w, http.StatusOK, apiUser)
 }
 
 // UpdateProfileRequest represents the update profile request

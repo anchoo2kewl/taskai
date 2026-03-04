@@ -16,6 +16,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
 	"github.com/go-chi/cors"
+	"github.com/golang-jwt/jwt/v5"
 	"go.uber.org/zap"
 
 	"taskai/internal/api"
@@ -25,6 +26,30 @@ import (
 	"taskai/internal/db"
 	"taskai/internal/yjs"
 )
+
+// isLoginOAuthState returns true if tokenStr is a valid login OAuth state JWT
+// signed with stateSecret (contains a "provider" claim).
+// Used to distinguish login callbacks from repo-sync callbacks at /api/auth/github/callback.
+func isLoginOAuthState(tokenStr, stateSecret string) bool {
+	if stateSecret == "" || tokenStr == "" {
+		return false
+	}
+	token, err := jwt.Parse(tokenStr, func(t *jwt.Token) (interface{}, error) {
+		if _, ok := t.Method.(*jwt.SigningMethodHMAC); !ok {
+			return nil, fmt.Errorf("unexpected signing method")
+		}
+		return []byte(stateSecret), nil
+	})
+	if err != nil || !token.Valid {
+		return false
+	}
+	claims, ok := token.Claims.(jwt.MapClaims)
+	if !ok {
+		return false
+	}
+	_, hasProvider := claims["provider"]
+	return hasProvider
+}
 
 func main() {
 	// Load configuration
@@ -196,56 +221,69 @@ func main() {
 		// Swagger UI (public)
 		r.Get("/docs", server.HandleSwaggerUI)
 
+		// Build OAuth login handler before registering routes (needed for callback dispatch).
+		var loginOAuthHandler *gologin.Handler
+		if (cfg.GoogleClientID != "" || cfg.LoginGitHubClientID != "") && cfg.OAuthStateSecret != "" {
+			oauthCfg := &gologin.Config{
+				SuccessURL:  cfg.OAuthSuccessURL,
+				ErrorURL:    cfg.OAuthErrorURL,
+				StateSecret: cfg.OAuthStateSecret,
+				JWTSecret:   cfg.JWTSecret,
+				JWTExpiry:   cfg.JWTExpiry(),
+				Logger:      logger,
+			}
+			if cfg.GoogleClientID != "" {
+				oauthCfg.Google = &gologin.OAuthProviderConfig{
+					ClientID:     cfg.GoogleClientID,
+					ClientSecret: cfg.GoogleClientSecret,
+					RedirectURL:  cfg.AppURL + "/api/auth/google/callback",
+				}
+			}
+			if cfg.LoginGitHubClientID != "" {
+				// GitHub login reuses the same OAuth app as repo-sync, so the
+				// registered callback URL is /api/auth/github/callback.
+				// The dispatcher below routes by inspecting the state JWT.
+				oauthCfg.GitHub = &gologin.OAuthProviderConfig{
+					ClientID:     cfg.LoginGitHubClientID,
+					ClientSecret: cfg.LoginGitHubClientSecret,
+					RedirectURL:  cfg.AppURL + "/api/auth/github/callback",
+				}
+			}
+			var err error
+			oauthStore := db.NewOAuthStore(database)
+			loginOAuthHandler, err = gologin.NewHandler(oauthCfg, oauthStore)
+			if err != nil {
+				logger.Fatal("failed to init OAuth login handler", zap.Error(err))
+			}
+			logger.Info("OAuth login routes registered",
+				zap.Bool("google", cfg.GoogleClientID != ""),
+				zap.Bool("github", cfg.LoginGitHubClientID != ""),
+			)
+		} else if cfg.GoogleClientID != "" || cfg.LoginGitHubClientID != "" {
+			logger.Warn("OAUTH_STATE_SECRET not set — OAuth login routes not registered")
+		}
+
 		// Auth routes (public) with rate limiting
 		r.Route("/auth", func(r chi.Router) {
 			// Apply stricter rate limiting to auth endpoints (20 req/min)
 			r.Use(api.RateLimitMiddleware(20))
 			r.Post("/signup", server.HandleSignup)
 			r.Post("/login", server.HandleLogin)
-			r.Get("/github/callback", server.HandleGitHubCallback)
 
-			// OAuth login routes — mounted only when credentials are configured.
-			if cfg.GoogleClientID != "" || cfg.LoginGitHubClientID != "" {
-				oauthCfg := &gologin.Config{
-					SuccessURL:  cfg.OAuthSuccessURL,
-					ErrorURL:    cfg.OAuthErrorURL,
-					StateSecret: cfg.OAuthStateSecret,
-					JWTSecret:   cfg.JWTSecret,
-					JWTExpiry:   cfg.JWTExpiry(),
-					Logger:      logger,
+			// GitHub callback — shared between repo-sync and login flows.
+			// The state JWT secret differs between the two; we dispatch accordingly.
+			r.Get("/github/callback", func(w http.ResponseWriter, r *http.Request) {
+				if loginOAuthHandler != nil && isLoginOAuthState(r.URL.Query().Get("state"), cfg.OAuthStateSecret) {
+					loginOAuthHandler.HandleGithubCallback(w, r)
+					return
 				}
-				if cfg.GoogleClientID != "" {
-					oauthCfg.Google = &gologin.OAuthProviderConfig{
-						ClientID:     cfg.GoogleClientID,
-						ClientSecret: cfg.GoogleClientSecret,
-						RedirectURL:  cfg.AppURL + "/api/auth/google/callback",
-					}
-				}
-				if cfg.LoginGitHubClientID != "" {
-					oauthCfg.GitHub = &gologin.OAuthProviderConfig{
-						ClientID:     cfg.LoginGitHubClientID,
-						ClientSecret: cfg.LoginGitHubClientSecret,
-						RedirectURL:  cfg.AppURL + "/api/auth/github/login/callback",
-					}
-				}
-				// Override StateSecret fallback — only register if properly configured.
-				if cfg.OAuthStateSecret == "" {
-					logger.Warn("OAUTH_STATE_SECRET not set — OAuth login routes not registered")
-				} else {
-					oauthStore := db.NewOAuthStore(database)
-					loginHandler, err := gologin.NewHandler(oauthCfg, oauthStore)
-					if err != nil {
-						logger.Fatal("failed to init OAuth login handler", zap.Error(err))
-					}
-					r.Get("/google", loginHandler.HandleGoogleInitiate)
-					r.Get("/google/callback", loginHandler.HandleGoogleCallback)
-					r.Get("/github/login", loginHandler.HandleGithubInitiate)
-					r.Get("/github/login/callback", loginHandler.HandleGithubCallback)
-					logger.Info("OAuth login routes registered",
-						zap.Bool("google", cfg.GoogleClientID != ""),
-						zap.Bool("github", cfg.LoginGitHubClientID != ""),
-					)
-				}
+				server.HandleGitHubCallback(w, r)
+			})
+
+			if loginOAuthHandler != nil {
+				r.Get("/google", loginOAuthHandler.HandleGoogleInitiate)
+				r.Get("/google/callback", loginOAuthHandler.HandleGoogleCallback)
+				r.Get("/github/login", loginOAuthHandler.HandleGithubInitiate)
 			}
 		})
 

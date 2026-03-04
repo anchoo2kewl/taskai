@@ -249,10 +249,15 @@ function GitHubFilterBar({
 }
 // ─────────────────────────────────────────────────────────────────────────────
 
-export default function ProjectSettings() {
+interface ProjectSettingsProps {
+  embedded?: boolean
+  projectIdOverride?: number
+}
+
+export default function ProjectSettings({ embedded, projectIdOverride }: ProjectSettingsProps = {}) {
   const navigate = useNavigate()
   const { projectId: projectIdParam } = useParams<{ projectId: string }>()
-  const projectId = parseInt(projectIdParam || '0')
+  const projectId = projectIdOverride || parseInt(projectIdParam || '0')
   const { user } = useAuth()
 
   // Project state
@@ -345,10 +350,14 @@ export default function ProjectSettings() {
     const params = new URLSearchParams(window.location.search)
     if (params.get('github') === 'connected') {
       setGithubSuccess('GitHub connected successfully!')
-      window.history.replaceState({}, '', window.location.pathname)
+      const url = new URL(window.location.href)
+      url.searchParams.delete('github')
+      window.history.replaceState({}, '', url.toString())
     } else if (params.get('github') === 'error') {
       setGithubError('GitHub connection failed. Please try again.')
-      window.history.replaceState({}, '', window.location.pathname)
+      const url = new URL(window.location.href)
+      url.searchParams.delete('github')
+      window.history.replaceState({}, '', url.toString())
     }
   }, [projectId]) // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -838,7 +847,9 @@ export default function ProjectSettings() {
   }
 
   return (
-    <div className="h-full flex flex-col bg-dark-bg-base">
+    <div className={embedded ? 'flex flex-col flex-1 overflow-hidden' : 'h-full flex flex-col bg-dark-bg-base'}>
+      {!embedded && (
+      <>
       {/* Project Header */}
       <div className="bg-dark-bg-secondary border-b border-dark-border-subtle">
         {/* Top bar with project info and actions */}
@@ -885,6 +896,8 @@ export default function ProjectSettings() {
           <div className="py-3"></div>
         </div>
       </div>
+      </>
+      )}
 
       <div className="flex-1 overflow-y-auto bg-dark-bg-primary py-8">
         <div className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8">

@@ -4,10 +4,12 @@ import userEvent from '@testing-library/user-event'
 import ProjectDetail from './ProjectDetail'
 
 const mockNavigate = vi.fn()
+const mockSetSearchParams = vi.fn()
 vi.mock('react-router-dom', () => ({
   useParams: () => ({ projectId: '7' }),
   useNavigate: () => mockNavigate,
   useLocation: () => ({ pathname: '/app/projects/7' }),
+  useSearchParams: () => [new URLSearchParams(), mockSetSearchParams],
 }))
 
 // Mock DnD kit with all needed exports
@@ -180,7 +182,7 @@ describe('ProjectDetail', () => {
     expect(createBtn).toBeDisabled()
   })
 
-  it('navigates to project settings', async () => {
+  it('switches to settings tab on settings click', async () => {
     const user = userEvent.setup()
     render(<ProjectDetail />)
     await waitFor(() => {
@@ -189,7 +191,7 @@ describe('ProjectDetail', () => {
 
     const settingsButton = screen.getByTitle('Settings')
     await user.click(settingsButton)
-    expect(mockNavigate).toHaveBeenCalledWith('/app/projects/7/settings')
+    expect(mockSetSearchParams).toHaveBeenCalledWith({ tab: 'settings' })
   })
 
   it('falls back to default swim lanes when API fails', async () => {

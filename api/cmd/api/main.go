@@ -28,6 +28,13 @@ import (
 	"taskai/internal/yjs"
 )
 
+func getEnv(key, fallback string) string {
+	if v := os.Getenv(key); v != "" {
+		return v
+	}
+	return fallback
+}
+
 // isLoginOAuthState returns true if tokenStr is a valid login OAuth state JWT
 // signed with stateSecret (contains a "provider" claim).
 // Used to distinguish login callbacks from repo-sync callbacks at /api/auth/github/callback.
@@ -202,12 +209,14 @@ func main() {
 		logger.Info("pprof endpoints enabled at /debug/pprof/")
 	}
 
-	// go-draw canvas editor — use /data/draw-data for writable storage in container
-	drawStore, err := godrawstore.NewFileStore("/data/draw-data")
+	// go-draw canvas editor — writable storage (configurable for local dev)
+	drawDataDir := getEnv("DRAW_DATA_DIR", "/data/draw-data")
+	drawUploadDir := getEnv("DRAW_UPLOAD_DIR", "/data/draw-uploads")
+	drawStore, err := godrawstore.NewFileStore(drawDataDir)
 	if err != nil {
 		logger.Fatal("could not initialize go-draw store", zap.Error(err))
 	}
-	drawHandler, err := godraw.New(godraw.WithBasePath("/draw"), godraw.WithStore(drawStore), godraw.WithUploadDir("/data/draw-uploads"))
+	drawHandler, err := godraw.New(godraw.WithBasePath("/draw"), godraw.WithStore(drawStore), godraw.WithUploadDir(drawUploadDir))
 	if err != nil {
 		logger.Fatal("could not initialize go-draw", zap.Error(err))
 	}

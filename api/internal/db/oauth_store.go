@@ -15,6 +15,7 @@ import (
 
 	"taskai/ent"
 	"taskai/ent/invite"
+	"taskai/ent/teaminvitation"
 )
 
 // OAuthStore implements gologin.UserStore using the Ent ORM and raw SQL for
@@ -218,7 +219,64 @@ func (s *OAuthStore) CreateOAuthUser(ctx context.Context, info gologin.ProviderU
 		zap.String("provider", provider),
 	)
 
+	// Auto-accept any pending team invitation linked to this invite code
+	s.acceptPendingTeamInvitation(ctx, inviteCode, newUser.ID)
+
 	return &gologin.User{ID: newUser.ID, Email: newUser.Email}, nil
+}
+
+// acceptPendingTeamInvitation looks up a TeamInvitation by invite_code and auto-accepts it.
+// Errors are logged but do not fail the signup.
+func (s *OAuthStore) acceptPendingTeamInvitation(ctx context.Context, inviteCode string, newUserID int64) {
+	entInv, err := s.db.Client.TeamInvitation.Query().
+		Where(
+			teaminvitation.InviteCode(inviteCode),
+			teaminvitation.Status("pending"),
+		).
+		Only(ctx)
+	if err != nil {
+		return // not found or already accepted
+	}
+
+	now := time.Now()
+	tx, err := s.db.Client.Tx(ctx)
+	if err != nil {
+		s.logger.Error("oauth_store: acceptPendingTeamInvitation: begin tx failed", zap.Error(err))
+		return
+	}
+	defer tx.Rollback()
+
+	_, err = tx.TeamInvitation.UpdateOneID(entInv.ID).
+		SetStatus("accepted").
+		SetInviteeID(newUserID).
+		SetRespondedAt(now).
+		Save(ctx)
+	if err != nil {
+		s.logger.Error("oauth_store: acceptPendingTeamInvitation: update failed", zap.Error(err))
+		return
+	}
+
+	_, err = tx.TeamMember.Create().
+		SetTeamID(entInv.TeamID).
+		SetUserID(newUserID).
+		SetRole("member").
+		SetStatus("active").
+		Save(ctx)
+	if err != nil {
+		s.logger.Error("oauth_store: acceptPendingTeamInvitation: create member failed", zap.Error(err))
+		return
+	}
+
+	if err := tx.Commit(); err != nil {
+		s.logger.Error("oauth_store: acceptPendingTeamInvitation: commit failed", zap.Error(err))
+		return
+	}
+
+	s.logger.Info("OAuth signup: team invitation auto-accepted",
+		zap.Int64("invitation_id", entInv.ID),
+		zap.Int64("team_id", entInv.TeamID),
+		zap.Int64("new_user_id", newUserID),
+	)
 }
 
 // ValidateInviteCode checks whether the given invite code is valid.

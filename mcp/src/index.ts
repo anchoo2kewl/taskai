@@ -2,10 +2,15 @@ import express from "express";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import { z } from "zod";
-import { TaskAIClient, Task, Project, SwimLane, Comment, WikiPage, WikiBlock } from "./api.js";
+import { TaskAIClient, Task, Project, SwimLane, Comment, WikiPage, WikiBlock, User } from "./api.js";
 
 const TASKAI_API_URL = process.env.TASKAI_API_URL || "https://taskai.cc";
 const PORT = parseInt(process.env.PORT || "3000", 10);
+
+// --- API key validation cache (5-minute TTL) ---
+interface CacheEntry { user: User; validUntil: number }
+const apiKeyCache = new Map<string, CacheEntry>();
+const CACHE_TTL_MS = 5 * 60 * 1000;
 
 /**
  * Helper to format response with minimal tokens by default.
@@ -25,6 +30,8 @@ function minimizeTask(task: Task) {
     title: task.title,
     status: task.status,
     priority: task.priority,
+    swim_lane_name: task.swim_lane_name,
+    assignee_name: task.assignee_name,
   };
 }
 
@@ -62,9 +69,23 @@ function minimizeComment(comment: Comment) {
 }
 
 /**
+ * Extract minimal fields from a wiki page for list operations.
+ */
+function minimizeWikiPage(page: WikiPage) {
+  return { id: page.id, title: page.title, slug: page.slug, updated_at: page.updated_at };
+}
+
+/**
+ * Extract minimal fields from a wiki search block.
+ */
+function minimizeWikiBlock(block: WikiBlock) {
+  return { page_id: block.page_id, page_title: block.page_title, block_type: block.block_type, snippet: block.snippet };
+}
+
+/**
  * Create and configure the MCP server with all TaskAI tools.
  */
-function createServer(client: TaskAIClient): McpServer {
+function createServer(client: TaskAIClient, cachedUser?: User): McpServer {
   const server = new McpServer({
     name: "taskai",
     version: "1.0.0",
@@ -76,7 +97,7 @@ function createServer(client: TaskAIClient): McpServer {
     "Get current authenticated user info",
     { verbose: z.boolean().optional().describe("Return full details (default: false)") },
     async ({ verbose }) => {
-      const user = await client.getMe();
+      const user = cachedUser ?? await client.getMe();
       return { content: [{ type: "text", text: formatResponse(user, verbose) }] };
     }
   );
@@ -180,7 +201,8 @@ function createServer(client: TaskAIClient): McpServer {
     },
     async ({ project_id, title, description, status, priority, assigned_to, swim_lane_id, verbose }) => {
       const task = await client.createTask(project_id, { title, description, status, priority, assigned_to, swim_lane_id });
-      return { content: [{ type: "text", text: formatResponse(task, verbose) }] };
+      const data = verbose ? task : minimizeTask(task);
+      return { content: [{ type: "text", text: formatResponse(data, verbose) }] };
     }
   );
 
@@ -200,7 +222,8 @@ function createServer(client: TaskAIClient): McpServer {
     },
     async ({ task_id, title, description, status, priority, assigned_to, swim_lane_id, verbose }) => {
       const task = await client.updateTask(task_id, { title, description, status, priority, assigned_to, swim_lane_id });
-      return { content: [{ type: "text", text: formatResponse(task, verbose) }] };
+      const data = verbose ? task : minimizeTask(task);
+      return { content: [{ type: "text", text: formatResponse(data, verbose) }] };
     }
   );
 
@@ -249,7 +272,8 @@ function createServer(client: TaskAIClient): McpServer {
     },
     async ({ query, project_id, limit, recency_days, verbose }) => {
       const result = await client.searchWiki({ query, project_id, limit, recency_days });
-      return { content: [{ type: "text", text: formatResponse(result, verbose) }] };
+      const data = verbose ? result : { results: result.results.map(minimizeWikiBlock), total: result.total };
+      return { content: [{ type: "text", text: formatResponse(data, verbose) }] };
     }
   );
 
@@ -263,7 +287,8 @@ function createServer(client: TaskAIClient): McpServer {
     },
     async ({ project_id, verbose }) => {
       const pages = await client.listWikiPages(project_id);
-      return { content: [{ type: "text", text: formatResponse(pages, verbose) }] };
+      const data = verbose ? pages : pages.map(minimizeWikiPage);
+      return { content: [{ type: "text", text: formatResponse(data, verbose) }] };
     }
   );
 
@@ -344,17 +369,25 @@ app.post("/mcp", async (req, res) => {
     return;
   }
 
-  // Validate the API key by calling /api/me
+  // Validate API key — use cache to avoid round-trip on every request
   const client = new TaskAIClient(TASKAI_API_URL, apiKey);
-  try {
-    await client.getMe();
-  } catch {
-    res.status(403).json({ error: "Invalid API key" });
-    return;
+  let cachedUser: User | undefined;
+  const now = Date.now();
+  const cached = apiKeyCache.get(apiKey);
+  if (cached && cached.validUntil > now) {
+    cachedUser = cached.user;
+  } else {
+    try {
+      cachedUser = await client.getMe();
+      apiKeyCache.set(apiKey, { user: cachedUser, validUntil: now + CACHE_TTL_MS });
+    } catch {
+      res.status(403).json({ error: "Invalid API key" });
+      return;
+    }
   }
 
-  // Create MCP server with authenticated client
-  const server = createServer(client);
+  // Create MCP server with authenticated client and cached user
+  const server = createServer(client, cachedUser);
 
   // Stateless transport — no session persistence
   const transport = new StreamableHTTPServerTransport({

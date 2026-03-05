@@ -57,28 +57,8 @@ describe('Dashboard', () => {
     expect(screen.getByAltText('TaskAI')).toBeInTheDocument()
   })
 
-  it('shows user email in header', () => {
-    render(<Dashboard />)
-
-    expect(screen.getByText('test@example.com')).toBeInTheDocument()
-  })
-
-  it('shows user initial avatar', () => {
-    render(<Dashboard />)
-
-    expect(screen.getByText('T')).toBeInTheDocument()
-  })
-
-  it('logout button calls logout and navigates to /login', async () => {
-    const user = userEvent.setup()
-    render(<Dashboard />)
-
-    const logoutButton = screen.getByTitle('Logout')
-    await user.click(logoutButton)
-
-    expect(mockLogout).toHaveBeenCalledOnce()
-    expect(mockNavigate).toHaveBeenCalledWith('/login')
-  })
+  // User email, avatar, and logout are now in the Sidebar component
+  // and covered by Sidebar.test.tsx
 
   it('opens sidebar on mobile hamburger click', async () => {
     const user = userEvent.setup()

@@ -34,6 +34,7 @@ const mockedGetProjects = vi.mocked(api.getProjects)
 describe('Sidebar', () => {
   const defaultProps = {
     onCreateProject: vi.fn(),
+    onLogout: vi.fn(),
     isOpen: false,
     onClose: vi.fn(),
     isPinned: true, // render static sidebar so tests can see content
@@ -106,26 +107,34 @@ describe('Sidebar', () => {
     expect(defaultProps.onCreateProject).toHaveBeenCalledOnce()
   })
 
-  it('shows admin link for admin users', async () => {
+  it('shows admin link in profile menu for admin users', async () => {
+    const user = userEvent.setup()
     mockUser = { email: 'admin@example.com', is_admin: true }
     mockedGetProjects.mockResolvedValue([])
 
     render(<Sidebar {...defaultProps} />)
 
     await waitFor(() => {
-      expect(screen.getByText('Admin')).toBeInTheDocument()
+      expect(screen.getByLabelText('User menu')).toBeInTheDocument()
     })
+
+    await user.click(screen.getByLabelText('User menu'))
+
+    expect(screen.getByText('Admin')).toBeInTheDocument()
   })
 
-  it('does not show admin link for non-admin users', async () => {
+  it('does not show admin link in profile menu for non-admin users', async () => {
+    const user = userEvent.setup()
     mockUser = { email: 'user@example.com', is_admin: false }
     mockedGetProjects.mockResolvedValue([])
 
     render(<Sidebar {...defaultProps} />)
 
     await waitFor(() => {
-      expect(screen.getByText('No projects yet')).toBeInTheDocument()
+      expect(screen.getByLabelText('User menu')).toBeInTheDocument()
     })
+
+    await user.click(screen.getByLabelText('User menu'))
 
     expect(screen.queryByText('Admin')).not.toBeInTheDocument()
   })
@@ -140,7 +149,6 @@ describe('Sidebar', () => {
     })
     expect(screen.getByText('Tags')).toBeInTheDocument()
     expect(screen.getByText('Assets')).toBeInTheDocument()
-    expect(screen.getByText('Settings')).toBeInTheDocument()
   })
 
   it('navigates to project on click', async () => {
@@ -161,16 +169,17 @@ describe('Sidebar', () => {
     expect(mockNavigate).toHaveBeenCalledWith('/app/projects/42')
   })
 
-  it('navigates on nav item click', async () => {
+  it('navigates to settings via profile menu', async () => {
     const user = userEvent.setup()
     mockedGetProjects.mockResolvedValue([])
 
     render(<Sidebar {...defaultProps} />)
 
     await waitFor(() => {
-      expect(screen.getByText('Settings')).toBeInTheDocument()
+      expect(screen.getByLabelText('User menu')).toBeInTheDocument()
     })
 
+    await user.click(screen.getByLabelText('User menu'))
     await user.click(screen.getByText('Settings'))
 
     expect(mockNavigate).toHaveBeenCalledWith('/app/settings')

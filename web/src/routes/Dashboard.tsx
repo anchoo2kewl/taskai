@@ -51,7 +51,7 @@ export default function Dashboard() {
 
   return (
     <NotificationProvider>
-      <div className="min-h-screen bg-dark-bg-base flex flex-col">
+      <div className="h-screen bg-dark-bg-base flex flex-col overflow-hidden">
         {/* Header */}
         <header className="bg-dark-bg-primary/80 backdrop-blur-lg border-b border-dark-border-subtle sticky top-0 z-10">
           <div className="flex items-center justify-between h-14 px-4 md:px-6">
@@ -90,34 +90,6 @@ export default function Dashboard() {
                 <span>Search...</span>
                 <kbd className="px-1.5 py-0.5 text-[10px] font-semibold bg-dark-bg-tertiary rounded border border-dark-border-subtle">{searchShortcutLabel}</kbd>
               </button>
-              <div className="flex items-center gap-2">
-                <div className="w-7 h-7 bg-primary-500/10 border border-primary-500/20 rounded-full flex items-center justify-center">
-                  <span className="text-xs font-medium text-primary-400">
-                    {user?.email?.charAt(0).toUpperCase()}
-                  </span>
-                </div>
-                <span className="text-xs text-dark-text-tertiary hidden md:inline">{user?.email}</span>
-              </div>
-              <button
-                onClick={handleLogout}
-                className="inline-flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-medium text-dark-text-tertiary hover:text-dark-text-primary hover:bg-dark-bg-tertiary rounded-md transition-all duration-150"
-                title="Logout"
-              >
-                <svg
-                  className="w-3.5 h-3.5"
-                  fill="none"
-                  stroke="currentColor"
-                  viewBox="0 0 24 24"
-                >
-                  <path
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    strokeWidth={2}
-                    d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1"
-                  />
-                </svg>
-                <span className="hidden md:inline">Logout</span>
-              </button>
             </div>
           </div>
         </header>
@@ -135,6 +107,7 @@ export default function Dashboard() {
           {/* Sidebar */}
           <Sidebar
             onCreateProject={() => setIsProjectModalOpen(true)}
+            onLogout={handleLogout}
             isOpen={sidebarOpen}
             onClose={() => setSidebarOpen(false)}
             isPinned={sidebarPinned}

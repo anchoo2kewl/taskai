@@ -1,8 +1,11 @@
-import { useEffect, useState, useRef, useMemo } from 'react'
-import { useParams, useNavigate, useLocation } from 'react-router-dom'
+import { useEffect, useState, useRef, useMemo, lazy, Suspense } from 'react'
+import { useParams, useNavigate, useLocation, useSearchParams } from 'react-router-dom'
 import { DndContext, DragEndEvent, DragOverlay, DragStartEvent, PointerSensor, useSensor, useSensors } from '@dnd-kit/core'
 import { api, Project, Task, type SwimLane, type Sprint, type Tag } from '../lib/api'
 import { useLocalTasks } from '../hooks/useLocalTasks'
+
+const WikiContent = lazy(() => import('../components/WikiContent'))
+const ProjectSettings = lazy(() => import('./ProjectSettings'))
 
 // ── Board filter bar (GitHub-style) ──────────────────────────────────────────
 type BoardFilterKey = 'sprint' | 'assignee' | 'priority' | 'label'
@@ -223,7 +226,8 @@ function BoardFilterBar({ sprints, assignees, tags, sprintId, assigneeId, priori
 
 export default function ProjectDetail() {
   const { projectId } = useParams<{ projectId: string }>()
-  const navigate = useNavigate()
+  const [searchParams, setSearchParams] = useSearchParams()
+  const activeTab = searchParams.get('tab') || 'board'
   const [project, setProject] = useState<Project | null>(null)
   const [loadingProject, setLoadingProject] = useState(true)
   const [projectError, setProjectError] = useState<string | null>(null)
@@ -446,7 +450,6 @@ export default function ProjectDetail() {
   }, {} as Record<number, Task[]>)
 
   return (
-    <DndContext sensors={sensors} onDragStart={handleDragStart} onDragEnd={handleDragEnd}>
       <div className="h-full flex flex-col bg-dark-bg-base">
         {/* Project Header */}
         <div className="bg-dark-bg-secondary border-b border-dark-border-subtle">
@@ -461,11 +464,10 @@ export default function ProjectDetail() {
               )}
             </div>
             <div className="flex items-center gap-2 flex-shrink-0">
-              {/* Settings icon */}
               <button
-                onClick={() => navigate(`/app/projects/${projectId}/settings`)}
+                onClick={() => setSearchParams({ tab: 'settings' })}
                 title="Settings"
-                className="p-2 text-dark-text-tertiary hover:text-dark-text-primary hover:bg-dark-bg-tertiary rounded-lg transition-colors"
+                className={`p-2 rounded-lg transition-colors ${activeTab === 'settings' ? 'text-primary-400 bg-dark-bg-tertiary' : 'text-dark-text-tertiary hover:text-dark-text-primary hover:bg-dark-bg-tertiary'}`}
               >
                 <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
@@ -489,29 +491,30 @@ export default function ProjectDetail() {
             <div className="flex items-center gap-1">
               {/* Board icon tab */}
               <button
-                onClick={() => navigate(`/app/projects/${projectId}`)}
+                onClick={() => setSearchParams({})}
                 title="Board"
-                className="relative p-3 text-primary-400 transition-colors"
+                className={`relative p-3 transition-colors ${activeTab === 'board' ? 'text-primary-400' : 'text-dark-text-secondary hover:text-dark-text-primary'}`}
               >
                 <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 17V7m0 10a2 2 0 01-2 2H5a2 2 0 01-2-2V7a2 2 0 012-2h2a2 2 0 012 2m0 10a2 2 0 002 2h2a2 2 0 002-2M9 7a2 2 0 012-2h2a2 2 0 012 2m0 10V7m0 10a2 2 0 002 2h2a2 2 0 002-2V7a2 2 0 00-2-2h-2a2 2 0 00-2 2" />
                 </svg>
-                <div className="absolute bottom-0 left-0 right-0 h-0.5 bg-primary-500"></div>
+                {activeTab === 'board' && <div className="absolute bottom-0 left-0 right-0 h-0.5 bg-primary-500" />}
               </button>
               {/* Wiki icon tab */}
               <button
-                onClick={() => navigate(`/app/projects/${projectId}/wiki`)}
+                onClick={() => setSearchParams({ tab: 'wiki' })}
                 title="Wiki"
-                className="p-3 text-dark-text-secondary hover:text-dark-text-primary transition-colors"
+                className={`relative p-3 transition-colors ${activeTab === 'wiki' ? 'text-primary-400' : 'text-dark-text-secondary hover:text-dark-text-primary'}`}
               >
                 <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253" />
                 </svg>
+                {activeTab === 'wiki' && <div className="absolute bottom-0 left-0 right-0 h-0.5 bg-primary-500" />}
               </button>
             </div>
 
-            {/* Filter bar + Task Stats */}
-            <div className="flex items-center gap-4 py-3">
+            {/* Filter bar + Task Stats (visible on board, invisible but space-reserving on other tabs) */}
+            <div className={`flex items-center gap-4 py-3 ${activeTab === 'board' ? '' : 'invisible'}`}>
               <BoardFilterBar
                 sprints={sprints}
                 assignees={uniqueAssignees}
@@ -540,59 +543,77 @@ export default function ProjectDetail() {
           </div>
         </div>
 
-        {/* Tasks Board */}
-        <div className="flex-1 overflow-y-auto overflow-x-auto p-4 md:p-6 bg-dark-bg-base">
-          {tasks.length === 0 ? (
-            <div className="flex items-center justify-center h-64">
-              <div className="text-center">
-                <svg
-                  className="mx-auto h-10 w-10 text-dark-text-tertiary"
-                  fill="none"
-                  viewBox="0 0 24 24"
-                  stroke="currentColor"
-                >
-                  <path
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    strokeWidth={2}
-                    d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"
-                  />
-                </svg>
-                <h3 className="mt-2 text-sm font-medium text-dark-text-primary">No tasks</h3>
-                <p className="mt-1 text-xs text-dark-text-secondary">
-                  Get started by creating a new task.
-                </p>
-              </div>
+        {/* Tab Content */}
+        {activeTab === 'board' && (
+          <DndContext sensors={sensors} onDragStart={handleDragStart} onDragEnd={handleDragEnd}>
+            {/* Tasks Board */}
+            <div className="flex-1 overflow-y-auto overflow-x-auto p-4 md:p-6 bg-dark-bg-base">
+              {tasks.length === 0 ? (
+                <div className="flex items-center justify-center h-64">
+                  <div className="text-center">
+                    <svg
+                      className="mx-auto h-10 w-10 text-dark-text-tertiary"
+                      fill="none"
+                      viewBox="0 0 24 24"
+                      stroke="currentColor"
+                    >
+                      <path
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        strokeWidth={2}
+                        d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"
+                      />
+                    </svg>
+                    <h3 className="mt-2 text-sm font-medium text-dark-text-primary">No tasks</h3>
+                    <p className="mt-1 text-xs text-dark-text-secondary">
+                      Get started by creating a new task.
+                    </p>
+                  </div>
+                </div>
+              ) : (
+                <div className="flex gap-4 overflow-x-auto pb-2 md:grid md:overflow-x-visible" style={{ gridTemplateColumns: `repeat(${swimLanes.length}, minmax(0, 1fr))` }}>
+                  {swimLanes.map((lane) => (
+                    <TaskColumn
+                      key={lane.id}
+                      id={lane.id.toString()}
+                      title={lane.name}
+                      count={tasksBySwimLane[lane.id]?.length || 0}
+                      tasks={tasksBySwimLane[lane.id] || []}
+                      color={lane.color}
+                      projectId={projectId || ''}
+                    />
+                  ))}
+                </div>
+              )}
             </div>
-          ) : (
-            <div className="flex gap-4 overflow-x-auto pb-2 md:grid md:overflow-x-visible" style={{ gridTemplateColumns: `repeat(${swimLanes.length}, minmax(0, 1fr))` }}>
-              {swimLanes.map((lane) => (
-                <TaskColumn
-                  key={lane.id}
-                  id={lane.id.toString()}
-                  title={lane.name}
-                  count={tasksBySwimLane[lane.id]?.length || 0}
-                  tasks={tasksBySwimLane[lane.id] || []}
-                  color={lane.color}
+
+            {/* Drag Overlay */}
+            <DragOverlay>
+              {activeTask ? (
+                <TaskCard
+                  task={activeTask}
                   projectId={projectId || ''}
+                  isDragging
                 />
-              ))}
-            </div>
-          )}
-        </div>
+              ) : null}
+            </DragOverlay>
 
-        {/* Drag Overlay */}
-        <DragOverlay>
-          {activeTask ? (
-            <TaskCard
-              task={activeTask}
-              projectId={projectId || ''}
-              isDragging
-            />
-          ) : null}
-        </DragOverlay>
+          </DndContext>
+        )}
 
-        {/* New Task Modal */}
+        {activeTab === 'wiki' && (
+          <Suspense fallback={<div className="flex-1 flex items-center justify-center"><div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary-500" /></div>}>
+            <WikiContent projectId={projectId!} />
+          </Suspense>
+        )}
+
+        {activeTab === 'settings' && (
+          <Suspense fallback={<div className="flex-1 flex items-center justify-center"><div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary-500" /></div>}>
+            <ProjectSettings embedded projectIdOverride={Number(projectId)} />
+          </Suspense>
+        )}
+
+        {/* New Task Modal (available on all tabs) */}
         {showNewTaskModal && (
           <div className="fixed inset-0 bg-black/70 flex items-center justify-center p-4 z-50">
             <div className="bg-dark-bg-elevated rounded-xl shadow-linear-xl max-w-2xl w-full p-6 border border-dark-border-subtle max-h-[90vh] overflow-y-auto">
@@ -672,7 +693,6 @@ export default function ProjectDetail() {
           </div>
         )}
       </div>
-    </DndContext>
   )
 }
 

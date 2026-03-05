@@ -1,24 +1,40 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useNavigate, useParams, useLocation } from 'react-router-dom'
 import { api, Project } from '../lib/api'
 import { useAuth } from '../state/AuthContext'
 
 interface SidebarProps {
   onCreateProject: () => void
+  onLogout: () => void
   isOpen?: boolean
   onClose?: () => void
   isPinned?: boolean
   onTogglePin?: () => void
 }
 
-export default function Sidebar({ onCreateProject, isOpen, onClose, isPinned, onTogglePin }: SidebarProps) {
+export default function Sidebar({ onCreateProject, onLogout, isOpen, onClose, isPinned, onTogglePin }: SidebarProps) {
   const [projects, setProjects] = useState<Project[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+  const [profileMenuOpen, setProfileMenuOpen] = useState(false)
+  const profileMenuRef = useRef<HTMLDivElement>(null)
   const navigate = useNavigate()
   const location = useLocation()
   const { user } = useAuth()
-  const { projectId: selectedProjectId } = useParams<{ projectId: string }>()
+  const { projectId: urlProjectId } = useParams<{ projectId: string }>()
+
+  // Remember last selected project so nav items stay active on Settings/Admin pages
+  const [lastProjectId, setLastProjectId] = useState<string | null>(
+    () => localStorage.getItem('last-project-id')
+  )
+  useEffect(() => {
+    if (urlProjectId) {
+      setLastProjectId(urlProjectId)
+      localStorage.setItem('last-project-id', urlProjectId)
+    }
+  }, [urlProjectId])
+
+  const selectedProjectId = urlProjectId || lastProjectId
 
   useEffect(() => {
     loadProjects()
@@ -30,6 +46,19 @@ export default function Sidebar({ onCreateProject, isOpen, onClose, isPinned, on
     window.addEventListener('project-membership-changed', handler)
     return () => window.removeEventListener('project-membership-changed', handler)
   }, [])
+
+  // Close profile menu on click outside
+  useEffect(() => {
+    const handleClickOutside = (e: MouseEvent) => {
+      if (profileMenuRef.current && !profileMenuRef.current.contains(e.target as Node)) {
+        setProfileMenuOpen(false)
+      }
+    }
+    if (profileMenuOpen) {
+      document.addEventListener('mousedown', handleClickOutside)
+      return () => document.removeEventListener('mousedown', handleClickOutside)
+    }
+  }, [profileMenuOpen])
 
   const loadProjects = async () => {
     try {
@@ -93,16 +122,6 @@ export default function Sidebar({ onCreateProject, isOpen, onClose, isPinned, on
       icon: (
         <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10" />
-        </svg>
-      ),
-    },
-    {
-      label: 'Settings',
-      path: '/app/settings',
-      icon: (
-        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
-          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
         </svg>
       ),
     },
@@ -189,23 +208,6 @@ export default function Sidebar({ onCreateProject, isOpen, onClose, isPinned, on
               </button>
             )
           })}
-
-          {/* Admin Link */}
-          {user?.is_admin && (
-            <button
-              onClick={() => { navigate('/app/admin'); onClose?.() }}
-              className={`w-full font-medium py-2.5 md:py-1.5 px-3 rounded-md transition-all duration-150 flex items-center gap-2.5 text-sm ${
-                location.pathname === '/app/admin'
-                  ? 'bg-primary-500/15 text-primary-400'
-                  : 'text-dark-text-tertiary hover:bg-dark-bg-secondary hover:text-dark-text-primary'
-              }`}
-            >
-              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M12 4.354a4 4 0 110 5.292M15 21H3v-1a6 6 0 0112 0v1zm0 0h6v-1a6 6 0 00-9-5.197M13 7a4 4 0 11-8 0 4 4 0 018 0z" />
-              </svg>
-              Admin
-            </button>
-          )}
         </div>
       </div>
 
@@ -280,6 +282,85 @@ export default function Sidebar({ onCreateProject, isOpen, onClose, isPinned, on
             })}
           </div>
         )}
+      </div>
+
+      {/* User Profile Section */}
+      <div className="relative border-t border-dark-border-subtle p-3" ref={profileMenuRef}>
+        {/* Profile Menu (opens upward) */}
+        {profileMenuOpen && (
+          <div className="absolute bottom-full left-2 right-2 mb-1 bg-dark-bg-elevated border border-dark-border-subtle rounded-lg shadow-linear-lg overflow-hidden">
+            <div className="py-1">
+              <button
+                onClick={() => { navigate('/app/settings'); setProfileMenuOpen(false); onClose?.() }}
+                className={`w-full text-left px-3 py-2 text-sm flex items-center gap-2.5 ${
+                  location.pathname === '/app/settings'
+                    ? 'bg-dark-bg-tertiary text-dark-text-primary'
+                    : 'text-dark-text-secondary hover:bg-dark-bg-tertiary hover:text-dark-text-primary'
+                } transition-colors`}
+              >
+                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                </svg>
+                Settings
+              </button>
+
+              {user?.is_admin && (
+                <button
+                  onClick={() => { navigate('/app/admin'); setProfileMenuOpen(false); onClose?.() }}
+                  className={`w-full text-left px-3 py-2 text-sm flex items-center gap-2.5 ${
+                    location.pathname === '/app/admin'
+                      ? 'bg-dark-bg-tertiary text-dark-text-primary'
+                      : 'text-dark-text-secondary hover:bg-dark-bg-tertiary hover:text-dark-text-primary'
+                  } transition-colors`}
+                >
+                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M12 4.354a4 4 0 110 5.292M15 21H3v-1a6 6 0 0112 0v1zm0 0h6v-1a6 6 0 00-9-5.197M13 7a4 4 0 11-8 0 4 4 0 018 0z" />
+                  </svg>
+                  Admin
+                </button>
+              )}
+
+              <div className="border-t border-dark-border-subtle my-1" />
+
+              <button
+                onClick={() => { setProfileMenuOpen(false); onLogout() }}
+                className="w-full text-left px-3 py-2 text-sm flex items-center gap-2.5 text-dark-text-secondary hover:bg-dark-bg-tertiary hover:text-dark-text-primary transition-colors"
+              >
+                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" />
+                </svg>
+                Sign out
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* Profile trigger button */}
+        <button
+          onClick={() => setProfileMenuOpen(!profileMenuOpen)}
+          className="w-full flex items-center gap-2.5 px-2 py-2 rounded-md hover:bg-dark-bg-secondary transition-colors"
+          aria-label="User menu"
+        >
+          <div className="w-8 h-8 bg-primary-500/15 border border-primary-500/25 rounded-full flex items-center justify-center flex-shrink-0">
+            <span className="text-xs font-semibold text-primary-400">
+              {user?.email?.charAt(0).toUpperCase()}
+            </span>
+          </div>
+          <div className="flex-1 min-w-0 text-left">
+            <p className="text-xs font-medium text-dark-text-primary truncate">
+              {user?.first_name && user?.last_name
+                ? `${user.first_name} ${user.last_name}`
+                : user?.email}
+            </p>
+            {user?.first_name && (
+              <p className="text-[11px] text-dark-text-quaternary truncate">{user.email}</p>
+            )}
+          </div>
+          <svg className={`w-4 h-4 text-dark-text-quaternary transition-transform ${profileMenuOpen ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 15l7-7 7 7" />
+          </svg>
+        </button>
       </div>
     </div>
   )

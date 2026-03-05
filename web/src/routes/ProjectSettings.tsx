@@ -249,10 +249,15 @@ function GitHubFilterBar({
 }
 // ─────────────────────────────────────────────────────────────────────────────
 
-export default function ProjectSettings() {
+interface ProjectSettingsProps {
+  embedded?: boolean
+  projectIdOverride?: number
+}
+
+export default function ProjectSettings({ embedded, projectIdOverride }: ProjectSettingsProps = {}) {
   const navigate = useNavigate()
   const { projectId: projectIdParam } = useParams<{ projectId: string }>()
-  const projectId = parseInt(projectIdParam || '0')
+  const projectId = projectIdOverride || parseInt(projectIdParam || '0')
   const { user } = useAuth()
 
   // Project state
@@ -307,6 +312,8 @@ export default function ProjectSettings() {
   const [importProgress, setImportProgress] = useState<GitHubProgressEvent | null>(null)
   const [userAssignments, setUserAssignments] = useState<Record<string, number>>({})
   const [statusAssignments, setStatusAssignments] = useState<Record<string, number>>({})
+  const [isSavingMappings, setIsSavingMappings] = useState(false)
+  const [mappingsSaved, setMappingsSaved] = useState(false)
   const [pullSprints, setPullSprints] = useState(true)
   const [pullTags, setPullTags] = useState(true)
   const [pullTasks, setPullTasks] = useState(true)
@@ -345,19 +352,29 @@ export default function ProjectSettings() {
     const params = new URLSearchParams(window.location.search)
     if (params.get('github') === 'connected') {
       setGithubSuccess('GitHub connected successfully!')
-      window.history.replaceState({}, '', window.location.pathname)
+      const url = new URL(window.location.href)
+      url.searchParams.delete('github')
+      window.history.replaceState({}, '', url.toString())
     } else if (params.get('github') === 'error') {
       setGithubError('GitHub connection failed. Please try again.')
-      window.history.replaceState({}, '', window.location.pathname)
+      const url = new URL(window.location.href)
+      url.searchParams.delete('github')
+      window.history.replaceState({}, '', url.toString())
     }
   }, [projectId]) // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Restore saved GitHub import settings (status mappings + filters) for this project
+  // Load saved GitHub mappings from DB on mount
   useEffect(() => {
-    try {
-      const saved = localStorage.getItem(`taskai_gh_status_${projectId}`)
-      if (saved) setStatusAssignments(JSON.parse(saved))
-    } catch { /* ignore */ }
+    apiClient.githubGetMappings(projectId)
+      .then(({ status_mappings, user_mappings }) => {
+        if (Object.keys(status_mappings).length > 0) setStatusAssignments(status_mappings)
+        if (Object.keys(user_mappings).length > 0) setUserAssignments(user_mappings)
+      })
+      .catch(() => { /* no saved mappings yet */ })
+  }, [projectId])
+
+  // Restore saved import filters for this project (filters stay in localStorage — they're UI state)
+  useEffect(() => {
     try {
       const saved = localStorage.getItem(`taskai_gh_filter_${projectId}`)
       if (saved) {
@@ -369,12 +386,6 @@ export default function ProjectSettings() {
       }
     } catch { /* ignore */ }
   }, [projectId])
-
-  // Persist status assignments whenever they change
-  useEffect(() => {
-    if (Object.keys(statusAssignments).length === 0) return
-    localStorage.setItem(`taskai_gh_status_${projectId}`, JSON.stringify(statusAssignments))
-  }, [statusAssignments, projectId])
 
   // Persist import filters whenever they change
   useEffect(() => {
@@ -511,15 +522,13 @@ export default function ProjectSettings() {
       }
       setUserAssignments(assignments)
       // Initialize status assignments from auto-matched statuses,
-      // then overlay any previously saved user assignments
+      // then overlay any previously saved DB mappings (DB values take priority)
       const statusInit: Record<string, number> = {}
       for (const s of (preview.statuses ?? [])) {
         statusInit[s.key] = s.matched_lane_id ?? 0
       }
-      try {
-        const saved = localStorage.getItem(`taskai_gh_status_${projectId}`)
-        if (saved) Object.assign(statusInit, JSON.parse(saved))
-      } catch { /* ignore */ }
+      // Merge saved DB mappings on top
+      Object.assign(statusInit, statusAssignments)
       setStatusAssignments(statusInit)
     } catch (error: unknown) {
       setImportError(error instanceof Error ? error.message : 'Failed to fetch GitHub preview')
@@ -569,6 +578,20 @@ export default function ProjectSettings() {
     }
   }
 
+  const handleSaveMappings = async () => {
+    setIsSavingMappings(true)
+    setMappingsSaved(false)
+    try {
+      await apiClient.githubSaveMappings(projectId, statusAssignments, userAssignments)
+      setMappingsSaved(true)
+      setTimeout(() => setMappingsSaved(false), 3000)
+    } catch {
+      // non-critical
+    } finally {
+      setIsSavingMappings(false)
+    }
+  }
+
   const handleSyncNow = async () => {
     setImportError('')
     setImportSuccess('')
@@ -578,6 +601,7 @@ export default function ProjectSettings() {
       const result = await apiClient.githubSync(
         projectId,
         statusAssignments,
+        userAssignments,
         (evt) => setImportProgress(evt)
       )
       setImportSuccess(`Synced: ${result.created_tasks} new tasks, updated existing`)
@@ -838,7 +862,9 @@ export default function ProjectSettings() {
   }
 
   return (
-    <div className="h-full flex flex-col bg-dark-bg-base">
+    <div className={embedded ? 'flex flex-col flex-1 overflow-hidden' : 'h-full flex flex-col bg-dark-bg-base'}>
+      {!embedded && (
+      <>
       {/* Project Header */}
       <div className="bg-dark-bg-secondary border-b border-dark-border-subtle">
         {/* Top bar with project info and actions */}
@@ -885,6 +911,8 @@ export default function ProjectSettings() {
           <div className="py-3"></div>
         </div>
       </div>
+      </>
+      )}
 
       <div className="flex-1 overflow-y-auto bg-dark-bg-primary py-8">
         <div className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8">
@@ -1625,6 +1653,22 @@ export default function ProjectSettings() {
                         </div>
                       )}
 
+                      {/* Save mappings */}
+                      {(githubPreview.github_users.length > 0 || (githubPreview.statuses ?? []).length > 0) && (
+                        <div className="flex items-center gap-3">
+                          <button
+                            onClick={handleSaveMappings}
+                            disabled={isSavingMappings}
+                            className="px-3 py-1.5 text-xs font-medium bg-primary-600 hover:bg-primary-500 disabled:opacity-50 text-white rounded-lg transition-colors"
+                          >
+                            {isSavingMappings ? 'Saving...' : 'Save Mappings'}
+                          </button>
+                          {mappingsSaved && (
+                            <span className="text-xs text-success-400">Mappings saved — will be used for future syncs</span>
+                          )}
+                        </div>
+                      )}
+
                       {/* Filters */}
                       <GitHubFilterBar
                         milestones={githubPreview.milestones ?? []}
@@ -1691,6 +1735,74 @@ export default function ProjectSettings() {
                           {isPulling ? 'Importing...' : 'Import from GitHub'}
                         </Button>
                       </div>
+                    </div>
+                  )}
+
+                  {/* Persistent Sync Mappings — visible even without Preview */}
+                  {!githubPreview && (Object.keys(statusAssignments).length > 0 || Object.keys(userAssignments).length > 0) && (
+                    <div className="mt-4 pt-4 border-t border-dark-border-subtle space-y-4">
+                      <div className="flex items-center justify-between">
+                        <div>
+                          <h4 className="text-sm font-medium text-dark-text-primary">Sync Mappings</h4>
+                          <p className="text-xs text-dark-text-tertiary mt-0.5">Saved mappings used when syncing from GitHub</p>
+                        </div>
+                        <div className="flex items-center gap-3">
+                          <button
+                            onClick={handleSaveMappings}
+                            disabled={isSavingMappings}
+                            className="px-3 py-1.5 text-xs font-medium bg-primary-600 hover:bg-primary-500 disabled:opacity-50 text-white rounded-lg transition-colors"
+                          >
+                            {isSavingMappings ? 'Saving...' : 'Save Mappings'}
+                          </button>
+                          {mappingsSaved && (
+                            <span className="text-xs text-success-400">Saved!</span>
+                          )}
+                        </div>
+                      </div>
+                      {Object.keys(statusAssignments).length > 0 && (
+                        <div>
+                          <h5 className="text-xs font-medium text-dark-text-secondary uppercase tracking-wide mb-2">GitHub Status → Swim Lane</h5>
+                          <div className="space-y-2">
+                            {Object.entries(statusAssignments).map(([key, laneId]) => (
+                              <div key={key} className="flex items-center gap-3 p-2 bg-dark-bg-secondary border border-dark-border-subtle rounded-lg">
+                                <span className="flex-1 text-sm text-dark-text-primary font-mono">{key}</span>
+                                <select
+                                  value={laneId ?? 0}
+                                  onChange={(e) => setStatusAssignments(prev => ({ ...prev, [key]: Number(e.target.value) }))}
+                                  className="text-sm bg-dark-bg-primary border border-dark-border-subtle text-dark-text-primary rounded-md px-2 py-1 focus:outline-none focus:ring-1 focus:ring-primary-500"
+                                >
+                                  <option value={0}>Default (by category)</option>
+                                  {swimLanes.map(l => (
+                                    <option key={l.id} value={l.id}>{l.name}</option>
+                                  ))}
+                                </select>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+                      {Object.keys(userAssignments).length > 0 && (
+                        <div>
+                          <h5 className="text-xs font-medium text-dark-text-secondary uppercase tracking-wide mb-2">GitHub User → TaskAI User</h5>
+                          <div className="space-y-2">
+                            {Object.entries(userAssignments).map(([login, userId]) => (
+                              <div key={login} className="flex items-center gap-3 p-2 bg-dark-bg-secondary border border-dark-border-subtle rounded-lg">
+                                <span className="flex-1 text-sm text-dark-text-primary font-mono">@{login}</span>
+                                <select
+                                  value={userId ?? 0}
+                                  onChange={(e) => setUserAssignments(prev => ({ ...prev, [login]: Number(e.target.value) }))}
+                                  className="text-sm bg-dark-bg-primary border border-dark-border-subtle text-dark-text-primary rounded-md px-2 py-1 focus:outline-none focus:ring-1 focus:ring-primary-500"
+                                >
+                                  <option value={0}>Unassigned</option>
+                                  {teamMembers.map(u => (
+                                    <option key={u.user_id} value={u.user_id}>{u.name || u.email}</option>
+                                  ))}
+                                </select>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      )}
                     </div>
                   )}
 

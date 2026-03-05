@@ -46,6 +46,22 @@ EOF
 ./script/server promote
 ```
 
+You can chain steps 2 and 3 into a single shell command:
+```bash
+gh api repos/anchoo2kewl/taskai/branches/uat/protection -X PUT \
+  -H "Accept: application/vnd.github+json" \
+  --input - <<'EOF'
+{"required_status_checks":{"strict":true,"contexts":[]},"enforce_admins":false,"required_pull_request_reviews":null,"restrictions":null,"allow_force_pushes":true,"required_linear_history":false}
+EOF
+git push origin main:uat --force && \
+gh api repos/anchoo2kewl/taskai/branches/uat/protection -X PUT \
+  -H "Accept: application/vnd.github+json" \
+  --input - <<'EOF'
+{"required_status_checks":{"strict":true,"contexts":[]},"enforce_admins":false,"required_pull_request_reviews":null,"restrictions":null,"allow_force_pushes":false,"required_linear_history":false}
+EOF
+./script/server promote
+```
+
 ### 4. Report Status
 Show a summary table:
 | Environment | Action | URL |

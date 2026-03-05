@@ -809,7 +809,9 @@ func (s *Server) HandleGitHubPreview(w http.ResponseWriter, r *http.Request) {
 		"message": fmt.Sprintf("Found %d labels — fetching issues...", len(labels)), "current": 2, "total": 0,
 	})
 
-	// Fetch issues (paginate up to 10 pages)
+	// Fetch issues (paginate up to 10 pages).
+	// NOTE: GitHub's /issues endpoint returns both issues and pull requests.
+	// We only handle issues for now. To add PR support, remove the PullRequest filter below.
 	var allIssues []ghIssue
 	for page := 1; page <= 10; page++ {
 		var pageIssues []ghIssue
@@ -822,7 +824,11 @@ func (s *Server) HandleGitHubPreview(w http.ResponseWriter, r *http.Request) {
 		if len(pageIssues) == 0 {
 			break
 		}
-		allIssues = append(allIssues, pageIssues...)
+		for _, iss := range pageIssues {
+			if iss.PullRequest == nil {
+				allIssues = append(allIssues, iss)
+			}
+		}
 		sendSSE(map[string]interface{}{
 			"type": "progress", "stage": "issues",
 			"message": fmt.Sprintf("Fetched %d issues...", len(allIssues)), "current": len(allIssues), "total": 0,
@@ -1301,6 +1307,8 @@ func (s *Server) handleGitHubImport(w http.ResponseWriter, r *http.Request, doUp
 	// --- Import Tasks from Issues ---
 	if req.PullTasks {
 		progress("issues", "Fetching issues...", 0, 0)
+		// NOTE: GitHub's /issues endpoint returns both issues and pull requests.
+		// We only handle issues for now. To add PR support, remove the PullRequest filter below.
 		var allIssues []ghIssue
 		for page := 1; page <= 10; page++ {
 			var pageIssues []ghIssue
@@ -1312,7 +1320,11 @@ func (s *Server) handleGitHubImport(w http.ResponseWriter, r *http.Request, doUp
 			if len(pageIssues) == 0 {
 				break
 			}
-			allIssues = append(allIssues, pageIssues...)
+			for _, iss := range pageIssues {
+				if iss.PullRequest == nil {
+					allIssues = append(allIssues, iss)
+				}
+			}
 		}
 		progress("issues", fmt.Sprintf("Processing %d issues...", len(allIssues)), 0, len(allIssues))
 
@@ -1426,9 +1438,6 @@ func (s *Server) handleGitHubImport(w http.ResponseWriter, r *http.Request, doUp
 		}
 
 		for i, issue := range allIssues {
-			if issue.PullRequest != nil {
-				continue // skip pull requests — import issues only
-			}
 			if i%25 == 0 && i > 0 {
 				progress("issues", fmt.Sprintf("Processed %d/%d issues...", i, len(allIssues)), i, len(allIssues))
 			}
@@ -2550,6 +2559,8 @@ func (s *Server) runGitHubImportCore(ctx context.Context, projectID int, owner, 
 			return fmt.Sprintf("%s/issues?state=all&per_page=100&page=%d", base, page)
 		}
 
+		// NOTE: GitHub's /issues endpoint returns both issues and pull requests.
+		// We only handle issues for now. To add PR support, remove the PullRequest filter below.
 		var allIssues []ghIssue
 		for page := 1; page <= 10; page++ {
 			var pageIssues []ghIssue
@@ -2560,7 +2571,11 @@ func (s *Server) runGitHubImportCore(ctx context.Context, projectID int, owner, 
 			if len(pageIssues) == 0 {
 				break
 			}
-			allIssues = append(allIssues, pageIssues...)
+			for _, iss := range pageIssues {
+				if iss.PullRequest == nil {
+					allIssues = append(allIssues, iss)
+				}
+			}
 		}
 
 		swimLaneByCategory := map[string]int64{}

@@ -370,6 +370,9 @@ func main() {
 			r.Post("/wiki/search", server.HandleSearchWiki)
 			r.Get("/wiki/autocomplete", server.HandleAutocompletePages)
 
+			// Knowledge graph routes
+			r.Get("/projects/{id}/graph", server.HandleGetProjectGraph)
+
 			// Global search
 			r.Post("/search", server.HandleGlobalSearch)
 

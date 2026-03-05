@@ -96,6 +96,7 @@ export default function Sidebar({ onCreateProject, onLogout, isOpen, onClose, is
   const sprintsPath = selectedProjectId ? `/app/projects/${selectedProjectId}/sprints` : null
   const tagsPath = selectedProjectId ? `/app/projects/${selectedProjectId}/tags` : null
   const assetsPath = selectedProjectId ? `/app/projects/${selectedProjectId}/assets` : null
+  const graphPath = selectedProjectId ? `/app/projects/${selectedProjectId}/graph` : null
 
   const navItems = [
     {
@@ -122,6 +123,15 @@ export default function Sidebar({ onCreateProject, onLogout, isOpen, onClose, is
       icon: (
         <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10" />
+        </svg>
+      ),
+    },
+    {
+      label: 'Graph',
+      path: graphPath,
+      icon: (
+        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M4 6a2 2 0 100 4 2 2 0 000-4zM20 6a2 2 0 100 4 2 2 0 000-4zM12 16a2 2 0 100 4 2 2 0 000-4zM6 8l6 6M18 8l-6 6" />
         </svg>
       ),
     },

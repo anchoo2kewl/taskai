@@ -571,6 +571,10 @@ func (s *Server) HandleCreateTask(w http.ResponseWriter, r *http.Request) {
 
 	respondJSON(w, http.StatusCreated, t)
 	go s.broadcastToProjectMembers(t.ProjectID, "task_created", t)
+	if createdTask.Description != nil {
+		taskNum := t.TaskNumber
+		go s.syncGraphLinks(context.Background(), createdTask.ProjectID, "task", createdTask.ID, &taskNum, createdTask.Title, *createdTask.Description)
+	}
 }
 
 // HandleUpdateTask updates an existing task
@@ -903,6 +907,10 @@ func (s *Server) HandleUpdateTask(w http.ResponseWriter, r *http.Request) {
 
 	respondJSON(w, http.StatusOK, t)
 	go s.broadcastToProjectMembers(t.ProjectID, "task_updated", t)
+	if updatedTask.Description != nil {
+		taskNum := t.TaskNumber
+		go s.syncGraphLinks(context.Background(), updatedTask.ProjectID, "task", taskID, &taskNum, updatedTask.Title, *updatedTask.Description)
+	}
 }
 
 // HandleDeleteTask deletes a task

@@ -7,6 +7,7 @@ import SearchSelect from '../components/ui/SearchSelect'
 import MultiSelectDropdown from '../components/ui/MultiSelectDropdown'
 import ImagePickerModal from '../components/ImagePickerModal'
 import { apiClient, Task, type UpdateTaskRequest, type SwimLane, type Sprint, type ProjectMember, type Attachment, type TaskComment, type GitHubPushTaskResponse, type Tag } from '../lib/api'
+import { preprocessGraphLinks, parseGraphLinkUrl } from '../lib/graphLinks'
 
 interface TaskDetailProps {
   isModal?: boolean
@@ -603,8 +604,39 @@ export default function TaskDetail({ isModal, onClose }: TaskDetailProps) {
                 </div>
               ) : task.description ? (
                 <div className="prose prose-sm max-w-none prose-headings:text-dark-text-primary prose-p:text-dark-text-secondary prose-a:text-primary-400 prose-code:text-primary-400 prose-code:bg-primary-500/10 prose-code:px-1 prose-code:py-0.5 prose-code:rounded prose-pre:bg-dark-bg-primary prose-pre:border prose-pre:border-dark-border-subtle prose-strong:text-dark-text-primary prose-li:text-dark-text-secondary prose-img:rounded-lg prose-img:border prose-img:border-dark-border-subtle">
-                  <ReactMarkdown remarkPlugins={[remarkGfm]}>
-                    {task.description}
+                  <ReactMarkdown
+                    remarkPlugins={[remarkGfm]}
+                    components={{
+                      a: ({ href, children }) => {
+                        const graphLink = href ? parseGraphLinkUrl(href) : null
+                        if (graphLink) {
+                          const label = String(children)
+                          const handleClick = () => {
+                            if (graphLink.type === 'wiki') {
+                              navigate(`/app/projects/${projectId}?tab=wiki&page=${graphLink.id}`)
+                            } else {
+                              navigate(`/app/projects/${projectId}`)
+                            }
+                          }
+                          return (
+                            <button
+                              onClick={handleClick}
+                              className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium not-prose border transition-colors ${
+                                graphLink.type === 'wiki'
+                                  ? 'bg-blue-500/15 text-blue-400 border-blue-500/30 hover:bg-blue-500/25'
+                                  : 'bg-orange-500/15 text-orange-400 border-orange-500/30 hover:bg-orange-500/25'
+                              }`}
+                            >
+                              <span>{graphLink.type === 'wiki' ? '📄' : '✅'}</span>
+                              {label}
+                            </button>
+                          )
+                        }
+                        return <a href={href}>{children}</a>
+                      },
+                    }}
+                  >
+                    {preprocessGraphLinks(task.description)}
                   </ReactMarkdown>
                 </div>
               ) : (

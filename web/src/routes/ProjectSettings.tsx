@@ -36,6 +36,10 @@ interface GitHubSettings {
   github_last_sync: string | null
   github_token_set: boolean
   github_login: string | null
+  github_project_url: string
+  github_sync_interval: string
+  github_sync_hour: number
+  github_sync_day: number
 }
 
 // ── GitHub-style filter bar ───────────────────────────────────────────────────
@@ -249,10 +253,15 @@ function GitHubFilterBar({
 }
 // ─────────────────────────────────────────────────────────────────────────────
 
-export default function ProjectSettings() {
+interface ProjectSettingsProps {
+  embedded?: boolean
+  projectIdOverride?: number
+}
+
+export default function ProjectSettings({ embedded, projectIdOverride }: ProjectSettingsProps = {}) {
   const navigate = useNavigate()
   const { projectId: projectIdParam } = useParams<{ projectId: string }>()
-  const projectId = parseInt(projectIdParam || '0')
+  const projectId = projectIdOverride || parseInt(projectIdParam || '0')
   const { user } = useAuth()
 
   // Project state
@@ -283,7 +292,12 @@ export default function ProjectSettings() {
     github_last_sync: null,
     github_token_set: false,
     github_login: null,
+    github_project_url: '',
+    github_sync_interval: '',
+    github_sync_hour: 0,
+    github_sync_day: 0,
   })
+  const [syncLogs, setSyncLogs] = useState<import('../lib/api').GitHubSyncLog[]>([])
   const [githubError, setGithubError] = useState('')
   const [githubSuccess, setGithubSuccess] = useState('')
   const [isSavingGitHub, setIsSavingGitHub] = useState(false)
@@ -307,6 +321,9 @@ export default function ProjectSettings() {
   const [importProgress, setImportProgress] = useState<GitHubProgressEvent | null>(null)
   const [userAssignments, setUserAssignments] = useState<Record<string, number>>({})
   const [statusAssignments, setStatusAssignments] = useState<Record<string, number>>({})
+  const [isSavingMappings, setIsSavingMappings] = useState(false)
+  const [mappingsSaved, setMappingsSaved] = useState(false)
+  const [syncStateFilter, setSyncStateFilter] = useState<'open' | 'closed' | 'all'>('open')
   const [pullSprints, setPullSprints] = useState(true)
   const [pullTags, setPullTags] = useState(true)
   const [pullTasks, setPullTasks] = useState(true)
@@ -338,6 +355,7 @@ export default function ProjectSettings() {
     loadInvitations()
     loadTeamMembers()
     loadGitHubSettings()
+    loadSyncLogs()
     loadSwimLanes()
     loadStorageUsage()
 
@@ -345,19 +363,29 @@ export default function ProjectSettings() {
     const params = new URLSearchParams(window.location.search)
     if (params.get('github') === 'connected') {
       setGithubSuccess('GitHub connected successfully!')
-      window.history.replaceState({}, '', window.location.pathname)
+      const url = new URL(window.location.href)
+      url.searchParams.delete('github')
+      window.history.replaceState({}, '', url.toString())
     } else if (params.get('github') === 'error') {
       setGithubError('GitHub connection failed. Please try again.')
-      window.history.replaceState({}, '', window.location.pathname)
+      const url = new URL(window.location.href)
+      url.searchParams.delete('github')
+      window.history.replaceState({}, '', url.toString())
     }
   }, [projectId]) // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Restore saved GitHub import settings (status mappings + filters) for this project
+  // Load saved GitHub mappings from DB on mount
   useEffect(() => {
-    try {
-      const saved = localStorage.getItem(`taskai_gh_status_${projectId}`)
-      if (saved) setStatusAssignments(JSON.parse(saved))
-    } catch { /* ignore */ }
+    apiClient.githubGetMappings(projectId)
+      .then(({ status_mappings, user_mappings }) => {
+        if (Object.keys(status_mappings).length > 0) setStatusAssignments(status_mappings)
+        if (Object.keys(user_mappings).length > 0) setUserAssignments(user_mappings)
+      })
+      .catch(() => { /* no saved mappings yet */ })
+  }, [projectId])
+
+  // Restore saved import filters for this project (filters stay in localStorage — they're UI state)
+  useEffect(() => {
     try {
       const saved = localStorage.getItem(`taskai_gh_filter_${projectId}`)
       if (saved) {
@@ -369,12 +397,6 @@ export default function ProjectSettings() {
       }
     } catch { /* ignore */ }
   }, [projectId])
-
-  // Persist status assignments whenever they change
-  useEffect(() => {
-    if (Object.keys(statusAssignments).length === 0) return
-    localStorage.setItem(`taskai_gh_status_${projectId}`, JSON.stringify(statusAssignments))
-  }, [statusAssignments, projectId])
 
   // Persist import filters whenever they change
   useEffect(() => {
@@ -425,13 +447,22 @@ export default function ProjectSettings() {
   const loadGitHubSettings = async () => {
     try {
       const data = await apiClient.getProjectGitHub(projectId)
-      setGithubSettings(data)
+      setGithubSettings({ ...data, github_sync_interval: data.github_sync_interval ?? '' })
       if (data.github_token_set) {
         loadGitHubRepos()
         if (data.github_owner) setSelectedRepoFullName(`${data.github_owner}/${data.github_repo_name}`)
       }
     } catch (error: unknown) {
       console.error('Failed to load data:', error)
+    }
+  }
+
+  const loadSyncLogs = async () => {
+    try {
+      const logs = await apiClient.githubGetSyncLogs(projectId)
+      setSyncLogs(logs)
+    } catch {
+      // Silently fail
     }
   }
 
@@ -511,15 +542,13 @@ export default function ProjectSettings() {
       }
       setUserAssignments(assignments)
       // Initialize status assignments from auto-matched statuses,
-      // then overlay any previously saved user assignments
+      // then overlay any previously saved DB mappings (DB values take priority)
       const statusInit: Record<string, number> = {}
       for (const s of (preview.statuses ?? [])) {
         statusInit[s.key] = s.matched_lane_id ?? 0
       }
-      try {
-        const saved = localStorage.getItem(`taskai_gh_status_${projectId}`)
-        if (saved) Object.assign(statusInit, JSON.parse(saved))
-      } catch { /* ignore */ }
+      // Merge saved DB mappings on top
+      Object.assign(statusInit, statusAssignments)
       setStatusAssignments(statusInit)
     } catch (error: unknown) {
       setImportError(error instanceof Error ? error.message : 'Failed to fetch GitHub preview')
@@ -569,6 +598,22 @@ export default function ProjectSettings() {
     }
   }
 
+  const handleSaveMappings = async () => {
+    setIsSavingMappings(true)
+    setMappingsSaved(false)
+    try {
+      await apiClient.githubSaveMappings(projectId, statusAssignments, userAssignments)
+      setMappingsSaved(true)
+      setTimeout(() => setMappingsSaved(false), 3000)
+    } catch {
+      // non-critical
+    } finally {
+      setIsSavingMappings(false)
+    }
+  }
+
+  const [isForceFullSyncing, setIsForceFullSyncing] = useState(false)
+
   const handleSyncNow = async () => {
     setImportError('')
     setImportSuccess('')
@@ -578,16 +623,46 @@ export default function ProjectSettings() {
       const result = await apiClient.githubSync(
         projectId,
         statusAssignments,
+        userAssignments,
+        syncStateFilter,
         (evt) => setImportProgress(evt)
       )
-      setImportSuccess(`Synced: ${result.created_tasks} new tasks, updated existing`)
+      setImportSuccess(`Synced: ${result.created_tasks} new, ${result.updated_tasks ?? 0} updated`)
       setImportProgress(null)
       loadGitHubSettings()
+      loadSyncLogs()
     } catch (error: unknown) {
       setImportError(error instanceof Error ? error.message : 'Sync failed')
       setImportProgress(null)
     } finally {
       setIsSyncing(false)
+    }
+  }
+
+  const handleForceFullSync = async () => {
+    if (!window.confirm('This will DELETE all GitHub-imported tasks and sprints for this project, then re-import everything from scratch. Any manual edits to those tasks will be lost. Continue?')) return
+    setImportError('')
+    setImportSuccess('')
+    setImportProgress(null)
+    setIsForceFullSyncing(true)
+    try {
+      const result = await apiClient.githubSync(
+        projectId,
+        statusAssignments,
+        userAssignments,
+        syncStateFilter,
+        (evt) => setImportProgress(evt),
+        true // forceFullSync
+      )
+      setImportSuccess(`Full re-sync complete: ${result.created_tasks} tasks, ${result.created_comments} comments`)
+      setImportProgress(null)
+      loadGitHubSettings()
+      loadSyncLogs()
+    } catch (error: unknown) {
+      setImportError(error instanceof Error ? error.message : 'Force sync failed')
+      setImportProgress(null)
+    } finally {
+      setIsForceFullSyncing(false)
     }
   }
 
@@ -828,6 +903,10 @@ export default function ProjectSettings() {
         github_branch: githubSettings.github_branch,
         github_sync_enabled: githubSettings.github_sync_enabled,
         github_push_enabled: githubSettings.github_push_enabled,
+        github_project_url: githubSettings.github_project_url,
+        github_sync_interval: githubSettings.github_sync_interval,
+        github_sync_hour: githubSettings.github_sync_hour,
+        github_sync_day: githubSettings.github_sync_day,
       })
       setGithubSuccess('GitHub settings saved successfully')
     } catch (error: unknown) {
@@ -838,7 +917,9 @@ export default function ProjectSettings() {
   }
 
   return (
-    <div className="h-full flex flex-col bg-dark-bg-base">
+    <div className={embedded ? 'flex flex-col flex-1 overflow-hidden' : 'h-full flex flex-col bg-dark-bg-base'}>
+      {!embedded && (
+      <>
       {/* Project Header */}
       <div className="bg-dark-bg-secondary border-b border-dark-border-subtle">
         {/* Top bar with project info and actions */}
@@ -885,6 +966,8 @@ export default function ProjectSettings() {
           <div className="py-3"></div>
         </div>
       </div>
+      </>
+      )}
 
       <div className="flex-1 overflow-y-auto bg-dark-bg-primary py-8">
         <div className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8">
@@ -1388,15 +1471,21 @@ export default function ProjectSettings() {
               {!githubSettings.github_token_set ? (
                 /* --- Not connected --- */
                 <div className="py-4">
-                  <p className="text-sm text-dark-text-secondary mb-4">Connect this project to your GitHub account to pick a repository.</p>
-                  <Button onClick={handleConnectGitHub} disabled={isConnectingGitHub}>
-                    {isConnectingGitHub ? 'Redirecting...' : 'Connect with GitHub'}
-                  </Button>
+                  {isOwnerOrAdmin ? (
+                    <>
+                      <p className="text-sm text-dark-text-secondary mb-4">Connect this project to your GitHub account to pick a repository.</p>
+                      <Button onClick={handleConnectGitHub} disabled={isConnectingGitHub}>
+                        {isConnectingGitHub ? 'Redirecting...' : 'Connect with GitHub'}
+                      </Button>
+                    </>
+                  ) : (
+                    <p className="text-sm text-dark-text-secondary">GitHub is not connected for this project. Ask a project owner or admin to set up the integration.</p>
+                  )}
                 </div>
               ) : (
                 /* --- Connected --- */
                 <form onSubmit={handleSaveGitHub} className="space-y-4">
-                  {/* Connected as badge + disconnect */}
+                  {/* Connected as badge + disconnect (disconnect only for owners/admins) */}
                   <div className="flex items-center justify-between p-3 bg-success-500/10 border border-success-500/20 rounded-lg">
                     <div className="flex items-center gap-2">
                       <svg className="w-4 h-4 text-success-400" fill="currentColor" viewBox="0 0 20 20">
@@ -1406,14 +1495,16 @@ export default function ProjectSettings() {
                         Connected{githubSettings.github_login ? ` as @${githubSettings.github_login}` : ''}
                       </span>
                     </div>
-                    <button
-                      type="button"
-                      onClick={handleDisconnectGitHub}
-                      disabled={isDisconnectingGitHub}
-                      className="text-xs text-dark-text-tertiary hover:text-error-400 transition-colors"
-                    >
-                      {isDisconnectingGitHub ? 'Disconnecting...' : 'Disconnect'}
-                    </button>
+                    {isOwnerOrAdmin && (
+                      <button
+                        type="button"
+                        onClick={handleDisconnectGitHub}
+                        disabled={isDisconnectingGitHub}
+                        className="text-xs text-dark-text-tertiary hover:text-error-400 transition-colors"
+                      >
+                        {isDisconnectingGitHub ? 'Disconnecting...' : 'Disconnect'}
+                      </button>
+                    )}
                   </div>
 
                   {/* Repository picker */}
@@ -1458,6 +1549,15 @@ export default function ProjectSettings() {
                     helpText="The default branch to track (e.g., main, master, develop)"
                   />
 
+                  <TextInput
+                    label="GitHub Project URL (optional)"
+                    type="url"
+                    value={githubSettings.github_project_url}
+                    onChange={(e) => setGithubSettings({ ...githubSettings, github_project_url: e.target.value })}
+                    placeholder="https://github.com/orgs/my-org/projects/26"
+                    helpText="Paste the URL of your GitHub Projects board to pin exact status column sync. Without this, the first matching project is auto-detected."
+                  />
+
                   <div className="flex items-center gap-3 p-4 bg-dark-bg-secondary border border-dark-border-subtle rounded-lg">
                     <input
                       type="checkbox"
@@ -1471,6 +1571,71 @@ export default function ProjectSettings() {
                       <p className="text-sm text-dark-text-secondary mt-0.5">Automatically sync tasks with GitHub issues</p>
                     </label>
                   </div>
+
+                  {isOwnerOrAdmin && (
+                    <div className="flex items-center gap-3 p-4 bg-dark-bg-secondary border border-dark-border-subtle rounded-lg">
+                      <div className="flex-1">
+                        <span className="font-medium text-dark-text-primary">Auto-sync Interval</span>
+                        <p className="text-sm text-dark-text-secondary mt-0.5">Automatically run sync on a schedule</p>
+                      </div>
+                      <select
+                        value={githubSettings.github_sync_interval}
+                        onChange={(e) => setGithubSettings({ ...githubSettings, github_sync_interval: e.target.value })}
+                        className="text-sm bg-dark-bg-primary border border-dark-border-subtle text-dark-text-primary rounded-md px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-primary-500"
+                      >
+                        <option value="">Disabled</option>
+                        <option value="daily">Daily</option>
+                        <option value="weekly">Weekly</option>
+                        <option value="monthly">Monthly</option>
+                      </select>
+                    </div>
+                  )}
+
+                  {isOwnerOrAdmin && githubSettings.github_sync_interval && (
+                    <div className="flex items-center gap-3 p-4 bg-dark-bg-secondary border border-dark-border-subtle rounded-lg">
+                      <div className="flex-1">
+                        <span className="font-medium text-dark-text-primary">Sync Time (UTC)</span>
+                        <p className="text-sm text-dark-text-secondary mt-0.5">
+                          {githubSettings.github_sync_interval === 'daily' && `Runs daily at ${String(githubSettings.github_sync_hour).padStart(2,'0')}:00 UTC`}
+                          {githubSettings.github_sync_interval === 'weekly' && `Runs every ${['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'][githubSettings.github_sync_day]} at ${String(githubSettings.github_sync_hour).padStart(2,'0')}:00 UTC`}
+                          {githubSettings.github_sync_interval === 'monthly' && `Runs on the ${githubSettings.github_sync_day === 1 ? '1st' : githubSettings.github_sync_day === 2 ? '2nd' : githubSettings.github_sync_day === 3 ? '3rd' : `${githubSettings.github_sync_day}th`} at ${String(githubSettings.github_sync_hour).padStart(2,'0')}:00 UTC`}
+                        </p>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        {githubSettings.github_sync_interval === 'weekly' && (
+                          <select
+                            value={githubSettings.github_sync_day}
+                            onChange={(e) => setGithubSettings({ ...githubSettings, github_sync_day: +e.target.value })}
+                            className="text-sm bg-dark-bg-primary border border-dark-border-subtle text-dark-text-primary rounded-md px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-primary-500"
+                          >
+                            {['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'].map((d, i) => (
+                              <option key={i} value={i}>{d}</option>
+                            ))}
+                          </select>
+                        )}
+                        {githubSettings.github_sync_interval === 'monthly' && (
+                          <select
+                            value={githubSettings.github_sync_day}
+                            onChange={(e) => setGithubSettings({ ...githubSettings, github_sync_day: +e.target.value })}
+                            className="text-sm bg-dark-bg-primary border border-dark-border-subtle text-dark-text-primary rounded-md px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-primary-500"
+                          >
+                            {Array.from({length: 28}, (_, i) => i + 1).map(d => (
+                              <option key={d} value={d}>{d === 1 ? '1st' : d === 2 ? '2nd' : d === 3 ? '3rd' : `${d}th`}</option>
+                            ))}
+                          </select>
+                        )}
+                        <select
+                          value={githubSettings.github_sync_hour}
+                          onChange={(e) => setGithubSettings({ ...githubSettings, github_sync_hour: +e.target.value })}
+                          className="text-sm bg-dark-bg-primary border border-dark-border-subtle text-dark-text-primary rounded-md px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-primary-500"
+                        >
+                          {Array.from({length: 24}, (_, h) => (
+                            <option key={h} value={h}>{String(h).padStart(2,'0')}:00 UTC</option>
+                          ))}
+                        </select>
+                      </div>
+                    </div>
+                  )}
 
                   <div className="flex items-center gap-3 p-4 bg-dark-bg-secondary border border-dark-border-subtle rounded-lg">
                     <input
@@ -1486,9 +1651,11 @@ export default function ProjectSettings() {
                     </label>
                   </div>
 
-                  <Button type="submit" disabled={isSavingGitHub}>
-                    {isSavingGitHub ? 'Saving...' : 'Save Settings'}
-                  </Button>
+                  {isOwnerOrAdmin && (
+                    <Button type="submit" disabled={isSavingGitHub}>
+                      {isSavingGitHub ? 'Saving...' : 'Save Settings'}
+                    </Button>
+                  )}
                 </form>
               )}
 
@@ -1573,7 +1740,7 @@ export default function ProjectSettings() {
                                   className="text-sm bg-dark-bg-primary border border-dark-border-subtle text-dark-text-primary rounded-md px-2 py-1 focus:outline-none focus:ring-1 focus:ring-primary-500"
                                 >
                                   <option value={0}>Unassigned</option>
-                                  {teamMembers.map(m => (
+                                  {members.map(m => (
                                     <option key={m.user_id} value={m.user_id}>
                                       {m.name || m.email}
                                     </option>
@@ -1622,6 +1789,22 @@ export default function ProjectSettings() {
                               </div>
                             ))}
                           </div>
+                        </div>
+                      )}
+
+                      {/* Save mappings */}
+                      {(githubPreview.github_users.length > 0 || (githubPreview.statuses ?? []).length > 0) && (
+                        <div className="flex items-center gap-3">
+                          <button
+                            onClick={handleSaveMappings}
+                            disabled={isSavingMappings}
+                            className="px-3 py-1.5 text-xs font-medium bg-primary-600 hover:bg-primary-500 disabled:opacity-50 text-white rounded-lg transition-colors"
+                          >
+                            {isSavingMappings ? 'Saving...' : 'Save Mappings'}
+                          </button>
+                          {mappingsSaved && (
+                            <span className="text-xs text-success-400">Mappings saved — will be used for future syncs</span>
+                          )}
                         </div>
                       )}
 
@@ -1694,16 +1877,100 @@ export default function ProjectSettings() {
                     </div>
                   )}
 
-                  {/* Sync Now (shown after first sync, only for owners/admins) */}
-                  {githubSettings.github_last_sync && (
+                  {/* Persistent Sync Mappings — visible even without Preview */}
+                  {!githubPreview && (Object.keys(statusAssignments).length > 0 || Object.keys(userAssignments).length > 0) && (
+                    <div className="mt-4 pt-4 border-t border-dark-border-subtle space-y-4">
+                      <div className="flex items-center justify-between">
+                        <div>
+                          <h4 className="text-sm font-medium text-dark-text-primary">Sync Mappings</h4>
+                          <p className="text-xs text-dark-text-tertiary mt-0.5">Saved mappings used when syncing from GitHub</p>
+                        </div>
+                        <div className="flex items-center gap-3">
+                          <button
+                            onClick={handleSaveMappings}
+                            disabled={isSavingMappings}
+                            className="px-3 py-1.5 text-xs font-medium bg-primary-600 hover:bg-primary-500 disabled:opacity-50 text-white rounded-lg transition-colors"
+                          >
+                            {isSavingMappings ? 'Saving...' : 'Save Mappings'}
+                          </button>
+                          {mappingsSaved && (
+                            <span className="text-xs text-success-400">Saved!</span>
+                          )}
+                        </div>
+                      </div>
+                      {Object.keys(statusAssignments).length > 0 && (
+                        <div>
+                          <h5 className="text-xs font-medium text-dark-text-secondary uppercase tracking-wide mb-2">GitHub Status → Swim Lane</h5>
+                          <div className="space-y-2">
+                            {Object.entries(statusAssignments).map(([key, laneId]) => (
+                              <div key={key} className="flex items-center gap-3 p-2 bg-dark-bg-secondary border border-dark-border-subtle rounded-lg">
+                                <span className="flex-1 text-sm text-dark-text-primary font-mono">{key}</span>
+                                <select
+                                  value={laneId ?? 0}
+                                  onChange={(e) => setStatusAssignments(prev => ({ ...prev, [key]: Number(e.target.value) }))}
+                                  className="text-sm bg-dark-bg-primary border border-dark-border-subtle text-dark-text-primary rounded-md px-2 py-1 focus:outline-none focus:ring-1 focus:ring-primary-500"
+                                >
+                                  <option value={0}>Default (by category)</option>
+                                  {swimLanes.map(l => (
+                                    <option key={l.id} value={l.id}>{l.name}</option>
+                                  ))}
+                                </select>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+                      {Object.keys(userAssignments).length > 0 && (
+                        <div>
+                          <h5 className="text-xs font-medium text-dark-text-secondary uppercase tracking-wide mb-2">GitHub User → TaskAI User</h5>
+                          <div className="space-y-2">
+                            {Object.entries(userAssignments).map(([login, userId]) => (
+                              <div key={login} className="flex items-center gap-3 p-2 bg-dark-bg-secondary border border-dark-border-subtle rounded-lg">
+                                <span className="flex-1 text-sm text-dark-text-primary font-mono">@{login}</span>
+                                <select
+                                  value={userId ?? 0}
+                                  onChange={(e) => setUserAssignments(prev => ({ ...prev, [login]: Number(e.target.value) }))}
+                                  className="text-sm bg-dark-bg-primary border border-dark-border-subtle text-dark-text-primary rounded-md px-2 py-1 focus:outline-none focus:ring-1 focus:ring-primary-500"
+                                >
+                                  <option value={0}>Unassigned</option>
+                                  {members.map(u => (
+                                    <option key={u.user_id} value={u.user_id}>{u.name || u.email}</option>
+                                  ))}
+                                </select>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  )}
+
+                  {/* Sync Now (shown after first sync, owners/admins only) */}
+                  {githubSettings.github_last_sync && isOwnerOrAdmin && (
                     <div className="mt-4 pt-4 border-t border-dark-border-subtle space-y-3">
-                      <div className="flex items-center gap-4">
+                      <div className="flex flex-wrap items-center gap-3">
                         <span className="text-sm text-dark-text-secondary">
                           Last synced: {new Date(githubSettings.github_last_sync).toLocaleString()}
                         </span>
-                        <Button onClick={handleSyncNow} disabled={isSyncing} variant="secondary" size="sm">
-                          {isSyncing ? 'Syncing...' : 'Sync Now'}
-                        </Button>
+                        <div className="flex items-center gap-2 ml-auto">
+                          <label className="text-xs text-dark-text-tertiary">Sync:</label>
+                          <select
+                            value={syncStateFilter}
+                            onChange={e => setSyncStateFilter(e.target.value as 'open' | 'closed' | 'all')}
+                            disabled={isSyncing}
+                            className="text-xs bg-dark-bg-primary border border-dark-border-subtle text-dark-text-primary rounded-md px-2 py-1 focus:outline-none focus:ring-1 focus:ring-primary-500"
+                          >
+                            <option value="open">Open issues only</option>
+                            <option value="all">All issues</option>
+                            <option value="closed">Closed issues only</option>
+                          </select>
+                          <Button onClick={handleSyncNow} disabled={isSyncing || isForceFullSyncing} variant="secondary" size="sm">
+                            {isSyncing ? 'Syncing...' : 'Sync Now'}
+                          </Button>
+                          <Button onClick={handleForceFullSync} disabled={isSyncing || isForceFullSyncing} variant="danger" size="sm" title="Delete all GitHub-imported tasks and re-import from scratch">
+                            {isForceFullSyncing ? 'Rebuilding...' : 'Force Full Sync'}
+                          </Button>
+                        </div>
                       </div>
                       {isSyncing && importProgress && (
                         <div className="p-3 bg-dark-bg-secondary border border-dark-border-subtle rounded-lg">
@@ -1758,6 +2025,36 @@ export default function ProjectSettings() {
                       )}
                     </div>
                   )}
+                </div>
+              )}
+
+              {/* Sync History */}
+              {syncLogs.length > 0 && (
+                <div className="mt-6 pt-6 border-t border-dark-border-subtle">
+                  <h3 className="text-sm font-semibold text-dark-text-primary mb-3">Sync History</h3>
+                  <div className="space-y-1.5">
+                    {syncLogs.map((log) => (
+                      <div key={log.id} className="flex items-center gap-3 p-2.5 bg-dark-bg-secondary rounded-lg text-xs">
+                        <span className="text-dark-text-tertiary shrink-0">
+                          {new Date(log.started_at).toLocaleString()}
+                        </span>
+                        <span className={`px-1.5 py-0.5 rounded text-xs font-medium shrink-0 ${log.triggered_by === 'auto' ? 'bg-blue-500/20 text-blue-300' : 'bg-gray-500/20 text-gray-300'}`}>
+                          {log.triggered_by}
+                        </span>
+                        <span className={`px-1.5 py-0.5 rounded text-xs font-medium shrink-0 ${log.status === 'success' ? 'bg-success-500/20 text-success-300' : log.status === 'failed' ? 'bg-red-500/20 text-red-300' : 'bg-yellow-500/20 text-yellow-300'}`}>
+                          {log.status}
+                        </span>
+                        {log.status !== 'running' && (
+                          <span className="text-dark-text-secondary">
+                            +{log.created_tasks} created · {log.updated_tasks} updated · {log.created_comments} comments
+                          </span>
+                        )}
+                        {log.error_message && (
+                          <span className="text-red-400 truncate" title={log.error_message}>{log.error_message}</span>
+                        )}
+                      </div>
+                    ))}
+                  </div>
                 </div>
               )}
             </div>

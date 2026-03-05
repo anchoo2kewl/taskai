@@ -27,6 +27,9 @@ const mocks = vi.hoisted(() => ({
   updateSwimLane: vi.fn(),
   deleteSwimLane: vi.fn(),
   getStorageUsage: vi.fn(),
+  getProjectInvitations: vi.fn(),
+  githubGetMappings: vi.fn(),
+  githubSaveMappings: vi.fn(),
 }))
 
 vi.mock('../lib/api', () => ({
@@ -82,9 +85,12 @@ describe('ProjectSettings', () => {
       github_last_sync: null,
       github_token_set: false,
       github_login: null,
+      github_project_url: '',
     })
     mocks.getSwimLanes.mockResolvedValue(swimLanes)
     mocks.getStorageUsage.mockResolvedValue([])
+    mocks.getProjectInvitations.mockResolvedValue([])
+    mocks.githubGetMappings.mockResolvedValue({ status_mappings: {}, user_mappings: {} })
   })
 
   it('renders page heading', async () => {

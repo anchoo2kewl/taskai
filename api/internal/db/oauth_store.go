@@ -15,6 +15,7 @@ import (
 
 	"taskai/ent"
 	"taskai/ent/invite"
+	"taskai/ent/teaminvitation"
 )
 
 // OAuthStore implements gologin.UserStore using the Ent ORM and raw SQL for
@@ -218,7 +219,64 @@ func (s *OAuthStore) CreateOAuthUser(ctx context.Context, info gologin.ProviderU
 		zap.String("provider", provider),
 	)
 
+	// Auto-accept any pending team invitation linked to this invite code
+	s.acceptPendingTeamInvitation(ctx, inviteCode, newUser.ID)
+
 	return &gologin.User{ID: newUser.ID, Email: newUser.Email}, nil
+}
+
+// acceptPendingTeamInvitation looks up a TeamInvitation by invite_code and auto-accepts it.
+// Errors are logged but do not fail the signup.
+func (s *OAuthStore) acceptPendingTeamInvitation(ctx context.Context, inviteCode string, newUserID int64) {
+	entInv, err := s.db.Client.TeamInvitation.Query().
+		Where(
+			teaminvitation.InviteCode(inviteCode),
+			teaminvitation.Status("pending"),
+		).
+		Only(ctx)
+	if err != nil {
+		return // not found or already accepted
+	}
+
+	now := time.Now()
+	tx, err := s.db.Client.Tx(ctx)
+	if err != nil {
+		s.logger.Error("oauth_store: acceptPendingTeamInvitation: begin tx failed", zap.Error(err))
+		return
+	}
+	defer tx.Rollback()
+
+	_, err = tx.TeamInvitation.UpdateOneID(entInv.ID).
+		SetStatus("accepted").
+		SetInviteeID(newUserID).
+		SetRespondedAt(now).
+		Save(ctx)
+	if err != nil {
+		s.logger.Error("oauth_store: acceptPendingTeamInvitation: update failed", zap.Error(err))
+		return
+	}
+
+	_, err = tx.TeamMember.Create().
+		SetTeamID(entInv.TeamID).
+		SetUserID(newUserID).
+		SetRole("member").
+		SetStatus("active").
+		Save(ctx)
+	if err != nil {
+		s.logger.Error("oauth_store: acceptPendingTeamInvitation: create member failed", zap.Error(err))
+		return
+	}
+
+	if err := tx.Commit(); err != nil {
+		s.logger.Error("oauth_store: acceptPendingTeamInvitation: commit failed", zap.Error(err))
+		return
+	}
+
+	s.logger.Info("OAuth signup: team invitation auto-accepted",
+		zap.Int64("invitation_id", entInv.ID),
+		zap.Int64("team_id", entInv.TeamID),
+		zap.Int64("new_user_id", newUserID),
+	)
 }
 
 // ValidateInviteCode checks whether the given invite code is valid.
@@ -250,6 +308,35 @@ func (s *OAuthStore) ValidateInviteCode(ctx context.Context, code string) (*golo
 		info.ExpiresAt = *inv.ExpiresAt
 	}
 	return info, nil
+}
+
+// LinkOAuthProvider links a new OAuth provider to an existing user account.
+// It is idempotent: if the provider is already linked, it updates the provider_user_id
+// and returns the user. This enables users to sign in with any provider whose
+// email matches their account.
+func (s *OAuthStore) LinkOAuthProvider(ctx context.Context, userID int64, provider, providerUserID string) (*gologin.User, error) {
+	// Upsert: insert or update so the provider_user_id is always current.
+	_, err := s.db.ExecContext(ctx,
+		s.db.Rebind(`INSERT INTO oauth_providers (user_id, provider, provider_user_id)
+			VALUES (?, ?, ?)
+			ON CONFLICT(user_id, provider) DO UPDATE SET provider_user_id = excluded.provider_user_id`),
+		userID, provider, providerUserID,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("oauth_store: LinkOAuthProvider: upsert provider: %w", err)
+	}
+
+	entUser, err := s.db.Client.User.Get(ctx, userID)
+	if err != nil {
+		return nil, fmt.Errorf("oauth_store: LinkOAuthProvider: fetch user: %w", err)
+	}
+
+	s.logger.Info("OAuth provider linked",
+		zap.Int64("user_id", userID),
+		zap.String("provider", provider),
+	)
+
+	return &gologin.User{ID: entUser.ID, Email: entUser.Email}, nil
 }
 
 // randomPlaceholderHash generates a random bcrypt hash to use as a placeholder

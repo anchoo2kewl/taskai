@@ -35,6 +35,10 @@ type ProjectGitHubSettings struct {
 	LastSync     *time.Time `json:"github_last_sync"`
 	TokenSet     bool       `json:"github_token_set"`
 	Login        *string    `json:"github_login"`
+	ProjectURL   string     `json:"github_project_url"`   // optional explicit GitHub Projects V2 URL
+	SyncInterval string     `json:"github_sync_interval"` // 'daily','weekly','monthly', '' = disabled
+	SyncHour     int        `json:"github_sync_hour"`     // 0-23
+	SyncDay      int        `json:"github_sync_day"`      // weekly: 0-6 (Sun=0), monthly: 1-28
 }
 
 // AddMemberRequest represents a request to add a member to a project
@@ -50,13 +54,17 @@ type UpdateMemberRoleRequest struct {
 
 // UpdateProjectGitHubRequest represents a request to update GitHub settings
 type UpdateProjectGitHubRequest struct {
-	RepoURL     string `json:"github_repo_url"`
-	Owner       string `json:"github_owner"`
-	RepoName    string `json:"github_repo_name"`
-	Branch      string `json:"github_branch"`
-	SyncEnabled bool   `json:"github_sync_enabled"`
-	PushEnabled bool   `json:"github_push_enabled"`
-	Token       string `json:"github_token"`
+	RepoURL      string `json:"github_repo_url"`
+	Owner        string `json:"github_owner"`
+	RepoName     string `json:"github_repo_name"`
+	Branch       string `json:"github_branch"`
+	SyncEnabled  bool   `json:"github_sync_enabled"`
+	PushEnabled  bool   `json:"github_push_enabled"`
+	Token        string `json:"github_token"`
+	ProjectURL   string `json:"github_project_url"`   // optional explicit GitHub Projects V2 URL
+	SyncInterval string `json:"github_sync_interval"` // 'daily','weekly','monthly', '' = disabled
+	SyncHour     int    `json:"github_sync_hour"`     // 0-23
+	SyncDay      int    `json:"github_sync_day"`      // weekly: 0-6 (Sun=0), monthly: 1-28
 }
 
 // HandleGetProjectMembers returns all members of a project
@@ -398,6 +406,8 @@ func (s *Server) HandleGetProjectGitHubSettings(w http.ResponseWriter, r *http.R
 	var lastSync sql.NullTime
 	var token sql.NullString
 	var loginNull sql.NullString
+	var projectURLNull sql.NullString
+	var syncIntervalNull sql.NullString
 
 	err = s.db.QueryRow(`
 		SELECT
@@ -409,7 +419,11 @@ func (s *Server) HandleGetProjectGitHubSettings(w http.ResponseWriter, r *http.R
 			github_push_enabled,
 			github_last_sync,
 			github_token,
-			github_login
+			github_login,
+			github_project_url,
+			COALESCE(github_sync_interval, ''),
+			COALESCE(github_sync_hour, 0),
+			COALESCE(github_sync_day, 0)
 		FROM projects
 		WHERE id = $1
 	`, projectID).Scan(
@@ -422,6 +436,10 @@ func (s *Server) HandleGetProjectGitHubSettings(w http.ResponseWriter, r *http.R
 		&lastSync,
 		&token,
 		&loginNull,
+		&projectURLNull,
+		&syncIntervalNull,
+		&settings.SyncHour,
+		&settings.SyncDay,
 	)
 
 	if err != nil {
@@ -437,6 +455,10 @@ func (s *Server) HandleGetProjectGitHubSettings(w http.ResponseWriter, r *http.R
 	if loginNull.Valid && loginNull.String != "" {
 		settings.Login = &loginNull.String
 	}
+	if projectURLNull.Valid {
+		settings.ProjectURL = projectURLNull.String
+	}
+	settings.SyncInterval = syncIntervalNull.String
 
 	respondJSON(w, http.StatusOK, settings)
 }
@@ -471,6 +493,7 @@ func (s *Server) HandleUpdateProjectGitHubSettings(w http.ResponseWriter, r *htt
 		http.Error(w, "Invalid request body", http.StatusBadRequest)
 		return
 	}
+	req.ProjectURL = strings.TrimSpace(req.ProjectURL)
 
 	if req.Token != "" {
 		_, err = s.db.Exec(`
@@ -482,9 +505,13 @@ func (s *Server) HandleUpdateProjectGitHubSettings(w http.ResponseWriter, r *htt
 				github_branch = $4,
 				github_sync_enabled = $5,
 				github_push_enabled = $6,
-				github_token = $7
-			WHERE id = $8
-		`, req.RepoURL, req.Owner, req.RepoName, req.Branch, req.SyncEnabled, req.PushEnabled, req.Token, projectID)
+				github_token = $7,
+				github_project_url = NULLIF($8, ''),
+				github_sync_interval = NULLIF($9, ''),
+				github_sync_hour = $10,
+				github_sync_day = $11
+			WHERE id = $12
+		`, req.RepoURL, req.Owner, req.RepoName, req.Branch, req.SyncEnabled, req.PushEnabled, req.Token, req.ProjectURL, req.SyncInterval, req.SyncHour, req.SyncDay, projectID)
 	} else {
 		_, err = s.db.Exec(`
 			UPDATE projects
@@ -494,9 +521,13 @@ func (s *Server) HandleUpdateProjectGitHubSettings(w http.ResponseWriter, r *htt
 				github_repo_name = $3,
 				github_branch = $4,
 				github_sync_enabled = $5,
-				github_push_enabled = $6
-			WHERE id = $7
-		`, req.RepoURL, req.Owner, req.RepoName, req.Branch, req.SyncEnabled, req.PushEnabled, projectID)
+				github_push_enabled = $6,
+				github_project_url = NULLIF($7, ''),
+				github_sync_interval = NULLIF($8, ''),
+				github_sync_hour = $9,
+				github_sync_day = $10
+			WHERE id = $11
+		`, req.RepoURL, req.Owner, req.RepoName, req.Branch, req.SyncEnabled, req.PushEnabled, req.ProjectURL, req.SyncInterval, req.SyncHour, req.SyncDay, projectID)
 	}
 
 	if err != nil {

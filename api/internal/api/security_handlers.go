@@ -43,7 +43,8 @@ type BackupCode struct {
 	Hash string `json:"hash"`
 }
 
-// HandleChangePassword allows users to change their password
+// HandleChangePassword allows users to change (or set for the first time) their password.
+// OAuth-only users (has_password=false) can skip current_password verification.
 func (s *Server) HandleChangePassword(w http.ResponseWriter, r *http.Request) {
 	userID, ok := GetUserID(r)
 	if !ok {
@@ -63,19 +64,27 @@ func (s *Server) HandleChangePassword(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Get current password hash
-	var currentHash string
-	err := s.db.QueryRow("SELECT password_hash FROM users WHERE id = $1", userID).Scan(&currentHash)
+	// Get current password hash and auth_provider
+	var currentHash, authProvider string
+	err := s.db.QueryRow(
+		s.db.Rebind(`SELECT password_hash, auth_provider FROM users WHERE id = ? LIMIT 1`),
+		userID,
+	).Scan(&currentHash, &authProvider)
 	if err != nil {
 		http.Error(w, "User not found", http.StatusNotFound)
 		return
 	}
 
-	// Verify current password
-	if err := bcrypt.CompareHashAndPassword([]byte(currentHash), []byte(req.CurrentPassword)); err != nil {
-		http.Error(w, "Current password is incorrect", http.StatusUnauthorized)
-		return
+	hasPassword := authProvider == "password"
+
+	if hasPassword {
+		// Existing password users must verify their current password
+		if err := bcrypt.CompareHashAndPassword([]byte(currentHash), []byte(req.CurrentPassword)); err != nil {
+			http.Error(w, "Current password is incorrect", http.StatusUnauthorized)
+			return
+		}
 	}
+	// OAuth-only users skip current password verification
 
 	// Hash new password
 	newHash, err := bcrypt.GenerateFromPassword([]byte(req.NewPassword), bcrypt.DefaultCost)
@@ -84,9 +93,11 @@ func (s *Server) HandleChangePassword(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Update password
-	_, err = s.db.Exec("UPDATE users SET password_hash = $1, password_changed_at = $2 WHERE id = $3",
-		string(newHash), time.Now(), userID)
+	// Update password (and mark auth_provider as "password" for OAuth users setting one for the first time)
+	_, err = s.db.Exec(
+		s.db.Rebind(`UPDATE users SET password_hash = ?, password_changed_at = ?, auth_provider = 'password' WHERE id = ?`),
+		string(newHash), time.Now(), userID,
+	)
 	if err != nil {
 		http.Error(w, "Failed to update password", http.StatusInternalServerError)
 		return

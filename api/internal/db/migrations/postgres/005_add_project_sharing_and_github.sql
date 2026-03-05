@@ -13,12 +13,12 @@ CREATE TABLE project_members (
     id BIGSERIAL PRIMARY KEY,
     project_id BIGINT NOT NULL,
     user_id BIGINT NOT NULL,
-    role TEXT NOT NULL CHECK(role IN ('viewer', 'editor', 'admin')) DEFAULT 'viewer',
-    added_by BIGINT NOT NULL,
-    created_at TIMESTAMPTZ DEFAULT NOW(),
+    role TEXT NOT NULL DEFAULT 'viewer',
+    granted_by BIGINT NOT NULL,
+    granted_at TIMESTAMPTZ DEFAULT NOW(),
     FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE,
     FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
-    FOREIGN KEY (added_by) REFERENCES users(id),
+    FOREIGN KEY (granted_by) REFERENCES users(id),
     UNIQUE(project_id, user_id)
 );
 

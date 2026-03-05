@@ -36,6 +36,7 @@ interface GitHubSettings {
   github_last_sync: string | null
   github_token_set: boolean
   github_login: string | null
+  github_project_url: string
 }
 
 // ── GitHub-style filter bar ───────────────────────────────────────────────────
@@ -288,6 +289,7 @@ export default function ProjectSettings({ embedded, projectIdOverride }: Project
     github_last_sync: null,
     github_token_set: false,
     github_login: null,
+    github_project_url: '',
   })
   const [githubError, setGithubError] = useState('')
   const [githubSuccess, setGithubSuccess] = useState('')
@@ -854,6 +856,7 @@ export default function ProjectSettings({ embedded, projectIdOverride }: Project
         github_branch: githubSettings.github_branch,
         github_sync_enabled: githubSettings.github_sync_enabled,
         github_push_enabled: githubSettings.github_push_enabled,
+        github_project_url: githubSettings.github_project_url,
       })
       setGithubSuccess('GitHub settings saved successfully')
     } catch (error: unknown) {
@@ -1494,6 +1497,15 @@ export default function ProjectSettings({ embedded, projectIdOverride }: Project
                     onChange={(e) => setGithubSettings({ ...githubSettings, github_branch: e.target.value })}
                     placeholder="main"
                     helpText="The default branch to track (e.g., main, master, develop)"
+                  />
+
+                  <TextInput
+                    label="GitHub Project URL (optional)"
+                    type="url"
+                    value={githubSettings.github_project_url}
+                    onChange={(e) => setGithubSettings({ ...githubSettings, github_project_url: e.target.value })}
+                    placeholder="https://github.com/orgs/my-org/projects/26"
+                    helpText="Paste the URL of your GitHub Projects board to pin exact status column sync. Without this, the first matching project is auto-detected."
                   />
 
                   <div className="flex items-center gap-3 p-4 bg-dark-bg-secondary border border-dark-border-subtle rounded-lg">

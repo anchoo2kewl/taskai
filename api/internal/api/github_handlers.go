@@ -575,17 +575,121 @@ func (s *Server) loadSwimLaneInfos(ctx context.Context, projectID int) ([]swimLa
 	return lanes, nil
 }
 
-// loadGitHubConfig loads owner, repo, and token for a project.
-func (s *Server) loadGitHubConfig(projectID int) (owner, repo, token string, err error) {
-	var tokenNull sql.NullString
+// loadGitHubConfig loads owner, repo, token, and optional project URL for a project.
+func (s *Server) loadGitHubConfig(projectID int) (owner, repo, token, projectURL string, err error) {
+	var tokenNull, projectURLNull sql.NullString
 	err = s.db.QueryRow(`
-		SELECT COALESCE(github_owner,''), COALESCE(github_repo_name,''), github_token
+		SELECT COALESCE(github_owner,''), COALESCE(github_repo_name,''), github_token, github_project_url
 		FROM projects WHERE id = $1
-	`, projectID).Scan(&owner, &repo, &tokenNull)
+	`, projectID).Scan(&owner, &repo, &tokenNull, &projectURLNull)
 	if tokenNull.Valid {
 		token = tokenNull.String
 	}
+	if projectURLNull.Valid {
+		projectURL = projectURLNull.String
+	}
 	return
+}
+
+// fetchProjectByURL fetches GitHub Projects V2 info for an explicit project URL.
+// Supports https://github.com/orgs/{org}/projects/{num} and
+//          https://github.com/users/{user}/projects/{num}
+func fetchProjectByURL(ctx context.Context, token, projectURL string) (*ghProjectInfo, error) {
+	// Parse: https://github.com/{orgs|users}/{name}/projects/{number}
+	parts := strings.Split(strings.TrimPrefix(projectURL, "https://github.com/"), "/")
+	if len(parts) < 4 || parts[2] != "projects" {
+		return nil, fmt.Errorf("invalid GitHub project URL: %s", projectURL)
+	}
+	ownerType := parts[0] // "orgs" or "users"
+	name := parts[1]
+	number, err := strconv.Atoi(parts[3])
+	if err != nil {
+		return nil, fmt.Errorf("invalid project number in URL: %s", projectURL)
+	}
+
+	var q string
+	var vars map[string]interface{}
+	if ownerType == "orgs" {
+		q = `query($org: String!, $number: Int!) {
+  organization(login: $org) {
+    projectV2(number: $number) {
+      id
+      fields(first: 20) {
+        nodes {
+          ... on ProjectV2SingleSelectField { id name options { id name } }
+        }
+      }
+    }
+  }
+}`
+		vars = map[string]interface{}{"org": name, "number": number}
+	} else {
+		q = `query($login: String!, $number: Int!) {
+  user(login: $login) {
+    projectV2(number: $number) {
+      id
+      fields(first: 20) {
+        nodes {
+          ... on ProjectV2SingleSelectField { id name options { id name } }
+        }
+      }
+    }
+  }
+}`
+		vars = map[string]interface{}{"login": name, "number": number}
+	}
+
+	var result struct {
+		Data struct {
+			Organization *struct {
+				ProjectV2 *ghProjectV2 `json:"projectV2"`
+			} `json:"organization"`
+			User *struct {
+				ProjectV2 *ghProjectV2 `json:"projectV2"`
+			} `json:"user"`
+		} `json:"data"`
+		Errors []struct {
+			Message string `json:"message"`
+		} `json:"errors"`
+	}
+	if err := fetchGitHubGraphQL(ctx, token, q, vars, &result); err != nil {
+		return nil, err
+	}
+	if len(result.Errors) > 0 {
+		return nil, fmt.Errorf("graphql: %s", result.Errors[0].Message)
+	}
+
+	var proj *ghProjectV2
+	if result.Data.Organization != nil {
+		proj = result.Data.Organization.ProjectV2
+	} else if result.Data.User != nil {
+		proj = result.Data.User.ProjectV2
+	}
+	if proj == nil {
+		return nil, fmt.Errorf("project not found at URL: %s", projectURL)
+	}
+
+	var best *ghProjectField
+	for i := range proj.Fields.Nodes {
+		f := &proj.Fields.Nodes[i]
+		if len(f.Options) == 0 {
+			continue
+		}
+		lower := strings.ToLower(f.Name)
+		if strings.Contains(lower, "status") || strings.Contains(lower, "stage") ||
+			strings.Contains(lower, "state") || strings.Contains(lower, "phase") ||
+			strings.Contains(lower, "column") {
+			best = f
+			break
+		}
+		if best == nil {
+			best = f
+		}
+	}
+	if best == nil {
+		return nil, fmt.Errorf("no single-select status field found in project")
+	}
+	return &ghProjectInfo{ProjectID: proj.ID, FieldID: best.ID, Options: best.Options}, nil
 }
 
 // --- Handlers ---
@@ -615,7 +719,7 @@ func (s *Server) HandleGitHubPreview(w http.ResponseWriter, r *http.Request) {
 	var req GitHubPreviewRequest
 	_ = json.NewDecoder(r.Body).Decode(&req)
 
-	owner, repo, storedToken, err := s.loadGitHubConfig(projectID)
+	owner, repo, storedToken, projectURL, err := s.loadGitHubConfig(projectID)
 	if err != nil {
 		http.Error(w, "Failed to load project config", http.StatusInternalServerError)
 		return
@@ -787,9 +891,16 @@ func (s *Server) HandleGitHubPreview(w http.ResponseWriter, r *http.Request) {
 	lanes, _ := s.loadSwimLaneInfos(fetchCtx, projectID)
 
 	// Try to fetch GitHub Projects V2 column names (best-effort, ordered)
+	// Use explicit project URL if configured; otherwise auto-detect.
 	var projColNames []string
-	if projInfo, err := fetchProjectStatusColumns(fetchCtx, token, owner, repo); err == nil && projInfo != nil {
-		for _, opt := range projInfo.Options {
+	var previewProjInfo *ghProjectInfo
+	if projectURL != "" {
+		previewProjInfo, _ = fetchProjectByURL(fetchCtx, token, projectURL)
+	} else {
+		previewProjInfo, _ = fetchProjectStatusColumns(fetchCtx, token, owner, repo)
+	}
+	if previewProjInfo != nil {
+		for _, opt := range previewProjInfo.Options {
 			projColNames = append(projColNames, opt.Name)
 		}
 	}
@@ -929,7 +1040,7 @@ func (s *Server) handleGitHubImport(w http.ResponseWriter, r *http.Request, doUp
 	req.StatusAssignments, req.UserAssignments = s.loadSavedGitHubMappings(
 		r.Context(), int64(projectID), req.StatusAssignments, req.UserAssignments)
 
-	owner, repo, storedToken, err := s.loadGitHubConfig(projectID)
+	owner, repo, storedToken, projectURL, err := s.loadGitHubConfig(projectID)
 	if err != nil {
 		http.Error(w, "Failed to load project config", http.StatusInternalServerError)
 		return
@@ -1193,8 +1304,21 @@ func (s *Server) handleGitHubImport(w http.ResponseWriter, r *http.Request, doUp
 		}
 
 		// Fetch GitHub Projects V2 issue→column+itemID map (best-effort; ignore errors)
+		// Use the explicit project URL if configured; otherwise auto-detect from repo/org.
 		issueColumnMap := map[int]ghProjectItemStatus{}
-		if projInfo, err := fetchProjectStatusColumns(ctx, token, owner, repo); err == nil && projInfo != nil {
+		var projInfo *ghProjectInfo
+		if projectURL != "" {
+			if pi, piErr := fetchProjectByURL(ctx, token, projectURL); piErr == nil {
+				projInfo = pi
+			} else {
+				s.logger.Warn("Failed to fetch GitHub project by URL", zap.String("url", projectURL), zap.Error(piErr))
+			}
+		} else {
+			if pi, piErr := fetchProjectStatusColumns(ctx, token, owner, repo); piErr == nil {
+				projInfo = pi
+			}
+		}
+		if projInfo != nil {
 			// Persist project/field IDs so push operations can use them later
 			_, _ = s.db.ExecContext(ctx,
 				s.db.Rebind(`UPDATE projects SET github_project_id = ?, github_status_field_id = ? WHERE id = ?`),
@@ -1860,7 +1984,7 @@ func (s *Server) HandleGitHubPushAll(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	owner, repo, token, err := s.loadGitHubConfig(projectID)
+	owner, repo, token, _, err := s.loadGitHubConfig(projectID)
 	if err != nil || owner == "" || repo == "" || token == "" {
 		respondError(w, http.StatusBadRequest, "GitHub not configured for this project", "missing_config")
 		return

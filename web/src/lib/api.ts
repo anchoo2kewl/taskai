@@ -179,6 +179,7 @@ export interface ProjectGitHubSettings {
   github_last_sync: string | null
   github_token_set: boolean
   github_login: string | null
+  github_project_url: string  // optional explicit GitHub Projects V2 URL
 }
 
 export interface GitHubRepo {

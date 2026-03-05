@@ -1,5 +1,6 @@
 import { useEffect, useState, useCallback, useRef } from 'react'
 import { WikiPage, WikiPageVersion, WikiPageVersionWithContent, apiClient } from '../lib/api'
+import { useAuth } from '../state/AuthContext'
 import SearchSelect from './ui/SearchSelect'
 import ImagePickerModal from './ImagePickerModal'
 import * as Y from 'yjs'
@@ -814,6 +815,7 @@ function PreviewContent({ previewHTML, content, previewRef }: Readonly<{
 // ── Component ────────────────────────────────────────────────────
 
 export default function WikiEditor({ page }: Readonly<WikiEditorProps>) {
+  const { user } = useAuth()
   const [content, setContent] = useState('')
   const [isPreview, setIsPreview] = useState(true)
   const [previewHTML, setPreviewHTML] = useState('')
@@ -839,6 +841,12 @@ export default function WikiEditor({ page }: Readonly<WikiEditorProps>) {
   const previewRef = useRef<HTMLDivElement>(null)
   const fsPreviewRef = useRef<HTMLDivElement>(null)
   const [fsSplitPct, setFsSplitPct] = useState(50)
+
+  // ── Page metadata (creator / last editor) ────────────────────
+  const [lastEditedBy, setLastEditedBy] = useState<string | null>(
+    page.updater_name ?? page.creator_name ?? null,
+  )
+  const [lastEditedAt, setLastEditedAt] = useState<string>(page.updated_at)
 
   // ── Version history state ─────────────────────────────────────
   const [showVersionHistory, setShowVersionHistory] = useState(false)
@@ -872,17 +880,19 @@ export default function WikiEditor({ page }: Readonly<WikiEditorProps>) {
     isSavingRef.current = true
     setSaveStatus('saving')
     try {
-      await apiClient.updateWikiPageContent(page.id, current, manualSave)
+      const result = await apiClient.updateWikiPageContent(page.id, current, manualSave)
       lastSavedContentRef.current = current
       isDirtyRef.current = false
       setSaveStatus('saved')
+      setLastEditedBy(user?.name ?? null)
+      setLastEditedAt(result.updated_at)
       setTimeout(() => setSaveStatus(clearSavedStatus), 3000)
     } catch {
       setSaveStatus('error')
     } finally {
       isSavingRef.current = false
     }
-  }, [page.id])
+  }, [page.id, user?.name])
 
   useAutoSave(page.id, autoSaveEnabled, saveNow, isDirtyRef, contentRef, lastSavedContentRef)
 
@@ -1209,11 +1219,13 @@ export default function WikiEditor({ page }: Readonly<WikiEditorProps>) {
       setShowVersionHistory(false)
       setViewingVersion(null)
       setSaveStatus('saved')
+      setLastEditedBy(user?.name ?? null)
+      setLastEditedAt(data.updated_at)
       setTimeout(() => setSaveStatus(clearSavedStatus), 3000)
     } catch {
       // ignore
     }
-  }, [page.id])
+  }, [page.id, user?.name])
 
   // ── Fullscreen overlay ───────────────────────────────────────
 
@@ -1320,6 +1332,20 @@ export default function WikiEditor({ page }: Readonly<WikiEditorProps>) {
             <div className="flex items-center justify-between">
               <div>
                 <h1 className="text-2xl font-semibold text-dark-text-primary">{page.title}</h1>
+                <div className="flex items-center gap-2 mt-1 text-xs text-dark-text-tertiary">
+                  {page.creator_name && (
+                    <span>Created by <span className="text-dark-text-secondary">{page.creator_name}</span> · {new Date(page.created_at).toLocaleDateString()}</span>
+                  )}
+                  {(lastEditedBy || lastEditedAt) && (
+                    <>
+                      <span className="text-dark-border-subtle">·</span>
+                      <span>
+                        Last edited{lastEditedBy ? <> by <span className="text-dark-text-secondary">{lastEditedBy}</span></> : ''}{' '}
+                        · {new Date(lastEditedAt).toLocaleString()}
+                      </span>
+                    </>
+                  )}
+                </div>
                 <div className="flex items-center gap-3 mt-2">
                   <div className="flex items-center gap-2">
                     <div className={`w-2 h-2 rounded-full ${getSaveStatusColor(saveStatus, syncState)}`} />

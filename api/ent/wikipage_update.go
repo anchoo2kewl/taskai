@@ -12,6 +12,7 @@ import (
 	"taskai/ent/user"
 	"taskai/ent/wikiblock"
 	"taskai/ent/wikipage"
+	"taskai/ent/wikipageversion"
 	"taskai/ent/yjsupdate"
 	"time"
 
@@ -89,6 +90,26 @@ func (_u *WikiPageUpdate) SetNillableCreatedBy(v *int64) *WikiPageUpdate {
 	return _u
 }
 
+// SetUpdatedBy sets the "updated_by" field.
+func (_u *WikiPageUpdate) SetUpdatedBy(v int64) *WikiPageUpdate {
+	_u.mutation.SetUpdatedBy(v)
+	return _u
+}
+
+// SetNillableUpdatedBy sets the "updated_by" field if the given value is not nil.
+func (_u *WikiPageUpdate) SetNillableUpdatedBy(v *int64) *WikiPageUpdate {
+	if v != nil {
+		_u.SetUpdatedBy(*v)
+	}
+	return _u
+}
+
+// ClearUpdatedBy clears the value of the "updated_by" field.
+func (_u *WikiPageUpdate) ClearUpdatedBy() *WikiPageUpdate {
+	_u.mutation.ClearUpdatedBy()
+	return _u
+}
+
 // SetContent sets the "content" field.
 func (_u *WikiPageUpdate) SetContent(v string) *WikiPageUpdate {
 	_u.mutation.SetContent(v)
@@ -131,6 +152,25 @@ func (_u *WikiPageUpdate) SetCreator(v *User) *WikiPageUpdate {
 	return _u.SetCreatorID(v.ID)
 }
 
+// SetUpdaterID sets the "updater" edge to the User entity by ID.
+func (_u *WikiPageUpdate) SetUpdaterID(id int64) *WikiPageUpdate {
+	_u.mutation.SetUpdaterID(id)
+	return _u
+}
+
+// SetNillableUpdaterID sets the "updater" edge to the User entity by ID if the given value is not nil.
+func (_u *WikiPageUpdate) SetNillableUpdaterID(id *int64) *WikiPageUpdate {
+	if id != nil {
+		_u = _u.SetUpdaterID(*id)
+	}
+	return _u
+}
+
+// SetUpdater sets the "updater" edge to the User entity.
+func (_u *WikiPageUpdate) SetUpdater(v *User) *WikiPageUpdate {
+	return _u.SetUpdaterID(v.ID)
+}
+
 // AddYjsUpdateIDs adds the "yjs_updates" edge to the YjsUpdate entity by IDs.
 func (_u *WikiPageUpdate) AddYjsUpdateIDs(ids ...int64) *WikiPageUpdate {
 	_u.mutation.AddYjsUpdateIDs(ids...)
@@ -159,6 +199,21 @@ func (_u *WikiPageUpdate) AddVersions(v ...*PageVersion) *WikiPageUpdate {
 		ids[i] = v[i].ID
 	}
 	return _u.AddVersionIDs(ids...)
+}
+
+// AddWikiPageVersionIDs adds the "wiki_page_versions" edge to the WikiPageVersion entity by IDs.
+func (_u *WikiPageUpdate) AddWikiPageVersionIDs(ids ...int64) *WikiPageUpdate {
+	_u.mutation.AddWikiPageVersionIDs(ids...)
+	return _u
+}
+
+// AddWikiPageVersions adds the "wiki_page_versions" edges to the WikiPageVersion entity.
+func (_u *WikiPageUpdate) AddWikiPageVersions(v ...*WikiPageVersion) *WikiPageUpdate {
+	ids := make([]int64, len(v))
+	for i := range v {
+		ids[i] = v[i].ID
+	}
+	return _u.AddWikiPageVersionIDs(ids...)
 }
 
 // AddBlockIDs adds the "blocks" edge to the WikiBlock entity by IDs.
@@ -190,6 +245,12 @@ func (_u *WikiPageUpdate) ClearProject() *WikiPageUpdate {
 // ClearCreator clears the "creator" edge to the User entity.
 func (_u *WikiPageUpdate) ClearCreator() *WikiPageUpdate {
 	_u.mutation.ClearCreator()
+	return _u
+}
+
+// ClearUpdater clears the "updater" edge to the User entity.
+func (_u *WikiPageUpdate) ClearUpdater() *WikiPageUpdate {
+	_u.mutation.ClearUpdater()
 	return _u
 }
 
@@ -233,6 +294,27 @@ func (_u *WikiPageUpdate) RemoveVersions(v ...*PageVersion) *WikiPageUpdate {
 		ids[i] = v[i].ID
 	}
 	return _u.RemoveVersionIDs(ids...)
+}
+
+// ClearWikiPageVersions clears all "wiki_page_versions" edges to the WikiPageVersion entity.
+func (_u *WikiPageUpdate) ClearWikiPageVersions() *WikiPageUpdate {
+	_u.mutation.ClearWikiPageVersions()
+	return _u
+}
+
+// RemoveWikiPageVersionIDs removes the "wiki_page_versions" edge to WikiPageVersion entities by IDs.
+func (_u *WikiPageUpdate) RemoveWikiPageVersionIDs(ids ...int64) *WikiPageUpdate {
+	_u.mutation.RemoveWikiPageVersionIDs(ids...)
+	return _u
+}
+
+// RemoveWikiPageVersions removes "wiki_page_versions" edges to WikiPageVersion entities.
+func (_u *WikiPageUpdate) RemoveWikiPageVersions(v ...*WikiPageVersion) *WikiPageUpdate {
+	ids := make([]int64, len(v))
+	for i := range v {
+		ids[i] = v[i].ID
+	}
+	return _u.RemoveWikiPageVersionIDs(ids...)
 }
 
 // ClearBlocks clears all "blocks" edges to the WikiBlock entity.
@@ -398,6 +480,35 @@ func (_u *WikiPageUpdate) sqlSave(ctx context.Context) (_node int, err error) {
 		}
 		_spec.Edges.Add = append(_spec.Edges.Add, edge)
 	}
+	if _u.mutation.UpdaterCleared() {
+		edge := &sqlgraph.EdgeSpec{
+			Rel:     sqlgraph.M2O,
+			Inverse: true,
+			Table:   wikipage.UpdaterTable,
+			Columns: []string{wikipage.UpdaterColumn},
+			Bidi:    false,
+			Target: &sqlgraph.EdgeTarget{
+				IDSpec: sqlgraph.NewFieldSpec(user.FieldID, field.TypeInt64),
+			},
+		}
+		_spec.Edges.Clear = append(_spec.Edges.Clear, edge)
+	}
+	if nodes := _u.mutation.UpdaterIDs(); len(nodes) > 0 {
+		edge := &sqlgraph.EdgeSpec{
+			Rel:     sqlgraph.M2O,
+			Inverse: true,
+			Table:   wikipage.UpdaterTable,
+			Columns: []string{wikipage.UpdaterColumn},
+			Bidi:    false,
+			Target: &sqlgraph.EdgeTarget{
+				IDSpec: sqlgraph.NewFieldSpec(user.FieldID, field.TypeInt64),
+			},
+		}
+		for _, k := range nodes {
+			edge.Target.Nodes = append(edge.Target.Nodes, k)
+		}
+		_spec.Edges.Add = append(_spec.Edges.Add, edge)
+	}
 	if _u.mutation.YjsUpdatesCleared() {
 		edge := &sqlgraph.EdgeSpec{
 			Rel:     sqlgraph.O2M,
@@ -481,6 +592,51 @@ func (_u *WikiPageUpdate) sqlSave(ctx context.Context) (_node int, err error) {
 			Bidi:    false,
 			Target: &sqlgraph.EdgeTarget{
 				IDSpec: sqlgraph.NewFieldSpec(pageversion.FieldID, field.TypeInt64),
+			},
+		}
+		for _, k := range nodes {
+			edge.Target.Nodes = append(edge.Target.Nodes, k)
+		}
+		_spec.Edges.Add = append(_spec.Edges.Add, edge)
+	}
+	if _u.mutation.WikiPageVersionsCleared() {
+		edge := &sqlgraph.EdgeSpec{
+			Rel:     sqlgraph.O2M,
+			Inverse: false,
+			Table:   wikipage.WikiPageVersionsTable,
+			Columns: []string{wikipage.WikiPageVersionsColumn},
+			Bidi:    false,
+			Target: &sqlgraph.EdgeTarget{
+				IDSpec: sqlgraph.NewFieldSpec(wikipageversion.FieldID, field.TypeInt64),
+			},
+		}
+		_spec.Edges.Clear = append(_spec.Edges.Clear, edge)
+	}
+	if nodes := _u.mutation.RemovedWikiPageVersionsIDs(); len(nodes) > 0 && !_u.mutation.WikiPageVersionsCleared() {
+		edge := &sqlgraph.EdgeSpec{
+			Rel:     sqlgraph.O2M,
+			Inverse: false,
+			Table:   wikipage.WikiPageVersionsTable,
+			Columns: []string{wikipage.WikiPageVersionsColumn},
+			Bidi:    false,
+			Target: &sqlgraph.EdgeTarget{
+				IDSpec: sqlgraph.NewFieldSpec(wikipageversion.FieldID, field.TypeInt64),
+			},
+		}
+		for _, k := range nodes {
+			edge.Target.Nodes = append(edge.Target.Nodes, k)
+		}
+		_spec.Edges.Clear = append(_spec.Edges.Clear, edge)
+	}
+	if nodes := _u.mutation.WikiPageVersionsIDs(); len(nodes) > 0 {
+		edge := &sqlgraph.EdgeSpec{
+			Rel:     sqlgraph.O2M,
+			Inverse: false,
+			Table:   wikipage.WikiPageVersionsTable,
+			Columns: []string{wikipage.WikiPageVersionsColumn},
+			Bidi:    false,
+			Target: &sqlgraph.EdgeTarget{
+				IDSpec: sqlgraph.NewFieldSpec(wikipageversion.FieldID, field.TypeInt64),
 			},
 		}
 		for _, k := range nodes {
@@ -609,6 +765,26 @@ func (_u *WikiPageUpdateOne) SetNillableCreatedBy(v *int64) *WikiPageUpdateOne {
 	return _u
 }
 
+// SetUpdatedBy sets the "updated_by" field.
+func (_u *WikiPageUpdateOne) SetUpdatedBy(v int64) *WikiPageUpdateOne {
+	_u.mutation.SetUpdatedBy(v)
+	return _u
+}
+
+// SetNillableUpdatedBy sets the "updated_by" field if the given value is not nil.
+func (_u *WikiPageUpdateOne) SetNillableUpdatedBy(v *int64) *WikiPageUpdateOne {
+	if v != nil {
+		_u.SetUpdatedBy(*v)
+	}
+	return _u
+}
+
+// ClearUpdatedBy clears the value of the "updated_by" field.
+func (_u *WikiPageUpdateOne) ClearUpdatedBy() *WikiPageUpdateOne {
+	_u.mutation.ClearUpdatedBy()
+	return _u
+}
+
 // SetContent sets the "content" field.
 func (_u *WikiPageUpdateOne) SetContent(v string) *WikiPageUpdateOne {
 	_u.mutation.SetContent(v)
@@ -651,6 +827,25 @@ func (_u *WikiPageUpdateOne) SetCreator(v *User) *WikiPageUpdateOne {
 	return _u.SetCreatorID(v.ID)
 }
 
+// SetUpdaterID sets the "updater" edge to the User entity by ID.
+func (_u *WikiPageUpdateOne) SetUpdaterID(id int64) *WikiPageUpdateOne {
+	_u.mutation.SetUpdaterID(id)
+	return _u
+}
+
+// SetNillableUpdaterID sets the "updater" edge to the User entity by ID if the given value is not nil.
+func (_u *WikiPageUpdateOne) SetNillableUpdaterID(id *int64) *WikiPageUpdateOne {
+	if id != nil {
+		_u = _u.SetUpdaterID(*id)
+	}
+	return _u
+}
+
+// SetUpdater sets the "updater" edge to the User entity.
+func (_u *WikiPageUpdateOne) SetUpdater(v *User) *WikiPageUpdateOne {
+	return _u.SetUpdaterID(v.ID)
+}
+
 // AddYjsUpdateIDs adds the "yjs_updates" edge to the YjsUpdate entity by IDs.
 func (_u *WikiPageUpdateOne) AddYjsUpdateIDs(ids ...int64) *WikiPageUpdateOne {
 	_u.mutation.AddYjsUpdateIDs(ids...)
@@ -679,6 +874,21 @@ func (_u *WikiPageUpdateOne) AddVersions(v ...*PageVersion) *WikiPageUpdateOne {
 		ids[i] = v[i].ID
 	}
 	return _u.AddVersionIDs(ids...)
+}
+
+// AddWikiPageVersionIDs adds the "wiki_page_versions" edge to the WikiPageVersion entity by IDs.
+func (_u *WikiPageUpdateOne) AddWikiPageVersionIDs(ids ...int64) *WikiPageUpdateOne {
+	_u.mutation.AddWikiPageVersionIDs(ids...)
+	return _u
+}
+
+// AddWikiPageVersions adds the "wiki_page_versions" edges to the WikiPageVersion entity.
+func (_u *WikiPageUpdateOne) AddWikiPageVersions(v ...*WikiPageVersion) *WikiPageUpdateOne {
+	ids := make([]int64, len(v))
+	for i := range v {
+		ids[i] = v[i].ID
+	}
+	return _u.AddWikiPageVersionIDs(ids...)
 }
 
 // AddBlockIDs adds the "blocks" edge to the WikiBlock entity by IDs.
@@ -710,6 +920,12 @@ func (_u *WikiPageUpdateOne) ClearProject() *WikiPageUpdateOne {
 // ClearCreator clears the "creator" edge to the User entity.
 func (_u *WikiPageUpdateOne) ClearCreator() *WikiPageUpdateOne {
 	_u.mutation.ClearCreator()
+	return _u
+}
+
+// ClearUpdater clears the "updater" edge to the User entity.
+func (_u *WikiPageUpdateOne) ClearUpdater() *WikiPageUpdateOne {
+	_u.mutation.ClearUpdater()
 	return _u
 }
 
@@ -753,6 +969,27 @@ func (_u *WikiPageUpdateOne) RemoveVersions(v ...*PageVersion) *WikiPageUpdateOn
 		ids[i] = v[i].ID
 	}
 	return _u.RemoveVersionIDs(ids...)
+}
+
+// ClearWikiPageVersions clears all "wiki_page_versions" edges to the WikiPageVersion entity.
+func (_u *WikiPageUpdateOne) ClearWikiPageVersions() *WikiPageUpdateOne {
+	_u.mutation.ClearWikiPageVersions()
+	return _u
+}
+
+// RemoveWikiPageVersionIDs removes the "wiki_page_versions" edge to WikiPageVersion entities by IDs.
+func (_u *WikiPageUpdateOne) RemoveWikiPageVersionIDs(ids ...int64) *WikiPageUpdateOne {
+	_u.mutation.RemoveWikiPageVersionIDs(ids...)
+	return _u
+}
+
+// RemoveWikiPageVersions removes "wiki_page_versions" edges to WikiPageVersion entities.
+func (_u *WikiPageUpdateOne) RemoveWikiPageVersions(v ...*WikiPageVersion) *WikiPageUpdateOne {
+	ids := make([]int64, len(v))
+	for i := range v {
+		ids[i] = v[i].ID
+	}
+	return _u.RemoveWikiPageVersionIDs(ids...)
 }
 
 // ClearBlocks clears all "blocks" edges to the WikiBlock entity.
@@ -948,6 +1185,35 @@ func (_u *WikiPageUpdateOne) sqlSave(ctx context.Context) (_node *WikiPage, err 
 		}
 		_spec.Edges.Add = append(_spec.Edges.Add, edge)
 	}
+	if _u.mutation.UpdaterCleared() {
+		edge := &sqlgraph.EdgeSpec{
+			Rel:     sqlgraph.M2O,
+			Inverse: true,
+			Table:   wikipage.UpdaterTable,
+			Columns: []string{wikipage.UpdaterColumn},
+			Bidi:    false,
+			Target: &sqlgraph.EdgeTarget{
+				IDSpec: sqlgraph.NewFieldSpec(user.FieldID, field.TypeInt64),
+			},
+		}
+		_spec.Edges.Clear = append(_spec.Edges.Clear, edge)
+	}
+	if nodes := _u.mutation.UpdaterIDs(); len(nodes) > 0 {
+		edge := &sqlgraph.EdgeSpec{
+			Rel:     sqlgraph.M2O,
+			Inverse: true,
+			Table:   wikipage.UpdaterTable,
+			Columns: []string{wikipage.UpdaterColumn},
+			Bidi:    false,
+			Target: &sqlgraph.EdgeTarget{
+				IDSpec: sqlgraph.NewFieldSpec(user.FieldID, field.TypeInt64),
+			},
+		}
+		for _, k := range nodes {
+			edge.Target.Nodes = append(edge.Target.Nodes, k)
+		}
+		_spec.Edges.Add = append(_spec.Edges.Add, edge)
+	}
 	if _u.mutation.YjsUpdatesCleared() {
 		edge := &sqlgraph.EdgeSpec{
 			Rel:     sqlgraph.O2M,
@@ -1031,6 +1297,51 @@ func (_u *WikiPageUpdateOne) sqlSave(ctx context.Context) (_node *WikiPage, err 
 			Bidi:    false,
 			Target: &sqlgraph.EdgeTarget{
 				IDSpec: sqlgraph.NewFieldSpec(pageversion.FieldID, field.TypeInt64),
+			},
+		}
+		for _, k := range nodes {
+			edge.Target.Nodes = append(edge.Target.Nodes, k)
+		}
+		_spec.Edges.Add = append(_spec.Edges.Add, edge)
+	}
+	if _u.mutation.WikiPageVersionsCleared() {
+		edge := &sqlgraph.EdgeSpec{
+			Rel:     sqlgraph.O2M,
+			Inverse: false,
+			Table:   wikipage.WikiPageVersionsTable,
+			Columns: []string{wikipage.WikiPageVersionsColumn},
+			Bidi:    false,
+			Target: &sqlgraph.EdgeTarget{
+				IDSpec: sqlgraph.NewFieldSpec(wikipageversion.FieldID, field.TypeInt64),
+			},
+		}
+		_spec.Edges.Clear = append(_spec.Edges.Clear, edge)
+	}
+	if nodes := _u.mutation.RemovedWikiPageVersionsIDs(); len(nodes) > 0 && !_u.mutation.WikiPageVersionsCleared() {
+		edge := &sqlgraph.EdgeSpec{
+			Rel:     sqlgraph.O2M,
+			Inverse: false,
+			Table:   wikipage.WikiPageVersionsTable,
+			Columns: []string{wikipage.WikiPageVersionsColumn},
+			Bidi:    false,
+			Target: &sqlgraph.EdgeTarget{
+				IDSpec: sqlgraph.NewFieldSpec(wikipageversion.FieldID, field.TypeInt64),
+			},
+		}
+		for _, k := range nodes {
+			edge.Target.Nodes = append(edge.Target.Nodes, k)
+		}
+		_spec.Edges.Clear = append(_spec.Edges.Clear, edge)
+	}
+	if nodes := _u.mutation.WikiPageVersionsIDs(); len(nodes) > 0 {
+		edge := &sqlgraph.EdgeSpec{
+			Rel:     sqlgraph.O2M,
+			Inverse: false,
+			Table:   wikipage.WikiPageVersionsTable,
+			Columns: []string{wikipage.WikiPageVersionsColumn},
+			Bidi:    false,
+			Target: &sqlgraph.EdgeTarget{
+				IDSpec: sqlgraph.NewFieldSpec(wikipageversion.FieldID, field.TypeInt64),
 			},
 		}
 		for _, k := range nodes {

@@ -30,6 +30,7 @@ import (
 	"taskai/ent/useractivity"
 	"taskai/ent/wikiblock"
 	"taskai/ent/wikipage"
+	"taskai/ent/wikipageversion"
 	"taskai/ent/yjsupdate"
 
 	"entgo.io/ent"
@@ -117,6 +118,7 @@ func checkColumn(t, c string) error {
 			useractivity.Table:         useractivity.ValidColumn,
 			wikiblock.Table:            wikiblock.ValidColumn,
 			wikipage.Table:             wikipage.ValidColumn,
+			wikipageversion.Table:      wikipageversion.ValidColumn,
 			yjsupdate.Table:            yjsupdate.ValidColumn,
 		})
 	})

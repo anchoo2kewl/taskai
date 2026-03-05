@@ -75,6 +75,11 @@ func CreatedBy(v int64) predicate.WikiPage {
 	return predicate.WikiPage(sql.FieldEQ(FieldCreatedBy, v))
 }
 
+// UpdatedBy applies equality check predicate on the "updated_by" field. It's identical to UpdatedByEQ.
+func UpdatedBy(v int64) predicate.WikiPage {
+	return predicate.WikiPage(sql.FieldEQ(FieldUpdatedBy, v))
+}
+
 // Content applies equality check predicate on the "content" field. It's identical to ContentEQ.
 func Content(v string) predicate.WikiPage {
 	return predicate.WikiPage(sql.FieldEQ(FieldContent, v))
@@ -258,6 +263,36 @@ func CreatedByIn(vs ...int64) predicate.WikiPage {
 // CreatedByNotIn applies the NotIn predicate on the "created_by" field.
 func CreatedByNotIn(vs ...int64) predicate.WikiPage {
 	return predicate.WikiPage(sql.FieldNotIn(FieldCreatedBy, vs...))
+}
+
+// UpdatedByEQ applies the EQ predicate on the "updated_by" field.
+func UpdatedByEQ(v int64) predicate.WikiPage {
+	return predicate.WikiPage(sql.FieldEQ(FieldUpdatedBy, v))
+}
+
+// UpdatedByNEQ applies the NEQ predicate on the "updated_by" field.
+func UpdatedByNEQ(v int64) predicate.WikiPage {
+	return predicate.WikiPage(sql.FieldNEQ(FieldUpdatedBy, v))
+}
+
+// UpdatedByIn applies the In predicate on the "updated_by" field.
+func UpdatedByIn(vs ...int64) predicate.WikiPage {
+	return predicate.WikiPage(sql.FieldIn(FieldUpdatedBy, vs...))
+}
+
+// UpdatedByNotIn applies the NotIn predicate on the "updated_by" field.
+func UpdatedByNotIn(vs ...int64) predicate.WikiPage {
+	return predicate.WikiPage(sql.FieldNotIn(FieldUpdatedBy, vs...))
+}
+
+// UpdatedByIsNil applies the IsNil predicate on the "updated_by" field.
+func UpdatedByIsNil() predicate.WikiPage {
+	return predicate.WikiPage(sql.FieldIsNull(FieldUpdatedBy))
+}
+
+// UpdatedByNotNil applies the NotNil predicate on the "updated_by" field.
+func UpdatedByNotNil() predicate.WikiPage {
+	return predicate.WikiPage(sql.FieldNotNull(FieldUpdatedBy))
 }
 
 // ContentEQ applies the EQ predicate on the "content" field.
@@ -461,6 +496,29 @@ func HasCreatorWith(preds ...predicate.User) predicate.WikiPage {
 	})
 }
 
+// HasUpdater applies the HasEdge predicate on the "updater" edge.
+func HasUpdater() predicate.WikiPage {
+	return predicate.WikiPage(func(s *sql.Selector) {
+		step := sqlgraph.NewStep(
+			sqlgraph.From(Table, FieldID),
+			sqlgraph.Edge(sqlgraph.M2O, true, UpdaterTable, UpdaterColumn),
+		)
+		sqlgraph.HasNeighbors(s, step)
+	})
+}
+
+// HasUpdaterWith applies the HasEdge predicate on the "updater" edge with a given conditions (other predicates).
+func HasUpdaterWith(preds ...predicate.User) predicate.WikiPage {
+	return predicate.WikiPage(func(s *sql.Selector) {
+		step := newUpdaterStep()
+		sqlgraph.HasNeighborsWith(s, step, func(s *sql.Selector) {
+			for _, p := range preds {
+				p(s)
+			}
+		})
+	})
+}
+
 // HasYjsUpdates applies the HasEdge predicate on the "yjs_updates" edge.
 func HasYjsUpdates() predicate.WikiPage {
 	return predicate.WikiPage(func(s *sql.Selector) {
@@ -499,6 +557,29 @@ func HasVersions() predicate.WikiPage {
 func HasVersionsWith(preds ...predicate.PageVersion) predicate.WikiPage {
 	return predicate.WikiPage(func(s *sql.Selector) {
 		step := newVersionsStep()
+		sqlgraph.HasNeighborsWith(s, step, func(s *sql.Selector) {
+			for _, p := range preds {
+				p(s)
+			}
+		})
+	})
+}
+
+// HasWikiPageVersions applies the HasEdge predicate on the "wiki_page_versions" edge.
+func HasWikiPageVersions() predicate.WikiPage {
+	return predicate.WikiPage(func(s *sql.Selector) {
+		step := sqlgraph.NewStep(
+			sqlgraph.From(Table, FieldID),
+			sqlgraph.Edge(sqlgraph.O2M, false, WikiPageVersionsTable, WikiPageVersionsColumn),
+		)
+		sqlgraph.HasNeighbors(s, step)
+	})
+}
+
+// HasWikiPageVersionsWith applies the HasEdge predicate on the "wiki_page_versions" edge with a given conditions (other predicates).
+func HasWikiPageVersionsWith(preds ...predicate.WikiPageVersion) predicate.WikiPage {
+	return predicate.WikiPage(func(s *sql.Selector) {
+		step := newWikiPageVersionsStep()
 		sqlgraph.HasNeighborsWith(s, step, func(s *sql.Selector) {
 			for _, p := range preds {
 				p(s)

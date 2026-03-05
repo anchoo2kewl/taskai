@@ -353,6 +353,9 @@ func main() {
 			r.Delete("/wiki/pages/{pageId}", server.HandleDeleteWikiPage)
 			r.Get("/wiki/pages/{pageId}/content", server.HandleGetWikiPageContent)
 			r.Put("/wiki/pages/{pageId}/content", server.HandleUpdateWikiPageContent)
+			r.Get("/wiki/pages/{pageId}/versions", server.HandleListWikiPageVersions)
+			r.Get("/wiki/pages/{pageId}/versions/{versionNumber}", server.HandleGetWikiPageVersion)
+			r.Post("/wiki/pages/{pageId}/versions/{versionNumber}/restore", server.HandleRestoreWikiPageVersion)
 			r.Post("/wiki/preview", server.HandleWikiPreview)
 
 			// Wiki WebSocket route for real-time collaboration

@@ -2,7 +2,9 @@ package api
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"regexp"
 	"strconv"
@@ -14,6 +16,7 @@ import (
 
 	"taskai/ent"
 	"taskai/ent/wikipage"
+	"taskai/ent/wikipageversion"
 )
 
 const errInvalidRequestBody = "invalid request body"
@@ -352,6 +355,24 @@ func (s *Server) HandleUpdateWikiPage(w http.ResponseWriter, r *http.Request) {
 
 // UpdateWikiPageContentRequest represents a request to update wiki page content
 type UpdateWikiPageContentRequest struct {
+	Content    string `json:"content"`
+	ManualSave bool   `json:"manual_save"`
+}
+
+// WikiPageVersionResponse represents a wiki page version in API responses (without content)
+type WikiPageVersionResponse struct {
+	ID            int64     `json:"id"`
+	WikiPageID    int64     `json:"wiki_page_id"`
+	VersionNumber int       `json:"version_number"`
+	ContentHash   string    `json:"content_hash"`
+	CreatedBy     int64     `json:"created_by"`
+	CreatorName   *string   `json:"creator_name,omitempty"`
+	CreatedAt     time.Time `json:"created_at"`
+}
+
+// WikiPageVersionWithContentResponse includes the full content
+type WikiPageVersionWithContentResponse struct {
+	WikiPageVersionResponse
 	Content string `json:"content"`
 }
 
@@ -453,6 +474,7 @@ func (s *Server) HandleUpdateWikiPageContent(w http.ResponseWriter, r *http.Requ
 
 	updatedPage, err := s.db.Client.WikiPage.UpdateOneID(pageID).
 		SetContent(req.Content).
+		SetUpdatedBy(userID).
 		Save(ctx)
 	if err != nil {
 		s.logger.Error("Failed to update wiki page content",
@@ -461,6 +483,321 @@ func (s *Server) HandleUpdateWikiPageContent(w http.ResponseWriter, r *http.Requ
 		)
 		respondError(w, http.StatusInternalServerError, "failed to update wiki page content", "internal_error")
 		return
+	}
+
+	if err := s.maybeCreateVersion(ctx, pageID, userID, req.Content, req.ManualSave); err != nil {
+		s.logger.Warn("Failed to create wiki page version",
+			zap.Int64("page_id", pageID),
+			zap.Error(err),
+		)
+	}
+
+	respondJSON(w, http.StatusOK, WikiPageContentResponse{
+		PageID:    updatedPage.ID,
+		Content:   updatedPage.Content,
+		UpdatedAt: updatedPage.UpdatedAt,
+	})
+}
+
+// maybeCreateVersion creates a version snapshot if versioning criteria are met.
+func (s *Server) maybeCreateVersion(ctx context.Context, pageID, userID int64, newContent string, manualSave bool) error {
+	hash := fmt.Sprintf("%x", sha256.Sum256([]byte(newContent)))
+
+	// Fetch last version
+	lastVersion, err := s.db.Client.WikiPageVersion.Query().
+		Where(wikipageversion.WikiPageID(pageID)).
+		Order(ent.Desc(wikipageversion.FieldVersionNumber)).
+		First(ctx)
+	if err != nil && !ent.IsNotFound(err) {
+		return err
+	}
+
+	// Skip if content identical to last version
+	if lastVersion != nil && lastVersion.ContentHash == hash {
+		return nil
+	}
+
+	shouldVersion := manualSave
+	if !shouldVersion {
+		if lastVersion == nil {
+			// First content — version it
+			if newContent != "" {
+				shouldVersion = true
+			}
+		} else if time.Since(lastVersion.CreatedAt) > 15*time.Minute {
+			// Time-based snapshot
+			shouldVersion = true
+		} else if isSignificantChange(lastVersion.Content, newContent) {
+			// Large diff
+			shouldVersion = true
+		}
+	}
+
+	if !shouldVersion {
+		return nil
+	}
+
+	versionNum := 1
+	if lastVersion != nil {
+		versionNum = lastVersion.VersionNumber + 1
+	}
+
+	_, err = s.db.Client.WikiPageVersion.Create().
+		SetWikiPageID(pageID).
+		SetVersionNumber(versionNum).
+		SetContent(newContent).
+		SetContentHash(hash).
+		SetCreatedBy(userID).
+		Save(ctx)
+	return err
+}
+
+// isSignificantChange returns true when the diff is >15% of old or >500 chars changed.
+func isSignificantChange(oldContent, newContent string) bool {
+	oldLines := strings.Split(oldContent, "\n")
+	newLines := strings.Split(newContent, "\n")
+
+	oldSet := make(map[string]int, len(oldLines))
+	for _, l := range oldLines {
+		oldSet[l]++
+	}
+
+	charsChanged := 0
+	for _, l := range newLines {
+		if oldSet[l] > 0 {
+			oldSet[l]--
+		} else {
+			charsChanged += len(l)
+		}
+	}
+	// Also count lines removed from old
+	for l, cnt := range oldSet {
+		charsChanged += len(l) * cnt
+	}
+
+	if charsChanged > 500 {
+		return true
+	}
+	if len(oldContent) > 0 && float64(charsChanged) > 0.15*float64(len(oldContent)) {
+		return true
+	}
+	return false
+}
+
+// HandleListWikiPageVersions returns all versions for a wiki page (no content body).
+func (s *Server) HandleListWikiPageVersions(w http.ResponseWriter, r *http.Request) {
+	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
+	defer cancel()
+
+	userID := r.Context().Value(UserIDKey).(int64)
+	pageID, err := strconv.ParseInt(chi.URLParam(r, "pageId"), 10, 64)
+	if err != nil {
+		respondError(w, http.StatusBadRequest, "invalid page ID", "invalid_input")
+		return
+	}
+
+	page, err := s.db.Client.WikiPage.Query().
+		Where(wikipage.ID(pageID)).
+		Only(ctx)
+	if err != nil {
+		if ent.IsNotFound(err) {
+			respondError(w, http.StatusNotFound, "wiki page not found", "not_found")
+			return
+		}
+		respondError(w, http.StatusInternalServerError, "failed to fetch wiki page", "internal_error")
+		return
+	}
+
+	hasAccess, err := s.checkProjectAccess(ctx, userID, page.ProjectID)
+	if err != nil {
+		respondError(w, http.StatusInternalServerError, "failed to verify project access", "internal_error")
+		return
+	}
+	if !hasAccess {
+		respondError(w, http.StatusForbidden, "access denied", "forbidden")
+		return
+	}
+
+	versions, err := s.db.Client.WikiPageVersion.Query().
+		Where(wikipageversion.WikiPageID(pageID)).
+		WithCreator().
+		Order(ent.Desc(wikipageversion.FieldVersionNumber)).
+		All(ctx)
+	if err != nil {
+		s.logger.Error("Failed to fetch wiki page versions",
+			zap.Int64("page_id", pageID),
+			zap.Error(err),
+		)
+		respondError(w, http.StatusInternalServerError, "failed to fetch versions", "internal_error")
+		return
+	}
+
+	resp := make([]WikiPageVersionResponse, 0, len(versions))
+	for _, v := range versions {
+		r := WikiPageVersionResponse{
+			ID:            v.ID,
+			WikiPageID:    v.WikiPageID,
+			VersionNumber: v.VersionNumber,
+			ContentHash:   v.ContentHash,
+			CreatedBy:     v.CreatedBy,
+			CreatedAt:     v.CreatedAt,
+		}
+		if v.Edges.Creator != nil && v.Edges.Creator.Name != nil {
+			r.CreatorName = v.Edges.Creator.Name
+		}
+		resp = append(resp, r)
+	}
+
+	respondJSON(w, http.StatusOK, resp)
+}
+
+// HandleGetWikiPageVersion returns a single version with full content.
+func (s *Server) HandleGetWikiPageVersion(w http.ResponseWriter, r *http.Request) {
+	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
+	defer cancel()
+
+	userID := r.Context().Value(UserIDKey).(int64)
+	pageID, err := strconv.ParseInt(chi.URLParam(r, "pageId"), 10, 64)
+	if err != nil {
+		respondError(w, http.StatusBadRequest, "invalid page ID", "invalid_input")
+		return
+	}
+	versionNumber, err := strconv.Atoi(chi.URLParam(r, "versionNumber"))
+	if err != nil {
+		respondError(w, http.StatusBadRequest, "invalid version number", "invalid_input")
+		return
+	}
+
+	page, err := s.db.Client.WikiPage.Query().
+		Where(wikipage.ID(pageID)).
+		Only(ctx)
+	if err != nil {
+		if ent.IsNotFound(err) {
+			respondError(w, http.StatusNotFound, "wiki page not found", "not_found")
+			return
+		}
+		respondError(w, http.StatusInternalServerError, "failed to fetch wiki page", "internal_error")
+		return
+	}
+
+	hasAccess, err := s.checkProjectAccess(ctx, userID, page.ProjectID)
+	if err != nil {
+		respondError(w, http.StatusInternalServerError, "failed to verify project access", "internal_error")
+		return
+	}
+	if !hasAccess {
+		respondError(w, http.StatusForbidden, "access denied", "forbidden")
+		return
+	}
+
+	version, err := s.db.Client.WikiPageVersion.Query().
+		Where(
+			wikipageversion.WikiPageID(pageID),
+			wikipageversion.VersionNumber(versionNumber),
+		).
+		WithCreator().
+		Only(ctx)
+	if err != nil {
+		if ent.IsNotFound(err) {
+			respondError(w, http.StatusNotFound, "version not found", "not_found")
+			return
+		}
+		respondError(w, http.StatusInternalServerError, "failed to fetch version", "internal_error")
+		return
+	}
+
+	resp := WikiPageVersionWithContentResponse{
+		WikiPageVersionResponse: WikiPageVersionResponse{
+			ID:            version.ID,
+			WikiPageID:    version.WikiPageID,
+			VersionNumber: version.VersionNumber,
+			ContentHash:   version.ContentHash,
+			CreatedBy:     version.CreatedBy,
+			CreatedAt:     version.CreatedAt,
+		},
+		Content: version.Content,
+	}
+	if version.Edges.Creator != nil && version.Edges.Creator.Name != nil {
+		resp.CreatorName = version.Edges.Creator.Name
+	}
+
+	respondJSON(w, http.StatusOK, resp)
+}
+
+// HandleRestoreWikiPageVersion restores a wiki page to a previous version.
+func (s *Server) HandleRestoreWikiPageVersion(w http.ResponseWriter, r *http.Request) {
+	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
+	defer cancel()
+
+	userID := r.Context().Value(UserIDKey).(int64)
+	pageID, err := strconv.ParseInt(chi.URLParam(r, "pageId"), 10, 64)
+	if err != nil {
+		respondError(w, http.StatusBadRequest, "invalid page ID", "invalid_input")
+		return
+	}
+	versionNumber, err := strconv.Atoi(chi.URLParam(r, "versionNumber"))
+	if err != nil {
+		respondError(w, http.StatusBadRequest, "invalid version number", "invalid_input")
+		return
+	}
+
+	page, err := s.db.Client.WikiPage.Query().
+		Where(wikipage.ID(pageID)).
+		Only(ctx)
+	if err != nil {
+		if ent.IsNotFound(err) {
+			respondError(w, http.StatusNotFound, "wiki page not found", "not_found")
+			return
+		}
+		respondError(w, http.StatusInternalServerError, "failed to fetch wiki page", "internal_error")
+		return
+	}
+
+	hasAccess, err := s.checkProjectAccess(ctx, userID, page.ProjectID)
+	if err != nil {
+		respondError(w, http.StatusInternalServerError, "failed to verify project access", "internal_error")
+		return
+	}
+	if !hasAccess {
+		respondError(w, http.StatusForbidden, "access denied", "forbidden")
+		return
+	}
+
+	version, err := s.db.Client.WikiPageVersion.Query().
+		Where(
+			wikipageversion.WikiPageID(pageID),
+			wikipageversion.VersionNumber(versionNumber),
+		).
+		Only(ctx)
+	if err != nil {
+		if ent.IsNotFound(err) {
+			respondError(w, http.StatusNotFound, "version not found", "not_found")
+			return
+		}
+		respondError(w, http.StatusInternalServerError, "failed to fetch version", "internal_error")
+		return
+	}
+
+	updatedPage, err := s.db.Client.WikiPage.UpdateOneID(pageID).
+		SetContent(version.Content).
+		SetUpdatedBy(userID).
+		Save(ctx)
+	if err != nil {
+		s.logger.Error("Failed to restore wiki page version",
+			zap.Int64("page_id", pageID),
+			zap.Int("version_number", versionNumber),
+			zap.Error(err),
+		)
+		respondError(w, http.StatusInternalServerError, "failed to restore version", "internal_error")
+		return
+	}
+
+	// Create a new version for the restore action
+	if err := s.maybeCreateVersion(ctx, pageID, userID, version.Content, true); err != nil {
+		s.logger.Warn("Failed to create version after restore",
+			zap.Int64("page_id", pageID),
+			zap.Error(err),
+		)
 	}
 
 	respondJSON(w, http.StatusOK, WikiPageContentResponse{

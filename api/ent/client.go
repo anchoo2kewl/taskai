@@ -33,6 +33,7 @@ import (
 	"taskai/ent/useractivity"
 	"taskai/ent/wikiblock"
 	"taskai/ent/wikipage"
+	"taskai/ent/wikipageversion"
 	"taskai/ent/yjsupdate"
 
 	"entgo.io/ent"
@@ -90,6 +91,8 @@ type Client struct {
 	WikiBlock *WikiBlockClient
 	// WikiPage is the client for interacting with the WikiPage builders.
 	WikiPage *WikiPageClient
+	// WikiPageVersion is the client for interacting with the WikiPageVersion builders.
+	WikiPageVersion *WikiPageVersionClient
 	// YjsUpdate is the client for interacting with the YjsUpdate builders.
 	YjsUpdate *YjsUpdateClient
 }
@@ -125,6 +128,7 @@ func (c *Client) init() {
 	c.UserActivity = NewUserActivityClient(c.config)
 	c.WikiBlock = NewWikiBlockClient(c.config)
 	c.WikiPage = NewWikiPageClient(c.config)
+	c.WikiPageVersion = NewWikiPageVersionClient(c.config)
 	c.YjsUpdate = NewYjsUpdateClient(c.config)
 }
 
@@ -240,6 +244,7 @@ func (c *Client) Tx(ctx context.Context) (*Tx, error) {
 		UserActivity:         NewUserActivityClient(cfg),
 		WikiBlock:            NewWikiBlockClient(cfg),
 		WikiPage:             NewWikiPageClient(cfg),
+		WikiPageVersion:      NewWikiPageVersionClient(cfg),
 		YjsUpdate:            NewYjsUpdateClient(cfg),
 	}, nil
 }
@@ -282,6 +287,7 @@ func (c *Client) BeginTx(ctx context.Context, opts *sql.TxOptions) (*Tx, error) 
 		UserActivity:         NewUserActivityClient(cfg),
 		WikiBlock:            NewWikiBlockClient(cfg),
 		WikiPage:             NewWikiPageClient(cfg),
+		WikiPageVersion:      NewWikiPageVersionClient(cfg),
 		YjsUpdate:            NewYjsUpdateClient(cfg),
 	}, nil
 }
@@ -316,7 +322,7 @@ func (c *Client) Use(hooks ...Hook) {
 		c.Project, c.ProjectMember, c.Sprint, c.SwimLane, c.Tag, c.Task,
 		c.TaskAssignee, c.TaskAttachment, c.TaskComment, c.TaskTag, c.Team,
 		c.TeamInvitation, c.TeamMember, c.User, c.UserActivity, c.WikiBlock,
-		c.WikiPage, c.YjsUpdate,
+		c.WikiPage, c.WikiPageVersion, c.YjsUpdate,
 	} {
 		n.Use(hooks...)
 	}
@@ -330,7 +336,7 @@ func (c *Client) Intercept(interceptors ...Interceptor) {
 		c.Project, c.ProjectMember, c.Sprint, c.SwimLane, c.Tag, c.Task,
 		c.TaskAssignee, c.TaskAttachment, c.TaskComment, c.TaskTag, c.Team,
 		c.TeamInvitation, c.TeamMember, c.User, c.UserActivity, c.WikiBlock,
-		c.WikiPage, c.YjsUpdate,
+		c.WikiPage, c.WikiPageVersion, c.YjsUpdate,
 	} {
 		n.Intercept(interceptors...)
 	}
@@ -383,6 +389,8 @@ func (c *Client) Mutate(ctx context.Context, m Mutation) (Value, error) {
 		return c.WikiBlock.mutate(ctx, m)
 	case *WikiPageMutation:
 		return c.WikiPage.mutate(ctx, m)
+	case *WikiPageVersionMutation:
+		return c.WikiPageVersion.mutate(ctx, m)
 	case *YjsUpdateMutation:
 		return c.YjsUpdate.mutate(ctx, m)
 	default:
@@ -4012,6 +4020,38 @@ func (c *UserClient) QueryWikiPagesCreated(_m *User) *WikiPageQuery {
 	return query
 }
 
+// QueryWikiPagesUpdated queries the wiki_pages_updated edge of a User.
+func (c *UserClient) QueryWikiPagesUpdated(_m *User) *WikiPageQuery {
+	query := (&WikiPageClient{config: c.config}).Query()
+	query.path = func(context.Context) (fromV *sql.Selector, _ error) {
+		id := _m.ID
+		step := sqlgraph.NewStep(
+			sqlgraph.From(user.Table, user.FieldID, id),
+			sqlgraph.To(wikipage.Table, wikipage.FieldID),
+			sqlgraph.Edge(sqlgraph.O2M, false, user.WikiPagesUpdatedTable, user.WikiPagesUpdatedColumn),
+		)
+		fromV = sqlgraph.Neighbors(_m.driver.Dialect(), step)
+		return fromV, nil
+	}
+	return query
+}
+
+// QueryWikiPageVersionsCreated queries the wiki_page_versions_created edge of a User.
+func (c *UserClient) QueryWikiPageVersionsCreated(_m *User) *WikiPageVersionQuery {
+	query := (&WikiPageVersionClient{config: c.config}).Query()
+	query.path = func(context.Context) (fromV *sql.Selector, _ error) {
+		id := _m.ID
+		step := sqlgraph.NewStep(
+			sqlgraph.From(user.Table, user.FieldID, id),
+			sqlgraph.To(wikipageversion.Table, wikipageversion.FieldID),
+			sqlgraph.Edge(sqlgraph.O2M, false, user.WikiPageVersionsCreatedTable, user.WikiPageVersionsCreatedColumn),
+		)
+		fromV = sqlgraph.Neighbors(_m.driver.Dialect(), step)
+		return fromV, nil
+	}
+	return query
+}
+
 // QueryYjsUpdates queries the yjs_updates edge of a User.
 func (c *UserClient) QueryYjsUpdates(_m *User) *YjsUpdateQuery {
 	query := (&YjsUpdateClient{config: c.config}).Query()
@@ -4491,6 +4531,22 @@ func (c *WikiPageClient) QueryCreator(_m *WikiPage) *UserQuery {
 	return query
 }
 
+// QueryUpdater queries the updater edge of a WikiPage.
+func (c *WikiPageClient) QueryUpdater(_m *WikiPage) *UserQuery {
+	query := (&UserClient{config: c.config}).Query()
+	query.path = func(context.Context) (fromV *sql.Selector, _ error) {
+		id := _m.ID
+		step := sqlgraph.NewStep(
+			sqlgraph.From(wikipage.Table, wikipage.FieldID, id),
+			sqlgraph.To(user.Table, user.FieldID),
+			sqlgraph.Edge(sqlgraph.M2O, true, wikipage.UpdaterTable, wikipage.UpdaterColumn),
+		)
+		fromV = sqlgraph.Neighbors(_m.driver.Dialect(), step)
+		return fromV, nil
+	}
+	return query
+}
+
 // QueryYjsUpdates queries the yjs_updates edge of a WikiPage.
 func (c *WikiPageClient) QueryYjsUpdates(_m *WikiPage) *YjsUpdateQuery {
 	query := (&YjsUpdateClient{config: c.config}).Query()
@@ -4516,6 +4572,22 @@ func (c *WikiPageClient) QueryVersions(_m *WikiPage) *PageVersionQuery {
 			sqlgraph.From(wikipage.Table, wikipage.FieldID, id),
 			sqlgraph.To(pageversion.Table, pageversion.FieldID),
 			sqlgraph.Edge(sqlgraph.O2M, false, wikipage.VersionsTable, wikipage.VersionsColumn),
+		)
+		fromV = sqlgraph.Neighbors(_m.driver.Dialect(), step)
+		return fromV, nil
+	}
+	return query
+}
+
+// QueryWikiPageVersions queries the wiki_page_versions edge of a WikiPage.
+func (c *WikiPageClient) QueryWikiPageVersions(_m *WikiPage) *WikiPageVersionQuery {
+	query := (&WikiPageVersionClient{config: c.config}).Query()
+	query.path = func(context.Context) (fromV *sql.Selector, _ error) {
+		id := _m.ID
+		step := sqlgraph.NewStep(
+			sqlgraph.From(wikipage.Table, wikipage.FieldID, id),
+			sqlgraph.To(wikipageversion.Table, wikipageversion.FieldID),
+			sqlgraph.Edge(sqlgraph.O2M, false, wikipage.WikiPageVersionsTable, wikipage.WikiPageVersionsColumn),
 		)
 		fromV = sqlgraph.Neighbors(_m.driver.Dialect(), step)
 		return fromV, nil
@@ -4561,6 +4633,171 @@ func (c *WikiPageClient) mutate(ctx context.Context, m *WikiPageMutation) (Value
 		return (&WikiPageDelete{config: c.config, hooks: c.Hooks(), mutation: m}).Exec(ctx)
 	default:
 		return nil, fmt.Errorf("ent: unknown WikiPage mutation op: %q", m.Op())
+	}
+}
+
+// WikiPageVersionClient is a client for the WikiPageVersion schema.
+type WikiPageVersionClient struct {
+	config
+}
+
+// NewWikiPageVersionClient returns a client for the WikiPageVersion from the given config.
+func NewWikiPageVersionClient(c config) *WikiPageVersionClient {
+	return &WikiPageVersionClient{config: c}
+}
+
+// Use adds a list of mutation hooks to the hooks stack.
+// A call to `Use(f, g, h)` equals to `wikipageversion.Hooks(f(g(h())))`.
+func (c *WikiPageVersionClient) Use(hooks ...Hook) {
+	c.hooks.WikiPageVersion = append(c.hooks.WikiPageVersion, hooks...)
+}
+
+// Intercept adds a list of query interceptors to the interceptors stack.
+// A call to `Intercept(f, g, h)` equals to `wikipageversion.Intercept(f(g(h())))`.
+func (c *WikiPageVersionClient) Intercept(interceptors ...Interceptor) {
+	c.inters.WikiPageVersion = append(c.inters.WikiPageVersion, interceptors...)
+}
+
+// Create returns a builder for creating a WikiPageVersion entity.
+func (c *WikiPageVersionClient) Create() *WikiPageVersionCreate {
+	mutation := newWikiPageVersionMutation(c.config, OpCreate)
+	return &WikiPageVersionCreate{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// CreateBulk returns a builder for creating a bulk of WikiPageVersion entities.
+func (c *WikiPageVersionClient) CreateBulk(builders ...*WikiPageVersionCreate) *WikiPageVersionCreateBulk {
+	return &WikiPageVersionCreateBulk{config: c.config, builders: builders}
+}
+
+// MapCreateBulk creates a bulk creation builder from the given slice. For each item in the slice, the function creates
+// a builder and applies setFunc on it.
+func (c *WikiPageVersionClient) MapCreateBulk(slice any, setFunc func(*WikiPageVersionCreate, int)) *WikiPageVersionCreateBulk {
+	rv := reflect.ValueOf(slice)
+	if rv.Kind() != reflect.Slice {
+		return &WikiPageVersionCreateBulk{err: fmt.Errorf("calling to WikiPageVersionClient.MapCreateBulk with wrong type %T, need slice", slice)}
+	}
+	builders := make([]*WikiPageVersionCreate, rv.Len())
+	for i := 0; i < rv.Len(); i++ {
+		builders[i] = c.Create()
+		setFunc(builders[i], i)
+	}
+	return &WikiPageVersionCreateBulk{config: c.config, builders: builders}
+}
+
+// Update returns an update builder for WikiPageVersion.
+func (c *WikiPageVersionClient) Update() *WikiPageVersionUpdate {
+	mutation := newWikiPageVersionMutation(c.config, OpUpdate)
+	return &WikiPageVersionUpdate{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// UpdateOne returns an update builder for the given entity.
+func (c *WikiPageVersionClient) UpdateOne(_m *WikiPageVersion) *WikiPageVersionUpdateOne {
+	mutation := newWikiPageVersionMutation(c.config, OpUpdateOne, withWikiPageVersion(_m))
+	return &WikiPageVersionUpdateOne{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// UpdateOneID returns an update builder for the given id.
+func (c *WikiPageVersionClient) UpdateOneID(id int64) *WikiPageVersionUpdateOne {
+	mutation := newWikiPageVersionMutation(c.config, OpUpdateOne, withWikiPageVersionID(id))
+	return &WikiPageVersionUpdateOne{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// Delete returns a delete builder for WikiPageVersion.
+func (c *WikiPageVersionClient) Delete() *WikiPageVersionDelete {
+	mutation := newWikiPageVersionMutation(c.config, OpDelete)
+	return &WikiPageVersionDelete{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// DeleteOne returns a builder for deleting the given entity.
+func (c *WikiPageVersionClient) DeleteOne(_m *WikiPageVersion) *WikiPageVersionDeleteOne {
+	return c.DeleteOneID(_m.ID)
+}
+
+// DeleteOneID returns a builder for deleting the given entity by its id.
+func (c *WikiPageVersionClient) DeleteOneID(id int64) *WikiPageVersionDeleteOne {
+	builder := c.Delete().Where(wikipageversion.ID(id))
+	builder.mutation.id = &id
+	builder.mutation.op = OpDeleteOne
+	return &WikiPageVersionDeleteOne{builder}
+}
+
+// Query returns a query builder for WikiPageVersion.
+func (c *WikiPageVersionClient) Query() *WikiPageVersionQuery {
+	return &WikiPageVersionQuery{
+		config: c.config,
+		ctx:    &QueryContext{Type: TypeWikiPageVersion},
+		inters: c.Interceptors(),
+	}
+}
+
+// Get returns a WikiPageVersion entity by its id.
+func (c *WikiPageVersionClient) Get(ctx context.Context, id int64) (*WikiPageVersion, error) {
+	return c.Query().Where(wikipageversion.ID(id)).Only(ctx)
+}
+
+// GetX is like Get, but panics if an error occurs.
+func (c *WikiPageVersionClient) GetX(ctx context.Context, id int64) *WikiPageVersion {
+	obj, err := c.Get(ctx, id)
+	if err != nil {
+		panic(err)
+	}
+	return obj
+}
+
+// QueryWikiPage queries the wiki_page edge of a WikiPageVersion.
+func (c *WikiPageVersionClient) QueryWikiPage(_m *WikiPageVersion) *WikiPageQuery {
+	query := (&WikiPageClient{config: c.config}).Query()
+	query.path = func(context.Context) (fromV *sql.Selector, _ error) {
+		id := _m.ID
+		step := sqlgraph.NewStep(
+			sqlgraph.From(wikipageversion.Table, wikipageversion.FieldID, id),
+			sqlgraph.To(wikipage.Table, wikipage.FieldID),
+			sqlgraph.Edge(sqlgraph.M2O, true, wikipageversion.WikiPageTable, wikipageversion.WikiPageColumn),
+		)
+		fromV = sqlgraph.Neighbors(_m.driver.Dialect(), step)
+		return fromV, nil
+	}
+	return query
+}
+
+// QueryCreator queries the creator edge of a WikiPageVersion.
+func (c *WikiPageVersionClient) QueryCreator(_m *WikiPageVersion) *UserQuery {
+	query := (&UserClient{config: c.config}).Query()
+	query.path = func(context.Context) (fromV *sql.Selector, _ error) {
+		id := _m.ID
+		step := sqlgraph.NewStep(
+			sqlgraph.From(wikipageversion.Table, wikipageversion.FieldID, id),
+			sqlgraph.To(user.Table, user.FieldID),
+			sqlgraph.Edge(sqlgraph.M2O, true, wikipageversion.CreatorTable, wikipageversion.CreatorColumn),
+		)
+		fromV = sqlgraph.Neighbors(_m.driver.Dialect(), step)
+		return fromV, nil
+	}
+	return query
+}
+
+// Hooks returns the client hooks.
+func (c *WikiPageVersionClient) Hooks() []Hook {
+	return c.hooks.WikiPageVersion
+}
+
+// Interceptors returns the client interceptors.
+func (c *WikiPageVersionClient) Interceptors() []Interceptor {
+	return c.inters.WikiPageVersion
+}
+
+func (c *WikiPageVersionClient) mutate(ctx context.Context, m *WikiPageVersionMutation) (Value, error) {
+	switch m.Op() {
+	case OpCreate:
+		return (&WikiPageVersionCreate{config: c.config, hooks: c.Hooks(), mutation: m}).Save(ctx)
+	case OpUpdate:
+		return (&WikiPageVersionUpdate{config: c.config, hooks: c.Hooks(), mutation: m}).Save(ctx)
+	case OpUpdateOne:
+		return (&WikiPageVersionUpdateOne{config: c.config, hooks: c.Hooks(), mutation: m}).Save(ctx)
+	case OpDelete, OpDeleteOne:
+		return (&WikiPageVersionDelete{config: c.config, hooks: c.Hooks(), mutation: m}).Exec(ctx)
+	default:
+		return nil, fmt.Errorf("ent: unknown WikiPageVersion mutation op: %q", m.Op())
 	}
 }
 
@@ -4735,12 +4972,12 @@ type (
 		APIKey, CloudinaryCredential, EmailProvider, Invite, PageVersion, Project,
 		ProjectMember, Sprint, SwimLane, Tag, Task, TaskAssignee, TaskAttachment,
 		TaskComment, TaskTag, Team, TeamInvitation, TeamMember, User, UserActivity,
-		WikiBlock, WikiPage, YjsUpdate []ent.Hook
+		WikiBlock, WikiPage, WikiPageVersion, YjsUpdate []ent.Hook
 	}
 	inters struct {
 		APIKey, CloudinaryCredential, EmailProvider, Invite, PageVersion, Project,
 		ProjectMember, Sprint, SwimLane, Tag, Task, TaskAssignee, TaskAttachment,
 		TaskComment, TaskTag, Team, TeamInvitation, TeamMember, User, UserActivity,
-		WikiBlock, WikiPage, YjsUpdate []ent.Interceptor
+		WikiBlock, WikiPage, WikiPageVersion, YjsUpdate []ent.Interceptor
 	}
 )

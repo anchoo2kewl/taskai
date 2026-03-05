@@ -78,6 +78,10 @@ const (
 	EdgeTaskAttachments = "task_attachments"
 	// EdgeWikiPagesCreated holds the string denoting the wiki_pages_created edge name in mutations.
 	EdgeWikiPagesCreated = "wiki_pages_created"
+	// EdgeWikiPagesUpdated holds the string denoting the wiki_pages_updated edge name in mutations.
+	EdgeWikiPagesUpdated = "wiki_pages_updated"
+	// EdgeWikiPageVersionsCreated holds the string denoting the wiki_page_versions_created edge name in mutations.
+	EdgeWikiPageVersionsCreated = "wiki_page_versions_created"
 	// EdgeYjsUpdates holds the string denoting the yjs_updates edge name in mutations.
 	EdgeYjsUpdates = "yjs_updates"
 	// Table holds the table name of the user in the database.
@@ -215,6 +219,20 @@ const (
 	WikiPagesCreatedInverseTable = "wiki_pages"
 	// WikiPagesCreatedColumn is the table column denoting the wiki_pages_created relation/edge.
 	WikiPagesCreatedColumn = "created_by"
+	// WikiPagesUpdatedTable is the table that holds the wiki_pages_updated relation/edge.
+	WikiPagesUpdatedTable = "wiki_pages"
+	// WikiPagesUpdatedInverseTable is the table name for the WikiPage entity.
+	// It exists in this package in order to avoid circular dependency with the "wikipage" package.
+	WikiPagesUpdatedInverseTable = "wiki_pages"
+	// WikiPagesUpdatedColumn is the table column denoting the wiki_pages_updated relation/edge.
+	WikiPagesUpdatedColumn = "updated_by"
+	// WikiPageVersionsCreatedTable is the table that holds the wiki_page_versions_created relation/edge.
+	WikiPageVersionsCreatedTable = "wiki_page_versions"
+	// WikiPageVersionsCreatedInverseTable is the table name for the WikiPageVersion entity.
+	// It exists in this package in order to avoid circular dependency with the "wikipageversion" package.
+	WikiPageVersionsCreatedInverseTable = "wiki_page_versions"
+	// WikiPageVersionsCreatedColumn is the table column denoting the wiki_page_versions_created relation/edge.
+	WikiPageVersionsCreatedColumn = "created_by"
 	// YjsUpdatesTable is the table that holds the yjs_updates relation/edge.
 	YjsUpdatesTable = "yjs_updates"
 	// YjsUpdatesInverseTable is the table name for the YjsUpdate entity.
@@ -610,6 +628,34 @@ func ByWikiPagesCreated(term sql.OrderTerm, terms ...sql.OrderTerm) OrderOption 
 	}
 }
 
+// ByWikiPagesUpdatedCount orders the results by wiki_pages_updated count.
+func ByWikiPagesUpdatedCount(opts ...sql.OrderTermOption) OrderOption {
+	return func(s *sql.Selector) {
+		sqlgraph.OrderByNeighborsCount(s, newWikiPagesUpdatedStep(), opts...)
+	}
+}
+
+// ByWikiPagesUpdated orders the results by wiki_pages_updated terms.
+func ByWikiPagesUpdated(term sql.OrderTerm, terms ...sql.OrderTerm) OrderOption {
+	return func(s *sql.Selector) {
+		sqlgraph.OrderByNeighborTerms(s, newWikiPagesUpdatedStep(), append([]sql.OrderTerm{term}, terms...)...)
+	}
+}
+
+// ByWikiPageVersionsCreatedCount orders the results by wiki_page_versions_created count.
+func ByWikiPageVersionsCreatedCount(opts ...sql.OrderTermOption) OrderOption {
+	return func(s *sql.Selector) {
+		sqlgraph.OrderByNeighborsCount(s, newWikiPageVersionsCreatedStep(), opts...)
+	}
+}
+
+// ByWikiPageVersionsCreated orders the results by wiki_page_versions_created terms.
+func ByWikiPageVersionsCreated(term sql.OrderTerm, terms ...sql.OrderTerm) OrderOption {
+	return func(s *sql.Selector) {
+		sqlgraph.OrderByNeighborTerms(s, newWikiPageVersionsCreatedStep(), append([]sql.OrderTerm{term}, terms...)...)
+	}
+}
+
 // ByYjsUpdatesCount orders the results by yjs_updates count.
 func ByYjsUpdatesCount(opts ...sql.OrderTermOption) OrderOption {
 	return func(s *sql.Selector) {
@@ -754,6 +800,20 @@ func newWikiPagesCreatedStep() *sqlgraph.Step {
 		sqlgraph.From(Table, FieldID),
 		sqlgraph.To(WikiPagesCreatedInverseTable, FieldID),
 		sqlgraph.Edge(sqlgraph.O2M, false, WikiPagesCreatedTable, WikiPagesCreatedColumn),
+	)
+}
+func newWikiPagesUpdatedStep() *sqlgraph.Step {
+	return sqlgraph.NewStep(
+		sqlgraph.From(Table, FieldID),
+		sqlgraph.To(WikiPagesUpdatedInverseTable, FieldID),
+		sqlgraph.Edge(sqlgraph.O2M, false, WikiPagesUpdatedTable, WikiPagesUpdatedColumn),
+	)
+}
+func newWikiPageVersionsCreatedStep() *sqlgraph.Step {
+	return sqlgraph.NewStep(
+		sqlgraph.From(Table, FieldID),
+		sqlgraph.To(WikiPageVersionsCreatedInverseTable, FieldID),
+		sqlgraph.Edge(sqlgraph.O2M, false, WikiPageVersionsCreatedTable, WikiPageVersionsCreatedColumn),
 	)
 }
 func newYjsUpdatesStep() *sqlgraph.Step {

@@ -56,6 +56,8 @@ type Tx struct {
 	WikiBlock *WikiBlockClient
 	// WikiPage is the client for interacting with the WikiPage builders.
 	WikiPage *WikiPageClient
+	// WikiPageVersion is the client for interacting with the WikiPageVersion builders.
+	WikiPageVersion *WikiPageVersionClient
 	// YjsUpdate is the client for interacting with the YjsUpdate builders.
 	YjsUpdate *YjsUpdateClient
 
@@ -211,6 +213,7 @@ func (tx *Tx) init() {
 	tx.UserActivity = NewUserActivityClient(tx.config)
 	tx.WikiBlock = NewWikiBlockClient(tx.config)
 	tx.WikiPage = NewWikiPageClient(tx.config)
+	tx.WikiPageVersion = NewWikiPageVersionClient(tx.config)
 	tx.YjsUpdate = NewYjsUpdateClient(tx.config)
 }
 

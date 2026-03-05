@@ -946,6 +946,7 @@ var (
 		{Name: "updated_at", Type: field.TypeTime},
 		{Name: "project_id", Type: field.TypeInt64},
 		{Name: "created_by", Type: field.TypeInt64},
+		{Name: "updated_by", Type: field.TypeInt64, Nullable: true},
 	}
 	// WikiPagesTable holds the schema information for the "wiki_pages" table.
 	WikiPagesTable = &schema.Table{
@@ -965,6 +966,12 @@ var (
 				RefColumns: []*schema.Column{UsersColumns[0]},
 				OnDelete:   schema.NoAction,
 			},
+			{
+				Symbol:     "wiki_pages_users_wiki_pages_updated",
+				Columns:    []*schema.Column{WikiPagesColumns[8]},
+				RefColumns: []*schema.Column{UsersColumns[0]},
+				OnDelete:   schema.SetNull,
+			},
 		},
 		Indexes: []*schema.Index{
 			{
@@ -981,6 +988,48 @@ var (
 				Name:    "wikipage_project_id_slug",
 				Unique:  true,
 				Columns: []*schema.Column{WikiPagesColumns[6], WikiPagesColumns[2]},
+			},
+		},
+	}
+	// WikiPageVersionsColumns holds the columns for the "wiki_page_versions" table.
+	WikiPageVersionsColumns = []*schema.Column{
+		{Name: "id", Type: field.TypeInt64, Increment: true},
+		{Name: "version_number", Type: field.TypeInt},
+		{Name: "content", Type: field.TypeString, Size: 2147483647, Default: ""},
+		{Name: "content_hash", Type: field.TypeString, Size: 64},
+		{Name: "created_at", Type: field.TypeTime},
+		{Name: "created_by", Type: field.TypeInt64},
+		{Name: "wiki_page_id", Type: field.TypeInt64},
+	}
+	// WikiPageVersionsTable holds the schema information for the "wiki_page_versions" table.
+	WikiPageVersionsTable = &schema.Table{
+		Name:       "wiki_page_versions",
+		Columns:    WikiPageVersionsColumns,
+		PrimaryKey: []*schema.Column{WikiPageVersionsColumns[0]},
+		ForeignKeys: []*schema.ForeignKey{
+			{
+				Symbol:     "wiki_page_versions_users_wiki_page_versions_created",
+				Columns:    []*schema.Column{WikiPageVersionsColumns[5]},
+				RefColumns: []*schema.Column{UsersColumns[0]},
+				OnDelete:   schema.NoAction,
+			},
+			{
+				Symbol:     "wiki_page_versions_wiki_pages_wiki_page_versions",
+				Columns:    []*schema.Column{WikiPageVersionsColumns[6]},
+				RefColumns: []*schema.Column{WikiPagesColumns[0]},
+				OnDelete:   schema.NoAction,
+			},
+		},
+		Indexes: []*schema.Index{
+			{
+				Name:    "wikipageversion_wiki_page_id",
+				Unique:  false,
+				Columns: []*schema.Column{WikiPageVersionsColumns[6]},
+			},
+			{
+				Name:    "wikipageversion_wiki_page_id_version_number",
+				Unique:  true,
+				Columns: []*schema.Column{WikiPageVersionsColumns[6], WikiPageVersionsColumns[1]},
 			},
 		},
 	}
@@ -1043,6 +1092,7 @@ var (
 		UserActivityTable,
 		WikiBlocksTable,
 		WikiPagesTable,
+		WikiPageVersionsTable,
 		YjsUpdatesTable,
 	}
 )
@@ -1089,6 +1139,9 @@ func init() {
 	WikiBlocksTable.ForeignKeys[0].RefTable = WikiPagesTable
 	WikiPagesTable.ForeignKeys[0].RefTable = ProjectsTable
 	WikiPagesTable.ForeignKeys[1].RefTable = UsersTable
+	WikiPagesTable.ForeignKeys[2].RefTable = UsersTable
+	WikiPageVersionsTable.ForeignKeys[0].RefTable = UsersTable
+	WikiPageVersionsTable.ForeignKeys[1].RefTable = WikiPagesTable
 	YjsUpdatesTable.ForeignKeys[0].RefTable = UsersTable
 	YjsUpdatesTable.ForeignKeys[1].RefTable = WikiPagesTable
 }

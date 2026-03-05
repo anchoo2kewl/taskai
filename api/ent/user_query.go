@@ -25,6 +25,7 @@ import (
 	"taskai/ent/user"
 	"taskai/ent/useractivity"
 	"taskai/ent/wikipage"
+	"taskai/ent/wikipageversion"
 	"taskai/ent/yjsupdate"
 
 	"entgo.io/ent"
@@ -59,6 +60,8 @@ type UserQuery struct {
 	withCloudinaryCredentials     *CloudinaryCredentialQuery
 	withTaskAttachments           *TaskAttachmentQuery
 	withWikiPagesCreated          *WikiPageQuery
+	withWikiPagesUpdated          *WikiPageQuery
+	withWikiPageVersionsCreated   *WikiPageVersionQuery
 	withYjsUpdates                *YjsUpdateQuery
 	// intermediate query (i.e. traversal path).
 	sql  *sql.Selector
@@ -514,6 +517,50 @@ func (_q *UserQuery) QueryWikiPagesCreated() *WikiPageQuery {
 	return query
 }
 
+// QueryWikiPagesUpdated chains the current query on the "wiki_pages_updated" edge.
+func (_q *UserQuery) QueryWikiPagesUpdated() *WikiPageQuery {
+	query := (&WikiPageClient{config: _q.config}).Query()
+	query.path = func(ctx context.Context) (fromU *sql.Selector, err error) {
+		if err := _q.prepareQuery(ctx); err != nil {
+			return nil, err
+		}
+		selector := _q.sqlQuery(ctx)
+		if err := selector.Err(); err != nil {
+			return nil, err
+		}
+		step := sqlgraph.NewStep(
+			sqlgraph.From(user.Table, user.FieldID, selector),
+			sqlgraph.To(wikipage.Table, wikipage.FieldID),
+			sqlgraph.Edge(sqlgraph.O2M, false, user.WikiPagesUpdatedTable, user.WikiPagesUpdatedColumn),
+		)
+		fromU = sqlgraph.SetNeighbors(_q.driver.Dialect(), step)
+		return fromU, nil
+	}
+	return query
+}
+
+// QueryWikiPageVersionsCreated chains the current query on the "wiki_page_versions_created" edge.
+func (_q *UserQuery) QueryWikiPageVersionsCreated() *WikiPageVersionQuery {
+	query := (&WikiPageVersionClient{config: _q.config}).Query()
+	query.path = func(ctx context.Context) (fromU *sql.Selector, err error) {
+		if err := _q.prepareQuery(ctx); err != nil {
+			return nil, err
+		}
+		selector := _q.sqlQuery(ctx)
+		if err := selector.Err(); err != nil {
+			return nil, err
+		}
+		step := sqlgraph.NewStep(
+			sqlgraph.From(user.Table, user.FieldID, selector),
+			sqlgraph.To(wikipageversion.Table, wikipageversion.FieldID),
+			sqlgraph.Edge(sqlgraph.O2M, false, user.WikiPageVersionsCreatedTable, user.WikiPageVersionsCreatedColumn),
+		)
+		fromU = sqlgraph.SetNeighbors(_q.driver.Dialect(), step)
+		return fromU, nil
+	}
+	return query
+}
+
 // QueryYjsUpdates chains the current query on the "yjs_updates" edge.
 func (_q *UserQuery) QueryYjsUpdates() *YjsUpdateQuery {
 	query := (&YjsUpdateClient{config: _q.config}).Query()
@@ -747,6 +794,8 @@ func (_q *UserQuery) Clone() *UserQuery {
 		withCloudinaryCredentials:     _q.withCloudinaryCredentials.Clone(),
 		withTaskAttachments:           _q.withTaskAttachments.Clone(),
 		withWikiPagesCreated:          _q.withWikiPagesCreated.Clone(),
+		withWikiPagesUpdated:          _q.withWikiPagesUpdated.Clone(),
+		withWikiPageVersionsCreated:   _q.withWikiPageVersionsCreated.Clone(),
 		withYjsUpdates:                _q.withYjsUpdates.Clone(),
 		// clone intermediate query.
 		sql:  _q.sql.Clone(),
@@ -963,6 +1012,28 @@ func (_q *UserQuery) WithWikiPagesCreated(opts ...func(*WikiPageQuery)) *UserQue
 	return _q
 }
 
+// WithWikiPagesUpdated tells the query-builder to eager-load the nodes that are connected to
+// the "wiki_pages_updated" edge. The optional arguments are used to configure the query builder of the edge.
+func (_q *UserQuery) WithWikiPagesUpdated(opts ...func(*WikiPageQuery)) *UserQuery {
+	query := (&WikiPageClient{config: _q.config}).Query()
+	for _, opt := range opts {
+		opt(query)
+	}
+	_q.withWikiPagesUpdated = query
+	return _q
+}
+
+// WithWikiPageVersionsCreated tells the query-builder to eager-load the nodes that are connected to
+// the "wiki_page_versions_created" edge. The optional arguments are used to configure the query builder of the edge.
+func (_q *UserQuery) WithWikiPageVersionsCreated(opts ...func(*WikiPageVersionQuery)) *UserQuery {
+	query := (&WikiPageVersionClient{config: _q.config}).Query()
+	for _, opt := range opts {
+		opt(query)
+	}
+	_q.withWikiPageVersionsCreated = query
+	return _q
+}
+
 // WithYjsUpdates tells the query-builder to eager-load the nodes that are connected to
 // the "yjs_updates" edge. The optional arguments are used to configure the query builder of the edge.
 func (_q *UserQuery) WithYjsUpdates(opts ...func(*YjsUpdateQuery)) *UserQuery {
@@ -1052,7 +1123,7 @@ func (_q *UserQuery) sqlAll(ctx context.Context, hooks ...queryHook) ([]*User, e
 	var (
 		nodes       = []*User{}
 		_spec       = _q.querySpec()
-		loadedTypes = [20]bool{
+		loadedTypes = [22]bool{
 			_q.withOwnedProjects != nil,
 			_q.withOwnedTeams != nil,
 			_q.withTeamMemberships != nil,
@@ -1072,6 +1143,8 @@ func (_q *UserQuery) sqlAll(ctx context.Context, hooks ...queryHook) ([]*User, e
 			_q.withCloudinaryCredentials != nil,
 			_q.withTaskAttachments != nil,
 			_q.withWikiPagesCreated != nil,
+			_q.withWikiPagesUpdated != nil,
+			_q.withWikiPageVersionsCreated != nil,
 			_q.withYjsUpdates != nil,
 		}
 	)
@@ -1229,6 +1302,22 @@ func (_q *UserQuery) sqlAll(ctx context.Context, hooks ...queryHook) ([]*User, e
 		if err := _q.loadWikiPagesCreated(ctx, query, nodes,
 			func(n *User) { n.Edges.WikiPagesCreated = []*WikiPage{} },
 			func(n *User, e *WikiPage) { n.Edges.WikiPagesCreated = append(n.Edges.WikiPagesCreated, e) }); err != nil {
+			return nil, err
+		}
+	}
+	if query := _q.withWikiPagesUpdated; query != nil {
+		if err := _q.loadWikiPagesUpdated(ctx, query, nodes,
+			func(n *User) { n.Edges.WikiPagesUpdated = []*WikiPage{} },
+			func(n *User, e *WikiPage) { n.Edges.WikiPagesUpdated = append(n.Edges.WikiPagesUpdated, e) }); err != nil {
+			return nil, err
+		}
+	}
+	if query := _q.withWikiPageVersionsCreated; query != nil {
+		if err := _q.loadWikiPageVersionsCreated(ctx, query, nodes,
+			func(n *User) { n.Edges.WikiPageVersionsCreated = []*WikiPageVersion{} },
+			func(n *User, e *WikiPageVersion) {
+				n.Edges.WikiPageVersionsCreated = append(n.Edges.WikiPageVersionsCreated, e)
+			}); err != nil {
 			return nil, err
 		}
 	}
@@ -1806,6 +1895,69 @@ func (_q *UserQuery) loadWikiPagesCreated(ctx context.Context, query *WikiPageQu
 	}
 	query.Where(predicate.WikiPage(func(s *sql.Selector) {
 		s.Where(sql.InValues(s.C(user.WikiPagesCreatedColumn), fks...))
+	}))
+	neighbors, err := query.All(ctx)
+	if err != nil {
+		return err
+	}
+	for _, n := range neighbors {
+		fk := n.CreatedBy
+		node, ok := nodeids[fk]
+		if !ok {
+			return fmt.Errorf(`unexpected referenced foreign-key "created_by" returned %v for node %v`, fk, n.ID)
+		}
+		assign(node, n)
+	}
+	return nil
+}
+func (_q *UserQuery) loadWikiPagesUpdated(ctx context.Context, query *WikiPageQuery, nodes []*User, init func(*User), assign func(*User, *WikiPage)) error {
+	fks := make([]driver.Value, 0, len(nodes))
+	nodeids := make(map[int64]*User)
+	for i := range nodes {
+		fks = append(fks, nodes[i].ID)
+		nodeids[nodes[i].ID] = nodes[i]
+		if init != nil {
+			init(nodes[i])
+		}
+	}
+	if len(query.ctx.Fields) > 0 {
+		query.ctx.AppendFieldOnce(wikipage.FieldUpdatedBy)
+	}
+	query.Where(predicate.WikiPage(func(s *sql.Selector) {
+		s.Where(sql.InValues(s.C(user.WikiPagesUpdatedColumn), fks...))
+	}))
+	neighbors, err := query.All(ctx)
+	if err != nil {
+		return err
+	}
+	for _, n := range neighbors {
+		fk := n.UpdatedBy
+		if fk == nil {
+			return fmt.Errorf(`foreign-key "updated_by" is nil for node %v`, n.ID)
+		}
+		node, ok := nodeids[*fk]
+		if !ok {
+			return fmt.Errorf(`unexpected referenced foreign-key "updated_by" returned %v for node %v`, *fk, n.ID)
+		}
+		assign(node, n)
+	}
+	return nil
+}
+func (_q *UserQuery) loadWikiPageVersionsCreated(ctx context.Context, query *WikiPageVersionQuery, nodes []*User, init func(*User), assign func(*User, *WikiPageVersion)) error {
+	fks := make([]driver.Value, 0, len(nodes))
+	nodeids := make(map[int64]*User)
+	for i := range nodes {
+		fks = append(fks, nodes[i].ID)
+		nodeids[nodes[i].ID] = nodes[i]
+		if init != nil {
+			init(nodes[i])
+		}
+	}
+	if len(query.ctx.Fields) > 0 {
+		query.ctx.AppendFieldOnce(wikipageversion.FieldCreatedBy)
+	}
+	query.Where(predicate.WikiPageVersion(func(s *sql.Selector) {
+		s.Where(sql.InValues(s.C(user.WikiPageVersionsCreatedColumn), fks...))
 	}))
 	neighbors, err := query.All(ctx)
 	if err != nil {

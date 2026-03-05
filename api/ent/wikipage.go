@@ -27,6 +27,8 @@ type WikiPage struct {
 	Slug string `json:"slug,omitempty"`
 	// CreatedBy holds the value of the "created_by" field.
 	CreatedBy int64 `json:"created_by,omitempty"`
+	// UpdatedBy holds the value of the "updated_by" field.
+	UpdatedBy *int64 `json:"updated_by,omitempty"`
 	// Content holds the value of the "content" field.
 	Content string `json:"content,omitempty"`
 	// CreatedAt holds the value of the "created_at" field.
@@ -45,15 +47,19 @@ type WikiPageEdges struct {
 	Project *Project `json:"project,omitempty"`
 	// Creator holds the value of the creator edge.
 	Creator *User `json:"creator,omitempty"`
+	// Updater holds the value of the updater edge.
+	Updater *User `json:"updater,omitempty"`
 	// YjsUpdates holds the value of the yjs_updates edge.
 	YjsUpdates []*YjsUpdate `json:"yjs_updates,omitempty"`
 	// Versions holds the value of the versions edge.
 	Versions []*PageVersion `json:"versions,omitempty"`
+	// WikiPageVersions holds the value of the wiki_page_versions edge.
+	WikiPageVersions []*WikiPageVersion `json:"wiki_page_versions,omitempty"`
 	// Blocks holds the value of the blocks edge.
 	Blocks []*WikiBlock `json:"blocks,omitempty"`
 	// loadedTypes holds the information for reporting if a
 	// type was loaded (or requested) in eager-loading or not.
-	loadedTypes [5]bool
+	loadedTypes [7]bool
 }
 
 // ProjectOrErr returns the Project value or an error if the edge
@@ -78,10 +84,21 @@ func (e WikiPageEdges) CreatorOrErr() (*User, error) {
 	return nil, &NotLoadedError{edge: "creator"}
 }
 
+// UpdaterOrErr returns the Updater value or an error if the edge
+// was not loaded in eager-loading, or loaded but was not found.
+func (e WikiPageEdges) UpdaterOrErr() (*User, error) {
+	if e.Updater != nil {
+		return e.Updater, nil
+	} else if e.loadedTypes[2] {
+		return nil, &NotFoundError{label: user.Label}
+	}
+	return nil, &NotLoadedError{edge: "updater"}
+}
+
 // YjsUpdatesOrErr returns the YjsUpdates value or an error if the edge
 // was not loaded in eager-loading.
 func (e WikiPageEdges) YjsUpdatesOrErr() ([]*YjsUpdate, error) {
-	if e.loadedTypes[2] {
+	if e.loadedTypes[3] {
 		return e.YjsUpdates, nil
 	}
 	return nil, &NotLoadedError{edge: "yjs_updates"}
@@ -90,16 +107,25 @@ func (e WikiPageEdges) YjsUpdatesOrErr() ([]*YjsUpdate, error) {
 // VersionsOrErr returns the Versions value or an error if the edge
 // was not loaded in eager-loading.
 func (e WikiPageEdges) VersionsOrErr() ([]*PageVersion, error) {
-	if e.loadedTypes[3] {
+	if e.loadedTypes[4] {
 		return e.Versions, nil
 	}
 	return nil, &NotLoadedError{edge: "versions"}
 }
 
+// WikiPageVersionsOrErr returns the WikiPageVersions value or an error if the edge
+// was not loaded in eager-loading.
+func (e WikiPageEdges) WikiPageVersionsOrErr() ([]*WikiPageVersion, error) {
+	if e.loadedTypes[5] {
+		return e.WikiPageVersions, nil
+	}
+	return nil, &NotLoadedError{edge: "wiki_page_versions"}
+}
+
 // BlocksOrErr returns the Blocks value or an error if the edge
 // was not loaded in eager-loading.
 func (e WikiPageEdges) BlocksOrErr() ([]*WikiBlock, error) {
-	if e.loadedTypes[4] {
+	if e.loadedTypes[6] {
 		return e.Blocks, nil
 	}
 	return nil, &NotLoadedError{edge: "blocks"}
@@ -110,7 +136,7 @@ func (*WikiPage) scanValues(columns []string) ([]any, error) {
 	values := make([]any, len(columns))
 	for i := range columns {
 		switch columns[i] {
-		case wikipage.FieldID, wikipage.FieldProjectID, wikipage.FieldCreatedBy:
+		case wikipage.FieldID, wikipage.FieldProjectID, wikipage.FieldCreatedBy, wikipage.FieldUpdatedBy:
 			values[i] = new(sql.NullInt64)
 		case wikipage.FieldTitle, wikipage.FieldSlug, wikipage.FieldContent:
 			values[i] = new(sql.NullString)
@@ -161,6 +187,13 @@ func (_m *WikiPage) assignValues(columns []string, values []any) error {
 			} else if value.Valid {
 				_m.CreatedBy = value.Int64
 			}
+		case wikipage.FieldUpdatedBy:
+			if value, ok := values[i].(*sql.NullInt64); !ok {
+				return fmt.Errorf("unexpected type %T for field updated_by", values[i])
+			} else if value.Valid {
+				_m.UpdatedBy = new(int64)
+				*_m.UpdatedBy = value.Int64
+			}
 		case wikipage.FieldContent:
 			if value, ok := values[i].(*sql.NullString); !ok {
 				return fmt.Errorf("unexpected type %T for field content", values[i])
@@ -202,6 +235,11 @@ func (_m *WikiPage) QueryCreator() *UserQuery {
 	return NewWikiPageClient(_m.config).QueryCreator(_m)
 }
 
+// QueryUpdater queries the "updater" edge of the WikiPage entity.
+func (_m *WikiPage) QueryUpdater() *UserQuery {
+	return NewWikiPageClient(_m.config).QueryUpdater(_m)
+}
+
 // QueryYjsUpdates queries the "yjs_updates" edge of the WikiPage entity.
 func (_m *WikiPage) QueryYjsUpdates() *YjsUpdateQuery {
 	return NewWikiPageClient(_m.config).QueryYjsUpdates(_m)
@@ -210,6 +248,11 @@ func (_m *WikiPage) QueryYjsUpdates() *YjsUpdateQuery {
 // QueryVersions queries the "versions" edge of the WikiPage entity.
 func (_m *WikiPage) QueryVersions() *PageVersionQuery {
 	return NewWikiPageClient(_m.config).QueryVersions(_m)
+}
+
+// QueryWikiPageVersions queries the "wiki_page_versions" edge of the WikiPage entity.
+func (_m *WikiPage) QueryWikiPageVersions() *WikiPageVersionQuery {
+	return NewWikiPageClient(_m.config).QueryWikiPageVersions(_m)
 }
 
 // QueryBlocks queries the "blocks" edge of the WikiPage entity.
@@ -251,6 +294,11 @@ func (_m *WikiPage) String() string {
 	builder.WriteString(", ")
 	builder.WriteString("created_by=")
 	builder.WriteString(fmt.Sprintf("%v", _m.CreatedBy))
+	builder.WriteString(", ")
+	if v := _m.UpdatedBy; v != nil {
+		builder.WriteString("updated_by=")
+		builder.WriteString(fmt.Sprintf("%v", *v))
+	}
 	builder.WriteString(", ")
 	builder.WriteString("content=")
 	builder.WriteString(_m.Content)

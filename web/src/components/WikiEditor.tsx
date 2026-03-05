@@ -1,5 +1,5 @@
 import { useEffect, useState, useCallback, useRef } from 'react'
-import { WikiPage, apiClient } from '../lib/api'
+import { WikiPage, WikiPageVersion, WikiPageVersionWithContent, apiClient } from '../lib/api'
 import SearchSelect from './ui/SearchSelect'
 import ImagePickerModal from './ImagePickerModal'
 import * as Y from 'yjs'
@@ -840,6 +840,12 @@ export default function WikiEditor({ page }: Readonly<WikiEditorProps>) {
   const fsPreviewRef = useRef<HTMLDivElement>(null)
   const [fsSplitPct, setFsSplitPct] = useState(50)
 
+  // ── Version history state ─────────────────────────────────────
+  const [showVersionHistory, setShowVersionHistory] = useState(false)
+  const [versions, setVersions] = useState<WikiPageVersion[]>([])
+  const [versionsLoading, setVersionsLoading] = useState(false)
+  const [viewingVersion, setViewingVersion] = useState<WikiPageVersionWithContent | null>(null)
+
   // ── Keep contentRef in sync ──────────────────────────────────
   useEffect(() => { contentRef.current = content }, [content])
 
@@ -859,14 +865,14 @@ export default function WikiEditor({ page }: Readonly<WikiEditorProps>) {
   }, [page.id])
 
   // ── Manual save function ─────────────────────────────────────
-  const saveNow = useCallback(async () => {
+  const saveNow = useCallback(async (manualSave = false) => {
     const current = contentRef.current
     if (isSavingRef.current || current === lastSavedContentRef.current) return
 
     isSavingRef.current = true
     setSaveStatus('saving')
     try {
-      await apiClient.updateWikiPageContent(page.id, current)
+      await apiClient.updateWikiPageContent(page.id, current, manualSave)
       lastSavedContentRef.current = current
       isDirtyRef.current = false
       setSaveStatus('saved')
@@ -1168,6 +1174,47 @@ export default function WikiEditor({ page }: Readonly<WikiEditorProps>) {
     </div>
   )
 
+  // ── Version history handlers ──────────────────────────────────
+
+  const openVersionHistory = useCallback(async () => {
+    setShowVersionHistory(true)
+    setVersionsLoading(true)
+    setViewingVersion(null)
+    try {
+      const data = await apiClient.getWikiPageVersions(page.id)
+      setVersions(data)
+    } catch {
+      setVersions([])
+    } finally {
+      setVersionsLoading(false)
+    }
+  }, [page.id])
+
+  const viewVersion = useCallback(async (versionNumber: number) => {
+    try {
+      const data = await apiClient.getWikiPageVersion(page.id, versionNumber)
+      setViewingVersion(data)
+    } catch {
+      // ignore
+    }
+  }, [page.id])
+
+  const restoreVersion = useCallback(async (versionNumber: number) => {
+    try {
+      const data = await apiClient.restoreWikiPageVersion(page.id, versionNumber)
+      setContent(data.content)
+      contentRef.current = data.content
+      lastSavedContentRef.current = data.content
+      isDirtyRef.current = false
+      setShowVersionHistory(false)
+      setViewingVersion(null)
+      setSaveStatus('saved')
+      setTimeout(() => setSaveStatus(clearSavedStatus), 3000)
+    } catch {
+      // ignore
+    }
+  }, [page.id])
+
   // ── Fullscreen overlay ───────────────────────────────────────
 
   // ── Fullscreen overlay ───────────────────────────────────────
@@ -1201,7 +1248,7 @@ export default function WikiEditor({ page }: Readonly<WikiEditorProps>) {
             {autoSaveEnabled ? 'Auto' : 'Manual'}
           </button>
           <button
-            onClick={saveNow}
+            onClick={() => saveNow(true)}
             disabled={saveStatus === 'saving'}
             className="px-2.5 py-1 rounded text-xs font-medium transition-colors bg-primary-600 text-white hover:bg-primary-500 disabled:opacity-50"
             title="Save now"
@@ -1292,7 +1339,7 @@ export default function WikiEditor({ page }: Readonly<WikiEditorProps>) {
                     {autoSaveEnabled ? 'Auto' : 'Manual'}
                   </button>
                   <button
-                    onClick={saveNow}
+                    onClick={() => saveNow(true)}
                     disabled={saveStatus === 'saving'}
                     className="px-2.5 py-0.5 rounded text-xs font-medium transition-colors bg-primary-600 text-white hover:bg-primary-500 disabled:opacity-50"
                     title="Save now"
@@ -1322,6 +1369,15 @@ export default function WikiEditor({ page }: Readonly<WikiEditorProps>) {
                   }`}
                 >
                   Preview
+                </button>
+                <button
+                  onClick={openVersionHistory}
+                  className="px-3 py-2 rounded text-sm font-medium transition-colors bg-dark-bg-tertiary text-dark-text-secondary hover:bg-dark-bg-tertiary/80"
+                  title="Version history"
+                >
+                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+                  </svg>
                 </button>
                 <button
                   onClick={() => setIsFullscreen(true)}
@@ -1487,6 +1543,113 @@ export default function WikiEditor({ page }: Readonly<WikiEditorProps>) {
           onSave={saveEditDraw}
           onClose={closeEditDraw}
         />
+      )}
+
+      {/* Version History Panel */}
+      {showVersionHistory && (
+        <div className="fixed inset-0 z-50 flex">
+          {/* Backdrop */}
+          <div
+            className="absolute inset-0 bg-black/40"
+            onClick={() => { setShowVersionHistory(false); setViewingVersion(null) }}
+            aria-hidden="true"
+          />
+          {/* Panel */}
+          <div className="relative ml-auto w-full max-w-2xl bg-dark-bg-secondary border-l border-dark-border-subtle flex flex-col h-full shadow-2xl">
+            {/* Panel header */}
+            <div className="flex items-center justify-between px-5 py-4 border-b border-dark-border-subtle">
+              <h2 className="text-base font-semibold text-dark-text-primary">Version History</h2>
+              <button
+                onClick={() => { setShowVersionHistory(false); setViewingVersion(null) }}
+                className="text-dark-text-tertiary hover:text-dark-text-primary transition-colors"
+                aria-label="Close version history"
+              >
+                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              </button>
+            </div>
+
+            {viewingVersion ? (
+              /* Version diff view */
+              <div className="flex flex-col flex-1 overflow-hidden">
+                <div className="flex items-center gap-3 px-5 py-3 border-b border-dark-border-subtle">
+                  <button
+                    onClick={() => setViewingVersion(null)}
+                    className="text-xs text-primary-400 hover:underline"
+                  >
+                    ← Back to list
+                  </button>
+                  <span className="text-xs text-dark-text-tertiary">
+                    Version {viewingVersion.version_number} — {new Date(viewingVersion.created_at).toLocaleString()}
+                  </span>
+                  <button
+                    onClick={() => restoreVersion(viewingVersion.version_number)}
+                    className="ml-auto px-3 py-1 rounded text-xs font-medium bg-primary-600 text-white hover:bg-primary-500 transition-colors"
+                  >
+                    Restore this version
+                  </button>
+                </div>
+                <div className="flex flex-1 overflow-hidden divide-x divide-dark-border-subtle">
+                  <div className="flex-1 flex flex-col overflow-hidden">
+                    <div className="px-3 py-2 text-xs font-medium text-dark-text-tertiary bg-dark-bg-tertiary/30">This version</div>
+                    <pre className="flex-1 overflow-auto px-3 py-2 text-xs text-dark-text-secondary font-mono whitespace-pre-wrap break-words">
+                      {viewingVersion.content || <span className="text-dark-text-tertiary italic">Empty</span>}
+                    </pre>
+                  </div>
+                  <div className="flex-1 flex flex-col overflow-hidden">
+                    <div className="px-3 py-2 text-xs font-medium text-dark-text-tertiary bg-dark-bg-tertiary/30">Current</div>
+                    <pre className="flex-1 overflow-auto px-3 py-2 text-xs text-dark-text-secondary font-mono whitespace-pre-wrap break-words">
+                      {content || <span className="text-dark-text-tertiary italic">Empty</span>}
+                    </pre>
+                  </div>
+                </div>
+              </div>
+            ) : (
+              /* Version list */
+              <div className="flex-1 overflow-y-auto">
+                {versionsLoading ? (
+                  <div className="flex items-center justify-center py-12 text-dark-text-tertiary text-sm">
+                    Loading versions…
+                  </div>
+                ) : versions.length === 0 ? (
+                  <div className="flex flex-col items-center justify-center py-12 text-dark-text-tertiary text-sm gap-2">
+                    <svg className="w-8 h-8 opacity-40" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+                    </svg>
+                    <span>No versions yet. Save the page to create a version.</span>
+                  </div>
+                ) : (
+                  <ul className="divide-y divide-dark-border-subtle">
+                    {versions.map((v) => (
+                      <li key={v.id} className="flex items-center gap-3 px-5 py-3 hover:bg-dark-bg-tertiary/30 transition-colors">
+                        <div className="flex-1 min-w-0">
+                          <div className="text-sm font-medium text-dark-text-primary">Version {v.version_number}</div>
+                          <div className="text-xs text-dark-text-tertiary">
+                            {new Date(v.created_at).toLocaleString()}
+                            {v.creator_name ? ` · ${v.creator_name}` : ''}
+                          </div>
+                        </div>
+                        <button
+                          onClick={() => viewVersion(v.version_number)}
+                          className="px-2.5 py-1 rounded text-xs font-medium bg-dark-bg-tertiary text-dark-text-secondary hover:bg-dark-bg-primary/50 transition-colors"
+                        >
+                          View
+                        </button>
+                        <button
+                          onClick={() => restoreVersion(v.version_number)}
+                          className="px-2.5 py-1 rounded text-xs font-medium bg-primary-600/20 text-primary-400 hover:bg-primary-600/30 transition-colors"
+                        >
+                          Restore
+                        </button>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </div>
+            )}
+          </div>
+        </div>
       )}
     </>
   )

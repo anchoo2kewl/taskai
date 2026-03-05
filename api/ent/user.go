@@ -89,11 +89,15 @@ type UserEdges struct {
 	TaskAttachments []*TaskAttachment `json:"task_attachments,omitempty"`
 	// WikiPagesCreated holds the value of the wiki_pages_created edge.
 	WikiPagesCreated []*WikiPage `json:"wiki_pages_created,omitempty"`
+	// WikiPagesUpdated holds the value of the wiki_pages_updated edge.
+	WikiPagesUpdated []*WikiPage `json:"wiki_pages_updated,omitempty"`
+	// WikiPageVersionsCreated holds the value of the wiki_page_versions_created edge.
+	WikiPageVersionsCreated []*WikiPageVersion `json:"wiki_page_versions_created,omitempty"`
 	// YjsUpdates holds the value of the yjs_updates edge.
 	YjsUpdates []*YjsUpdate `json:"yjs_updates,omitempty"`
 	// loadedTypes holds the information for reporting if a
 	// type was loaded (or requested) in eager-loading or not.
-	loadedTypes [20]bool
+	loadedTypes [22]bool
 }
 
 // OwnedProjectsOrErr returns the OwnedProjects value or an error if the edge
@@ -267,10 +271,28 @@ func (e UserEdges) WikiPagesCreatedOrErr() ([]*WikiPage, error) {
 	return nil, &NotLoadedError{edge: "wiki_pages_created"}
 }
 
+// WikiPagesUpdatedOrErr returns the WikiPagesUpdated value or an error if the edge
+// was not loaded in eager-loading.
+func (e UserEdges) WikiPagesUpdatedOrErr() ([]*WikiPage, error) {
+	if e.loadedTypes[19] {
+		return e.WikiPagesUpdated, nil
+	}
+	return nil, &NotLoadedError{edge: "wiki_pages_updated"}
+}
+
+// WikiPageVersionsCreatedOrErr returns the WikiPageVersionsCreated value or an error if the edge
+// was not loaded in eager-loading.
+func (e UserEdges) WikiPageVersionsCreatedOrErr() ([]*WikiPageVersion, error) {
+	if e.loadedTypes[20] {
+		return e.WikiPageVersionsCreated, nil
+	}
+	return nil, &NotLoadedError{edge: "wiki_page_versions_created"}
+}
+
 // YjsUpdatesOrErr returns the YjsUpdates value or an error if the edge
 // was not loaded in eager-loading.
 func (e UserEdges) YjsUpdatesOrErr() ([]*YjsUpdate, error) {
-	if e.loadedTypes[19] {
+	if e.loadedTypes[21] {
 		return e.YjsUpdates, nil
 	}
 	return nil, &NotLoadedError{edge: "yjs_updates"}
@@ -500,6 +522,16 @@ func (_m *User) QueryTaskAttachments() *TaskAttachmentQuery {
 // QueryWikiPagesCreated queries the "wiki_pages_created" edge of the User entity.
 func (_m *User) QueryWikiPagesCreated() *WikiPageQuery {
 	return NewUserClient(_m.config).QueryWikiPagesCreated(_m)
+}
+
+// QueryWikiPagesUpdated queries the "wiki_pages_updated" edge of the User entity.
+func (_m *User) QueryWikiPagesUpdated() *WikiPageQuery {
+	return NewUserClient(_m.config).QueryWikiPagesUpdated(_m)
+}
+
+// QueryWikiPageVersionsCreated queries the "wiki_page_versions_created" edge of the User entity.
+func (_m *User) QueryWikiPageVersionsCreated() *WikiPageVersionQuery {
+	return NewUserClient(_m.config).QueryWikiPageVersionsCreated(_m)
 }
 
 // QueryYjsUpdates queries the "yjs_updates" edge of the User entity.

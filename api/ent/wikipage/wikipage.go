@@ -22,6 +22,8 @@ const (
 	FieldSlug = "slug"
 	// FieldCreatedBy holds the string denoting the created_by field in the database.
 	FieldCreatedBy = "created_by"
+	// FieldUpdatedBy holds the string denoting the updated_by field in the database.
+	FieldUpdatedBy = "updated_by"
 	// FieldContent holds the string denoting the content field in the database.
 	FieldContent = "content"
 	// FieldCreatedAt holds the string denoting the created_at field in the database.
@@ -32,10 +34,14 @@ const (
 	EdgeProject = "project"
 	// EdgeCreator holds the string denoting the creator edge name in mutations.
 	EdgeCreator = "creator"
+	// EdgeUpdater holds the string denoting the updater edge name in mutations.
+	EdgeUpdater = "updater"
 	// EdgeYjsUpdates holds the string denoting the yjs_updates edge name in mutations.
 	EdgeYjsUpdates = "yjs_updates"
 	// EdgeVersions holds the string denoting the versions edge name in mutations.
 	EdgeVersions = "versions"
+	// EdgeWikiPageVersions holds the string denoting the wiki_page_versions edge name in mutations.
+	EdgeWikiPageVersions = "wiki_page_versions"
 	// EdgeBlocks holds the string denoting the blocks edge name in mutations.
 	EdgeBlocks = "blocks"
 	// Table holds the table name of the wikipage in the database.
@@ -54,6 +60,13 @@ const (
 	CreatorInverseTable = "users"
 	// CreatorColumn is the table column denoting the creator relation/edge.
 	CreatorColumn = "created_by"
+	// UpdaterTable is the table that holds the updater relation/edge.
+	UpdaterTable = "wiki_pages"
+	// UpdaterInverseTable is the table name for the User entity.
+	// It exists in this package in order to avoid circular dependency with the "user" package.
+	UpdaterInverseTable = "users"
+	// UpdaterColumn is the table column denoting the updater relation/edge.
+	UpdaterColumn = "updated_by"
 	// YjsUpdatesTable is the table that holds the yjs_updates relation/edge.
 	YjsUpdatesTable = "yjs_updates"
 	// YjsUpdatesInverseTable is the table name for the YjsUpdate entity.
@@ -68,6 +81,13 @@ const (
 	VersionsInverseTable = "page_versions"
 	// VersionsColumn is the table column denoting the versions relation/edge.
 	VersionsColumn = "page_id"
+	// WikiPageVersionsTable is the table that holds the wiki_page_versions relation/edge.
+	WikiPageVersionsTable = "wiki_page_versions"
+	// WikiPageVersionsInverseTable is the table name for the WikiPageVersion entity.
+	// It exists in this package in order to avoid circular dependency with the "wikipageversion" package.
+	WikiPageVersionsInverseTable = "wiki_page_versions"
+	// WikiPageVersionsColumn is the table column denoting the wiki_page_versions relation/edge.
+	WikiPageVersionsColumn = "wiki_page_id"
 	// BlocksTable is the table that holds the blocks relation/edge.
 	BlocksTable = "wiki_blocks"
 	// BlocksInverseTable is the table name for the WikiBlock entity.
@@ -84,6 +104,7 @@ var Columns = []string{
 	FieldTitle,
 	FieldSlug,
 	FieldCreatedBy,
+	FieldUpdatedBy,
 	FieldContent,
 	FieldCreatedAt,
 	FieldUpdatedAt,
@@ -142,6 +163,11 @@ func ByCreatedBy(opts ...sql.OrderTermOption) OrderOption {
 	return sql.OrderByField(FieldCreatedBy, opts...).ToFunc()
 }
 
+// ByUpdatedBy orders the results by the updated_by field.
+func ByUpdatedBy(opts ...sql.OrderTermOption) OrderOption {
+	return sql.OrderByField(FieldUpdatedBy, opts...).ToFunc()
+}
+
 // ByContent orders the results by the content field.
 func ByContent(opts ...sql.OrderTermOption) OrderOption {
 	return sql.OrderByField(FieldContent, opts...).ToFunc()
@@ -168,6 +194,13 @@ func ByProjectField(field string, opts ...sql.OrderTermOption) OrderOption {
 func ByCreatorField(field string, opts ...sql.OrderTermOption) OrderOption {
 	return func(s *sql.Selector) {
 		sqlgraph.OrderByNeighborTerms(s, newCreatorStep(), sql.OrderByField(field, opts...))
+	}
+}
+
+// ByUpdaterField orders the results by updater field.
+func ByUpdaterField(field string, opts ...sql.OrderTermOption) OrderOption {
+	return func(s *sql.Selector) {
+		sqlgraph.OrderByNeighborTerms(s, newUpdaterStep(), sql.OrderByField(field, opts...))
 	}
 }
 
@@ -199,6 +232,20 @@ func ByVersions(term sql.OrderTerm, terms ...sql.OrderTerm) OrderOption {
 	}
 }
 
+// ByWikiPageVersionsCount orders the results by wiki_page_versions count.
+func ByWikiPageVersionsCount(opts ...sql.OrderTermOption) OrderOption {
+	return func(s *sql.Selector) {
+		sqlgraph.OrderByNeighborsCount(s, newWikiPageVersionsStep(), opts...)
+	}
+}
+
+// ByWikiPageVersions orders the results by wiki_page_versions terms.
+func ByWikiPageVersions(term sql.OrderTerm, terms ...sql.OrderTerm) OrderOption {
+	return func(s *sql.Selector) {
+		sqlgraph.OrderByNeighborTerms(s, newWikiPageVersionsStep(), append([]sql.OrderTerm{term}, terms...)...)
+	}
+}
+
 // ByBlocksCount orders the results by blocks count.
 func ByBlocksCount(opts ...sql.OrderTermOption) OrderOption {
 	return func(s *sql.Selector) {
@@ -226,6 +273,13 @@ func newCreatorStep() *sqlgraph.Step {
 		sqlgraph.Edge(sqlgraph.M2O, true, CreatorTable, CreatorColumn),
 	)
 }
+func newUpdaterStep() *sqlgraph.Step {
+	return sqlgraph.NewStep(
+		sqlgraph.From(Table, FieldID),
+		sqlgraph.To(UpdaterInverseTable, FieldID),
+		sqlgraph.Edge(sqlgraph.M2O, true, UpdaterTable, UpdaterColumn),
+	)
+}
 func newYjsUpdatesStep() *sqlgraph.Step {
 	return sqlgraph.NewStep(
 		sqlgraph.From(Table, FieldID),
@@ -238,6 +292,13 @@ func newVersionsStep() *sqlgraph.Step {
 		sqlgraph.From(Table, FieldID),
 		sqlgraph.To(VersionsInverseTable, FieldID),
 		sqlgraph.Edge(sqlgraph.O2M, false, VersionsTable, VersionsColumn),
+	)
+}
+func newWikiPageVersionsStep() *sqlgraph.Step {
+	return sqlgraph.NewStep(
+		sqlgraph.From(Table, FieldID),
+		sqlgraph.To(WikiPageVersionsInverseTable, FieldID),
+		sqlgraph.Edge(sqlgraph.O2M, false, WikiPageVersionsTable, WikiPageVersionsColumn),
 	)
 }
 func newBlocksStep() *sqlgraph.Step {

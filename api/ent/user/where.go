@@ -1252,6 +1252,52 @@ func HasWikiPagesCreatedWith(preds ...predicate.WikiPage) predicate.User {
 	})
 }
 
+// HasWikiPagesUpdated applies the HasEdge predicate on the "wiki_pages_updated" edge.
+func HasWikiPagesUpdated() predicate.User {
+	return predicate.User(func(s *sql.Selector) {
+		step := sqlgraph.NewStep(
+			sqlgraph.From(Table, FieldID),
+			sqlgraph.Edge(sqlgraph.O2M, false, WikiPagesUpdatedTable, WikiPagesUpdatedColumn),
+		)
+		sqlgraph.HasNeighbors(s, step)
+	})
+}
+
+// HasWikiPagesUpdatedWith applies the HasEdge predicate on the "wiki_pages_updated" edge with a given conditions (other predicates).
+func HasWikiPagesUpdatedWith(preds ...predicate.WikiPage) predicate.User {
+	return predicate.User(func(s *sql.Selector) {
+		step := newWikiPagesUpdatedStep()
+		sqlgraph.HasNeighborsWith(s, step, func(s *sql.Selector) {
+			for _, p := range preds {
+				p(s)
+			}
+		})
+	})
+}
+
+// HasWikiPageVersionsCreated applies the HasEdge predicate on the "wiki_page_versions_created" edge.
+func HasWikiPageVersionsCreated() predicate.User {
+	return predicate.User(func(s *sql.Selector) {
+		step := sqlgraph.NewStep(
+			sqlgraph.From(Table, FieldID),
+			sqlgraph.Edge(sqlgraph.O2M, false, WikiPageVersionsCreatedTable, WikiPageVersionsCreatedColumn),
+		)
+		sqlgraph.HasNeighbors(s, step)
+	})
+}
+
+// HasWikiPageVersionsCreatedWith applies the HasEdge predicate on the "wiki_page_versions_created" edge with a given conditions (other predicates).
+func HasWikiPageVersionsCreatedWith(preds ...predicate.WikiPageVersion) predicate.User {
+	return predicate.User(func(s *sql.Selector) {
+		step := newWikiPageVersionsCreatedStep()
+		sqlgraph.HasNeighborsWith(s, step, func(s *sql.Selector) {
+			for _, p := range preds {
+				p(s)
+			}
+		})
+	})
+}
+
 // HasYjsUpdates applies the HasEdge predicate on the "yjs_updates" edge.
 func HasYjsUpdates() predicate.User {
 	return predicate.User(func(s *sql.Selector) {

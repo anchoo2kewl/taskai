@@ -26,6 +26,7 @@ import (
 	"taskai/ent/useractivity"
 	"taskai/ent/wikiblock"
 	"taskai/ent/wikipage"
+	"taskai/ent/wikipageversion"
 	"taskai/ent/yjsupdate"
 	"time"
 )
@@ -471,19 +472,33 @@ func init() {
 		}
 	}()
 	// wikipageDescContent is the schema descriptor for content field.
-	wikipageDescContent := wikipageFields[5].Descriptor()
+	wikipageDescContent := wikipageFields[6].Descriptor()
 	// wikipage.DefaultContent holds the default value on creation for the content field.
 	wikipage.DefaultContent = wikipageDescContent.Default.(string)
 	// wikipageDescCreatedAt is the schema descriptor for created_at field.
-	wikipageDescCreatedAt := wikipageFields[6].Descriptor()
+	wikipageDescCreatedAt := wikipageFields[7].Descriptor()
 	// wikipage.DefaultCreatedAt holds the default value on creation for the created_at field.
 	wikipage.DefaultCreatedAt = wikipageDescCreatedAt.Default.(func() time.Time)
 	// wikipageDescUpdatedAt is the schema descriptor for updated_at field.
-	wikipageDescUpdatedAt := wikipageFields[7].Descriptor()
+	wikipageDescUpdatedAt := wikipageFields[8].Descriptor()
 	// wikipage.DefaultUpdatedAt holds the default value on creation for the updated_at field.
 	wikipage.DefaultUpdatedAt = wikipageDescUpdatedAt.Default.(func() time.Time)
 	// wikipage.UpdateDefaultUpdatedAt holds the default value on update for the updated_at field.
 	wikipage.UpdateDefaultUpdatedAt = wikipageDescUpdatedAt.UpdateDefault.(func() time.Time)
+	wikipageversionFields := schema.WikiPageVersion{}.Fields()
+	_ = wikipageversionFields
+	// wikipageversionDescContent is the schema descriptor for content field.
+	wikipageversionDescContent := wikipageversionFields[3].Descriptor()
+	// wikipageversion.DefaultContent holds the default value on creation for the content field.
+	wikipageversion.DefaultContent = wikipageversionDescContent.Default.(string)
+	// wikipageversionDescContentHash is the schema descriptor for content_hash field.
+	wikipageversionDescContentHash := wikipageversionFields[4].Descriptor()
+	// wikipageversion.ContentHashValidator is a validator for the "content_hash" field. It is called by the builders before save.
+	wikipageversion.ContentHashValidator = wikipageversionDescContentHash.Validators[0].(func(string) error)
+	// wikipageversionDescCreatedAt is the schema descriptor for created_at field.
+	wikipageversionDescCreatedAt := wikipageversionFields[6].Descriptor()
+	// wikipageversion.DefaultCreatedAt holds the default value on creation for the created_at field.
+	wikipageversion.DefaultCreatedAt = wikipageversionDescCreatedAt.Default.(func() time.Time)
 	yjsupdateFields := schema.YjsUpdate{}.Fields()
 	_ = yjsupdateFields
 	// yjsupdateDescUpdateData is the schema descriptor for update_data field.

@@ -128,6 +128,20 @@ export interface WikiPage {
   updated_at: string
 }
 
+export interface WikiPageVersion {
+  id: number
+  wiki_page_id: number
+  version_number: number
+  content_hash: string
+  created_by: number
+  creator_name?: string
+  created_at: string
+}
+
+export interface WikiPageVersionWithContent extends WikiPageVersion {
+  content: string
+}
+
 export interface WikiSearchResult {
   page_id: number
   page_title: string
@@ -1384,11 +1398,26 @@ class ApiClient {
     return this.request<{ page_id: number; content: string; updated_at: string }>(`/api/wiki/pages/${pageId}/content`)
   }
 
-  async updateWikiPageContent(pageId: number, content: string): Promise<{ page_id: number; content: string; updated_at: string }> {
+  async updateWikiPageContent(pageId: number, content: string, manualSave = false): Promise<{ page_id: number; content: string; updated_at: string }> {
     return this.request<{ page_id: number; content: string; updated_at: string }>(`/api/wiki/pages/${pageId}/content`, {
       method: 'PUT',
-      body: JSON.stringify({ content }),
+      body: JSON.stringify({ content, manual_save: manualSave }),
     })
+  }
+
+  async getWikiPageVersions(pageId: number): Promise<WikiPageVersion[]> {
+    return this.request<WikiPageVersion[]>(`/api/wiki/pages/${pageId}/versions`)
+  }
+
+  async getWikiPageVersion(pageId: number, versionNumber: number): Promise<WikiPageVersionWithContent> {
+    return this.request<WikiPageVersionWithContent>(`/api/wiki/pages/${pageId}/versions/${versionNumber}`)
+  }
+
+  async restoreWikiPageVersion(pageId: number, versionNumber: number): Promise<{ page_id: number; content: string; updated_at: string }> {
+    return this.request<{ page_id: number; content: string; updated_at: string }>(
+      `/api/wiki/pages/${pageId}/versions/${versionNumber}/restore`,
+      { method: 'POST' },
+    )
   }
 
   async searchWiki(query: string, projectId?: number, limit?: number): Promise<{ results: WikiSearchResult[]; total: number }> {

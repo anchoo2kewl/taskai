@@ -243,7 +243,7 @@ func fetchProjectStatusColumns(ctx context.Context, token, owner, repo string) (
 	const q = `
 query($owner: String!, $repo: String!) {
   repository(owner: $owner, name: $repo) {
-    projectsV2(first: 10) {
+    projectsV2(first: 50) {
       nodes {
         id
         fields(first: 20) {
@@ -255,7 +255,7 @@ query($owner: String!, $repo: String!) {
     }
     owner {
       ... on Organization {
-        projectsV2(first: 10) {
+        projectsV2(first: 50) {
           nodes {
             id
             fields(first: 20) {
@@ -267,7 +267,7 @@ query($owner: String!, $repo: String!) {
         }
       }
       ... on User {
-        projectsV2(first: 10) {
+        projectsV2(first: 50) {
           nodes {
             id
             fields(first: 20) {
@@ -400,7 +400,7 @@ query($projectId: ID!, $cursor: String) {
 	}
 
 	var cursor *string
-	for page := 0; page < 20; page++ {
+	for page := 0; page < 300; page++ { // up to 30,000 project items
 		vars := map[string]interface{}{"projectId": projectID}
 		if cursor != nil {
 			vars["cursor"] = *cursor
@@ -1187,9 +1187,9 @@ func (s *Server) handleGitHubImport(w http.ResponseWriter, r *http.Request, doUp
 		issueColumnMap := map[int]ghProjectItemStatus{}
 		if projInfo, err := fetchProjectStatusColumns(ctx, token, owner, repo); err == nil && projInfo != nil {
 			// Persist project/field IDs so push operations can use them later
-			_, _ = s.db.ExecContext(ctx, `
-				UPDATE projects SET github_project_id = $1, github_status_field_id = $2 WHERE id = $3
-			`, projInfo.ProjectID, projInfo.FieldID, projectID)
+			_, _ = s.db.ExecContext(ctx,
+				s.db.Rebind(`UPDATE projects SET github_project_id = ?, github_status_field_id = ? WHERE id = ?`),
+				projInfo.ProjectID, projInfo.FieldID, projectID)
 
 			if m, err := fetchProjectIssueStatuses(ctx, token, projInfo.ProjectID); err == nil {
 				issueColumnMap = m
@@ -1200,7 +1200,8 @@ func (s *Server) handleGitHubImport(w http.ResponseWriter, r *http.Request, doUp
 			for _, opt := range projInfo.Options {
 				if laneID, _ := fuzzyMatchColumn(opt.Name, lanes); laneID != 0 {
 					optID := opt.ID
-					_, _ = s.db.ExecContext(ctx, `UPDATE swim_lanes SET github_option_id = $1 WHERE id = $2`, optID, laneID)
+					_, _ = s.db.ExecContext(ctx,
+						s.db.Rebind(`UPDATE swim_lanes SET github_option_id = ? WHERE id = ?`), optID, laneID)
 				}
 			}
 		}

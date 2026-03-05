@@ -29,6 +29,8 @@ type WikiPageResponse struct {
 	Slug        string    `json:"slug"`
 	CreatedBy   int64     `json:"created_by"`
 	CreatorName *string   `json:"creator_name,omitempty"`
+	UpdatedBy   *int64    `json:"updated_by,omitempty"`
+	UpdaterName *string   `json:"updater_name,omitempty"`
 	CreatedAt   time.Time `json:"created_at"`
 	UpdatedAt   time.Time `json:"updated_at"`
 }
@@ -70,6 +72,7 @@ func (s *Server) HandleListWikiPages(w http.ResponseWriter, r *http.Request) {
 	pages, err := s.db.Client.WikiPage.Query().
 		Where(wikipage.ProjectID(projectID)).
 		WithCreator().
+		WithUpdater().
 		Order(ent.Asc(wikipage.FieldTitle)).
 		All(ctx)
 	if err != nil {
@@ -90,11 +93,15 @@ func (s *Server) HandleListWikiPages(w http.ResponseWriter, r *http.Request) {
 			Title:     p.Title,
 			Slug:      p.Slug,
 			CreatedBy: p.CreatedBy,
+			UpdatedBy: p.UpdatedBy,
 			CreatedAt: p.CreatedAt,
 			UpdatedAt: p.UpdatedAt,
 		}
 		if p.Edges.Creator != nil && p.Edges.Creator.Name != nil {
 			wp.CreatorName = p.Edges.Creator.Name
+		}
+		if p.Edges.Updater != nil && p.Edges.Updater.Name != nil {
+			wp.UpdaterName = p.Edges.Updater.Name
 		}
 		response = append(response, wp)
 	}
@@ -225,6 +232,7 @@ func (s *Server) HandleGetWikiPage(w http.ResponseWriter, r *http.Request) {
 	page, err := s.db.Client.WikiPage.Query().
 		Where(wikipage.ID(pageID)).
 		WithCreator().
+		WithUpdater().
 		WithProject().
 		Only(ctx)
 	if err != nil {
@@ -257,11 +265,15 @@ func (s *Server) HandleGetWikiPage(w http.ResponseWriter, r *http.Request) {
 		Title:     page.Title,
 		Slug:      page.Slug,
 		CreatedBy: page.CreatedBy,
+		UpdatedBy: page.UpdatedBy,
 		CreatedAt: page.CreatedAt,
 		UpdatedAt: page.UpdatedAt,
 	}
 	if page.Edges.Creator != nil && page.Edges.Creator.Name != nil {
 		response.CreatorName = page.Edges.Creator.Name
+	}
+	if page.Edges.Updater != nil && page.Edges.Updater.Name != nil {
+		response.UpdaterName = page.Edges.Updater.Name
 	}
 
 	respondJSON(w, http.StatusOK, response)

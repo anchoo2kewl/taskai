@@ -124,6 +124,9 @@ export interface WikiPage {
   title: string
   slug: string
   created_by: number
+  creator_name?: string
+  updated_by?: number
+  updater_name?: string
   created_at: string
   updated_at: string
 }

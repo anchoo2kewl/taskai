@@ -1180,6 +1180,8 @@ func (s *Server) handleGitHubImport(w http.ResponseWriter, r *http.Request, doUp
 	}
 
 	var result GitHubPullResponse
+	// Track Projects V2 status keys not yet in the mapping table so we can register them.
+	unknownStatusKeys := map[string]struct{}{}
 
 	// --- Import Sprints from Milestones ---
 	if req.PullSprints {
@@ -1476,6 +1478,9 @@ func (s *Server) handleGitHubImport(w http.ResponseWriter, r *http.Request, doUp
 						swimLaneID = &laneID
 					} else if laneID, ok := statusAssignmentsLower[strings.ToLower(itemStatus.StatusName)]; ok && laneID > 0 {
 						swimLaneID = &laneID
+					} else {
+						// Status key not yet mapped — register it so it surfaces in the UI.
+						unknownStatusKeys[itemStatus.StatusName] = struct{}{}
 					}
 				}
 			}
@@ -1628,6 +1633,8 @@ func (s *Server) handleGitHubImport(w http.ResponseWriter, r *http.Request, doUp
 	_, _ = s.db.ExecContext(ctx, `UPDATE projects SET github_last_sync = $1 WHERE id = $2`, time.Now(), projectID)
 
 	// Persist the mappings used in this sync so future syncs reuse them.
+	// Also register any newly-discovered status keys so they surface in the mapping UI.
+	s.registerUnknownStatusKeys(ctx, int64(projectID), unknownStatusKeys)
 	s.saveGitHubMappings(ctx, int64(projectID), req.StatusAssignments, req.UserAssignments)
 
 	finishSyncLog(&result, nil)
@@ -1851,6 +1858,19 @@ func (s *Server) saveGitHubMappings(ctx context.Context, projectID int64, status
 				VALUES (?, ?, ?)
 				ON CONFLICT(project_id, github_login) DO UPDATE SET user_id = excluded.user_id`),
 			projectID, login, uidVal)
+	}
+}
+
+// registerUnknownStatusKeys inserts newly-discovered Projects V2 status keys with a NULL
+// swim_lane_id so they surface in the mapping UI. Uses ON CONFLICT DO NOTHING so it never
+// overwrites an existing (user-configured) mapping.
+func (s *Server) registerUnknownStatusKeys(ctx context.Context, projectID int64, keys map[string]struct{}) {
+	for key := range keys {
+		_, _ = s.db.ExecContext(ctx,
+			s.db.Rebind(`INSERT INTO github_status_mappings (project_id, status_key, swim_lane_id)
+				VALUES (?, ?, NULL)
+				ON CONFLICT(project_id, status_key) DO NOTHING`),
+			projectID, key)
 	}
 }
 
@@ -2435,6 +2455,7 @@ func (s *Server) runGitHubImportCore(ctx context.Context, projectID int, owner, 
 	_ = noop
 
 	// --- Import Tasks from Issues ---
+	unknownStatusKeys := map[string]struct{}{}
 	if req.PullTasks {
 		buildIssueURL := func(page int) string {
 			return fmt.Sprintf("%s/issues?state=all&per_page=100&page=%d", base, page)
@@ -2486,6 +2507,7 @@ func (s *Server) runGitHubImportCore(ctx context.Context, projectID int, owner, 
 			statusAssignmentsLower[strings.ToLower(k)] = v
 		}
 
+
 		var maxNumber sql.NullInt64
 		_ = s.db.QueryRowContext(ctx, `SELECT MAX(task_number) FROM tasks WHERE project_id = $1`, projectID).Scan(&maxNumber)
 		nextNumber := int64(1)
@@ -2516,6 +2538,9 @@ func (s *Server) runGitHubImportCore(ctx context.Context, projectID int, owner, 
 						swimLaneID = &laneID
 					} else if laneID, ok := statusAssignmentsLower[strings.ToLower(itemStatus.StatusName)]; ok && laneID > 0 {
 						swimLaneID = &laneID
+					} else {
+						// Status key not yet mapped â register it so it surfaces in the UI.
+						unknownStatusKeys[itemStatus.StatusName] = struct{}{}
 					}
 				}
 			}
@@ -2616,6 +2641,7 @@ func (s *Server) runGitHubImportCore(ctx context.Context, projectID int, owner, 
 
 	// Update last sync timestamp
 	_, _ = s.db.ExecContext(ctx, `UPDATE projects SET github_last_sync = $1 WHERE id = $2`, time.Now(), projectID)
+	s.registerUnknownStatusKeys(ctx, int64(projectID), unknownStatusKeys)
 	s.saveGitHubMappings(ctx, int64(projectID), req.StatusAssignments, req.UserAssignments)
 
 	return result

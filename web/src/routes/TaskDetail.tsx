@@ -56,6 +56,7 @@ export default function TaskDetail({ isModal, onClose }: TaskDetailProps) {
   // GitHub push
   const [pushingToGitHub, setPushingToGitHub] = useState(false)
   const [githubPushResult, setGithubPushResult] = useState<GitHubPushTaskResponse | null>(null)
+  const [githubRepo, setGithubRepo] = useState<{ github_owner: string; github_repo_name: string } | null>(null)
 
   useEffect(() => {
     loadTask()
@@ -63,6 +64,11 @@ export default function TaskDetail({ isModal, onClose }: TaskDetailProps) {
     loadSwimLanes()
     loadMembers()
     loadProjectTags()
+    if (projectId) {
+      apiClient.getProjectGitHub(Number(projectId))
+        .then(s => setGithubRepo({ github_owner: s.github_owner, github_repo_name: s.github_repo_name }))
+        .catch(() => {})
+    }
   }, [projectId, taskNumber]) // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
@@ -305,6 +311,9 @@ export default function TaskDetail({ isModal, onClose }: TaskDetailProps) {
           break
         case 'assignee_id':
           update.assignee_id = value ? parseInt(value) : null
+          break
+        case 'start_date':
+          update.start_date = value || null
           break
         case 'due_date':
           update.due_date = value || null
@@ -848,6 +857,28 @@ export default function TaskDetail({ isModal, onClose }: TaskDetailProps) {
                 />
               </SidebarField>
 
+              {/* Start Date */}
+              <SidebarField label="Start Date">
+                {editingField === 'start_date' ? (
+                  <input
+                    type="date"
+                    value={editValue}
+                    onChange={(e) => setEditValue(e.target.value)}
+                    onBlur={() => saveField('start_date', editValue)}
+                    onKeyDown={(e) => handleKeyDown(e, 'start_date')}
+                    className="w-full text-sm bg-dark-bg-primary border border-dark-border-subtle text-dark-text-primary rounded-md px-3 py-1.5 focus:ring-1 focus:ring-primary-500 focus:border-primary-500 outline-none"
+                    autoFocus
+                  />
+                ) : (
+                  <button
+                    onClick={() => startEdit('start_date', task.start_date?.split('T')[0] || '')}
+                    className="text-sm text-dark-text-primary hover:bg-dark-bg-tertiary/50 px-3 py-1.5 rounded-md w-full text-left transition-colors"
+                  >
+                    {task.start_date ? new Date(task.start_date).toLocaleDateString() : 'None'}
+                  </button>
+                )}
+              </SidebarField>
+
               {/* Due Date */}
               <SidebarField label="Due Date">
                 {editingField === 'due_date' ? (
@@ -933,10 +964,10 @@ export default function TaskDetail({ isModal, onClose }: TaskDetailProps) {
 
             {/* GitHub */}
             <div className="mt-4">
-              {githubPushResult?.html_url ? (
+              {task.github_issue_number && githubRepo?.github_owner && githubRepo?.github_repo_name ? (
                 <div className="flex items-center gap-2">
                   <a
-                    href={githubPushResult.html_url}
+                    href={githubPushResult?.html_url || `https://github.com/${githubRepo.github_owner}/${githubRepo.github_repo_name}/issues/${task.github_issue_number}`}
                     target="_blank"
                     rel="noopener noreferrer"
                     className="flex items-center gap-1.5 text-xs text-primary-400 hover:text-primary-300 transition-colors"

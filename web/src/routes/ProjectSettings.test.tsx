@@ -85,6 +85,7 @@ describe('ProjectSettings', () => {
       github_last_sync: null,
       github_token_set: false,
       github_login: null,
+      github_project_url: '',
     })
     mocks.getSwimLanes.mockResolvedValue(swimLanes)
     mocks.getStorageUsage.mockResolvedValue([])

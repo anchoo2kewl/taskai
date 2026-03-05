@@ -1609,13 +1609,33 @@ func (s *Server) handleGitHubImport(w http.ResponseWriter, r *http.Request, doUp
 			}
 			rows.Close()
 
+			// Build set of tasks that already have GitHub comments imported.
+			// Tasks with zero existing comments must always fetch — they may have missed
+			// comments created before the first sync or before the since-filter was fixed.
+			tasksWithComments := map[int64]bool{}
+			crows, cerr := s.db.QueryContext(ctx, `
+				SELECT DISTINCT task_id FROM task_comments
+				WHERE task_id IN (SELECT id FROM tasks WHERE project_id = $1 AND github_issue_number IS NOT NULL)
+				AND github_comment_id IS NOT NULL
+			`, projectID)
+			if cerr == nil {
+				for crows.Next() {
+					var tid int64
+					if crows.Scan(&tid) == nil {
+						tasksWithComments[tid] = true
+					}
+				}
+				crows.Close()
+			}
+
 			progress("comments", fmt.Sprintf("Fetching comments for %d issues...", len(taskRefs)), 0, len(taskRefs))
 			for i, tr := range taskRefs {
 				if i%10 == 0 && i > 0 {
 					progress("comments", fmt.Sprintf("Fetched comments for %d/%d issues...", i, len(taskRefs)), i, len(taskRefs))
 				}
-				// Skip issues that haven't been updated since last sync — their comments are already synced.
-				if sinceParam != "" && !updatedIssues[tr.issueNum] {
+				// Skip issues not updated since last sync only if the task already has comments.
+				// Tasks with zero comments must always fetch to catch comments that predate the sync.
+				if sinceParam != "" && !updatedIssues[tr.issueNum] && tasksWithComments[tr.taskID] {
 					continue
 				}
 				var ghComments []ghIssueComment
@@ -2733,11 +2753,29 @@ func (s *Server) runGitHubImportCore(ctx context.Context, projectID int, owner, 
 			rows.Close()
 
 			var ownerID int64
-			_ = s.db.QueryRowContext(ctx, `SELECT user_id FROM project_members WHERE project_id = $1 AND role = 'owner' LIMIT 1`, projectID).Scan(&ownerID)
+			_ = s.db.QueryRowContext(ctx, s.db.Rebind(`SELECT user_id FROM project_members WHERE project_id = ? AND role = 'owner' LIMIT 1`), projectID).Scan(&ownerID)
+
+			// Build set of tasks that already have GitHub comments imported.
+			tasksWithComments := map[int64]bool{}
+			crows2, cerr2 := s.db.QueryContext(ctx, s.db.Rebind(`
+				SELECT DISTINCT task_id FROM task_comments
+				WHERE task_id IN (SELECT id FROM tasks WHERE project_id = ? AND github_issue_number IS NOT NULL)
+				AND github_comment_id IS NOT NULL
+			`), projectID)
+			if cerr2 == nil {
+				for crows2.Next() {
+					var tid int64
+					if crows2.Scan(&tid) == nil {
+						tasksWithComments[tid] = true
+					}
+				}
+				crows2.Close()
+			}
 
 			for _, tr := range taskRefs {
-				// Skip issues not updated since last sync — their comments are already in sync.
-				if sinceParam != "" && updatedIssues != nil && !updatedIssues[tr.issueNum] {
+				// Skip issues not updated since last sync only if the task already has comments.
+				// Tasks with zero comments must always fetch to catch pre-sync comments.
+				if sinceParam != "" && !updatedIssues[tr.issueNum] && tasksWithComments[tr.taskID] {
 					continue
 				}
 				// Fetch all comments (no since) — ON CONFLICT handles dedup.

@@ -586,26 +586,32 @@ export default function ProjectDetail() {
                 </div>
               ) : (
                 <>
-                  {/* Mobile: swim lane tab picker */}
-                  <div className="md:hidden flex gap-1.5 overflow-x-auto pb-3 -mx-1 px-1" style={{ scrollbarWidth: 'none' }}>
-                    {swimLanes.map(lane => (
-                      <button
-                        key={lane.id}
-                        onClick={() => setMobileLane(lane.id)}
-                        className={`flex-shrink-0 flex items-center gap-1.5 px-3 py-1.5 rounded-full text-sm font-medium transition-all ${
-                          mobileLane === lane.id
-                            ? 'bg-dark-bg-elevated border border-dark-border-medium text-dark-text-primary shadow-linear-sm'
-                            : 'text-dark-text-tertiary hover:text-dark-text-secondary hover:bg-dark-bg-secondary'
-                        }`}
-                      >
-                        <span className="w-2 h-2 rounded-full flex-shrink-0" style={{ backgroundColor: lane.color }} />
-                        {lane.name}
-                        <span className={`text-xs tabular-nums ${mobileLane === lane.id ? 'text-dark-text-secondary' : 'text-dark-text-quaternary'}`}>
-                          {tasksBySwimLane[lane.id]?.length || 0}
-                        </span>
-                      </button>
-                    ))}
-                  </div>
+                  {/* Mobile: swim lane dropdown */}
+                  {mobileLane !== null && (
+                    <div className="md:hidden mb-3 relative">
+                      <div className="flex items-center gap-2 px-3 py-2.5 bg-dark-bg-elevated border border-dark-border-medium rounded-lg shadow-linear-sm">
+                        <span
+                          className="w-2.5 h-2.5 rounded-full flex-shrink-0"
+                          style={{ backgroundColor: swimLanes.find(l => l.id === mobileLane)?.color }}
+                        />
+                        <select
+                          value={mobileLane}
+                          onChange={e => setMobileLane(Number(e.target.value))}
+                          className="flex-1 bg-transparent text-sm font-medium text-dark-text-primary outline-none appearance-none cursor-pointer"
+                          aria-label="Select swim lane"
+                        >
+                          {swimLanes.map(lane => (
+                            <option key={lane.id} value={lane.id}>
+                              {lane.name} ({tasksBySwimLane[lane.id]?.length || 0})
+                            </option>
+                          ))}
+                        </select>
+                        <svg className="w-4 h-4 text-dark-text-tertiary pointer-events-none flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                        </svg>
+                      </div>
+                    </div>
+                  )}
 
                   {/* Mobile: single lane view */}
                   {mobileLane !== null && (

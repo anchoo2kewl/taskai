@@ -1991,12 +1991,34 @@ func (s *Server) HandleGitHubPushTask(w http.ResponseWriter, r *http.Request) {
 		body = description.String
 	}
 
+	// Reverse-map TaskAI assignees → GitHub logins via github_user_mappings.
+	var assigneeLogins []string
+	assigneeRows, err := s.db.QueryContext(ctx,
+		s.db.Rebind(`SELECT gum.github_login
+			FROM task_assignees ta
+			JOIN github_user_mappings gum ON gum.project_id = ? AND gum.user_id = ta.user_id
+			WHERE ta.task_id = ? AND gum.github_login IS NOT NULL`),
+		projectID, taskID)
+	if err == nil {
+		defer assigneeRows.Close()
+		for assigneeRows.Next() {
+			var login string
+			if assigneeRows.Scan(&login) == nil && login != "" {
+				assigneeLogins = append(assigneeLogins, login)
+			}
+		}
+		assigneeRows.Close()
+	}
+
 	payload := map[string]interface{}{
 		"title": title,
 		"body":  body,
 	}
 	if milestoneNumber.Valid {
 		payload["milestone"] = milestoneNumber.Int64
+	}
+	if len(assigneeLogins) > 0 {
+		payload["assignees"] = assigneeLogins
 	}
 
 	var issueNumber int64
@@ -2145,6 +2167,26 @@ func (s *Server) HandleGitHubPushAll(w http.ResponseWriter, r *http.Request) {
 	}
 	rows.Close()
 
+	// Pre-load assignee→github_login mappings for all tasks in this project.
+	taskAssignees := map[int64][]string{}
+	aRows, err := s.db.QueryContext(ctx,
+		s.db.Rebind(`SELECT ta.task_id, gum.github_login
+			FROM task_assignees ta
+			JOIN github_user_mappings gum ON gum.project_id = ? AND gum.user_id = ta.user_id
+			WHERE ta.task_id IN (SELECT id FROM tasks WHERE project_id = ?) AND gum.github_login IS NOT NULL`),
+		projectID, projectID)
+	if err == nil {
+		defer aRows.Close()
+		for aRows.Next() {
+			var tid int64
+			var login string
+			if aRows.Scan(&tid, &login) == nil {
+				taskAssignees[tid] = append(taskAssignees[tid], login)
+			}
+		}
+		aRows.Close()
+	}
+
 	total := len(tasks)
 	sendSSE(map[string]interface{}{
 		"type": "progress", "stage": "start",
@@ -2166,6 +2208,9 @@ func (s *Server) HandleGitHubPushAll(w http.ResponseWriter, r *http.Request) {
 		}
 		if t.Milestone.Valid {
 			payload["milestone"] = t.Milestone.Int64
+		}
+		if logins := taskAssignees[t.ID]; len(logins) > 0 {
+			payload["assignees"] = logins
 		}
 
 		data, _ := json.Marshal(payload)

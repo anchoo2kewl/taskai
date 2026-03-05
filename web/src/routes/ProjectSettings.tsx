@@ -608,6 +608,8 @@ export default function ProjectSettings({ embedded, projectIdOverride }: Project
     }
   }
 
+  const [isForceFullSyncing, setIsForceFullSyncing] = useState(false)
+
   const handleSyncNow = async () => {
     setImportError('')
     setImportSuccess('')
@@ -630,6 +632,33 @@ export default function ProjectSettings({ embedded, projectIdOverride }: Project
       setImportProgress(null)
     } finally {
       setIsSyncing(false)
+    }
+  }
+
+  const handleForceFullSync = async () => {
+    if (!window.confirm('This will DELETE all GitHub-imported tasks and sprints for this project, then re-import everything from scratch. Any manual edits to those tasks will be lost. Continue?')) return
+    setImportError('')
+    setImportSuccess('')
+    setImportProgress(null)
+    setIsForceFullSyncing(true)
+    try {
+      const result = await apiClient.githubSync(
+        projectId,
+        statusAssignments,
+        userAssignments,
+        syncStateFilter,
+        (evt) => setImportProgress(evt),
+        true // forceFullSync
+      )
+      setImportSuccess(`Full re-sync complete: ${result.created_tasks} tasks, ${result.created_comments} comments`)
+      setImportProgress(null)
+      loadGitHubSettings()
+      loadSyncLogs()
+    } catch (error: unknown) {
+      setImportError(error instanceof Error ? error.message : 'Force sync failed')
+      setImportProgress(null)
+    } finally {
+      setIsForceFullSyncing(false)
     }
   }
 
@@ -1883,8 +1912,11 @@ export default function ProjectSettings({ embedded, projectIdOverride }: Project
                             <option value="all">All issues</option>
                             <option value="closed">Closed issues only</option>
                           </select>
-                          <Button onClick={handleSyncNow} disabled={isSyncing} variant="secondary" size="sm">
+                          <Button onClick={handleSyncNow} disabled={isSyncing || isForceFullSyncing} variant="secondary" size="sm">
                             {isSyncing ? 'Syncing...' : 'Sync Now'}
+                          </Button>
+                          <Button onClick={handleForceFullSync} disabled={isSyncing || isForceFullSyncing} variant="danger" size="sm" title="Delete all GitHub-imported tasks and re-import from scratch">
+                            {isForceFullSyncing ? 'Rebuilding...' : 'Force Full Sync'}
                           </Button>
                         </div>
                       </div>

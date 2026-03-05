@@ -247,6 +247,7 @@ export interface GitHubPullRequest {
   user_assignments: Record<string, number>
   status_assignments: Record<string, number>
   filter?: GitHubImportFilter
+  force_full_sync?: boolean
 }
 
 export interface GitHubPullResponse {
@@ -849,7 +850,8 @@ class ApiClient {
     statusAssignments?: Record<string, number>,
     userAssignments?: Record<string, number>,
     stateFilter?: 'open' | 'closed' | 'all',
-    onProgress?: (event: GitHubProgressEvent) => void
+    onProgress?: (event: GitHubProgressEvent) => void,
+    forceFullSync?: boolean
   ): Promise<GitHubPullResponse> {
     const filter = stateFilter && stateFilter !== 'all' ? { state: stateFilter } : undefined
     return this.streamGitHub(
@@ -862,6 +864,7 @@ class ApiClient {
         user_assignments: userAssignments ?? {},
         status_assignments: statusAssignments ?? {},
         filter,
+        force_full_sync: forceFullSync,
       },
       onProgress ?? (() => {})
     )

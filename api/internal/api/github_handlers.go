@@ -167,6 +167,7 @@ type GitHubPullRequest struct {
 	UserAssignments   map[string]int64    `json:"user_assignments"`   // login → TaskAI user_id (0 = unassigned)
 	StatusAssignments map[string]int64    `json:"status_assignments"` // status key → swim_lane_id (0 = use category fallback)
 	Filter            *GitHubImportFilter `json:"filter"`             // optional filter for issues
+	ForceFullSync     bool                `json:"force_full_sync"`    // delete all GitHub-sourced data and re-import from scratch
 }
 
 // GitHubPullResponse is returned by HandleGitHubPull / HandleGitHubSync.
@@ -1104,9 +1105,20 @@ func (s *Server) handleGitHubImport(w http.ResponseWriter, r *http.Request, doUp
 	ctx := r.Context()
 	base := fmt.Sprintf("https://api.github.com/repos/%s/%s", owner, repo)
 
+	// Force full sync: delete all GitHub-sourced tasks and sprints, clear last-sync timestamp
+	if req.ForceFullSync {
+		progress("reset", "Clearing GitHub-imported tasks and sprints...", 0, 0)
+		_, _ = s.db.ExecContext(ctx, `DELETE FROM tasks WHERE project_id=$1 AND github_issue_number IS NOT NULL`, projectID)
+		_, _ = s.db.ExecContext(ctx, `DELETE FROM sprints WHERE project_id=$1 AND github_milestone_number IS NOT NULL`, projectID)
+		_, _ = s.db.ExecContext(ctx, `UPDATE projects SET github_last_sync=NULL WHERE id=$1`, projectID)
+		s.logger.Info("Force full sync: cleared GitHub data", zap.Int("project_id", projectID))
+	}
+
 	// Compute since parameter for efficient incremental sync (sync mode only)
+	// Note: since is intentionally NOT applied to the issues list — only to comments.
+	// This ensures assignee/status changes are always re-evaluated against current user mappings.
 	sinceParam := ""
-	if doUpdate {
+	if doUpdate && !req.ForceFullSync {
 		var lastSync sql.NullTime
 		_ = s.db.QueryRowContext(ctx, `SELECT github_last_sync FROM projects WHERE id=$1`, projectID).Scan(&lastSync)
 		if lastSync.Valid {
@@ -1163,9 +1175,6 @@ func (s *Server) handleGitHubImport(w http.ResponseWriter, r *http.Request, doUp
 			if len(req.Filter.Labels) > 0 {
 				url += "&labels=" + strings.Join(req.Filter.Labels, ",")
 			}
-		}
-		if sinceParam != "" {
-			url += "&since=" + sinceParam
 		}
 		return url
 	}
@@ -2428,11 +2437,7 @@ func (s *Server) runGitHubImportCore(ctx context.Context, projectID int, owner, 
 	// --- Import Tasks from Issues ---
 	if req.PullTasks {
 		buildIssueURL := func(page int) string {
-			url := fmt.Sprintf("%s/issues?state=all&per_page=100&page=%d", base, page)
-			if sinceParam != "" {
-				url += "&since=" + sinceParam
-			}
-			return url
+			return fmt.Sprintf("%s/issues?state=all&per_page=100&page=%d", base, page)
 		}
 
 		var allIssues []ghIssue

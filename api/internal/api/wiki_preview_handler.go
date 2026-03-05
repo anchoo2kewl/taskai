@@ -2,6 +2,7 @@ package api
 
 import (
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"regexp"
@@ -23,6 +24,46 @@ var wiki = gowiki.New(
 
 // drawEditSrcRe matches data-src attributes ending in /edit inside godraw-embed divs.
 var drawEditSrcRe = regexp.MustCompile(`(data-src="[^"]+)/edit"`)
+
+// graphLinkPreRe matches [[wiki:ID|Label]] and [[task:ID|Label]] for preview rendering.
+var graphLinkPreRe = regexp.MustCompile(`\[\[(wiki|task):(\d+)(?:\|([^\]]*))?\]\]`)
+
+// preprocessGraphLinksForPreview converts [[wiki:ID|Label]] / [[task:ID|Label]] syntax
+// into styled inline HTML elements before markdown rendering.
+func preprocessGraphLinksForPreview(content string) string {
+	return graphLinkPreRe.ReplaceAllStringFunc(content, func(match string) string {
+		m := graphLinkPreRe.FindStringSubmatch(match)
+		if len(m) < 3 {
+			return match
+		}
+		entityType, entityID, label := m[1], m[2], m[3]
+		if label == "" {
+			if entityType == "wiki" {
+				label = "Wiki #" + entityID
+			} else {
+				label = "Task #" + entityID
+			}
+		}
+		icon := "📄"
+		baseColor := "#3b82f6"
+		bgColor := "rgba(59,130,246,0.15)"
+		borderColor := "rgba(59,130,246,0.3)"
+		if entityType == "task" {
+			icon = "✅"
+			baseColor = "#f97316"
+			bgColor = "rgba(249,115,22,0.15)"
+			borderColor = "rgba(249,115,22,0.3)"
+		}
+		style := fmt.Sprintf(
+			"display:inline-flex;align-items:center;gap:4px;padding:1px 8px;border-radius:9999px;font-size:11px;font-weight:500;background:%s;color:%s;border:1px solid %s;text-decoration:none;cursor:pointer;vertical-align:middle",
+			bgColor, baseColor, borderColor,
+		)
+		return fmt.Sprintf(
+			`<a href="#" data-graph-type="%s" data-entity-id="%s" style="%s">%s %s</a>`,
+			entityType, entityID, style, icon, label,
+		)
+	})
+}
 
 // stripDrawEditMode removes /edit from go-draw embed URLs so that
 // rendered content always shows a read-only canvas viewer.
@@ -60,7 +101,7 @@ func (s *Server) HandleWikiPreview(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	html := stripDrawEditMode(wiki.RenderContent(req.Content))
+	html := stripDrawEditMode(wiki.RenderContent(preprocessGraphLinksForPreview(req.Content)))
 
 	respondJSON(w, http.StatusOK, wikiPreviewResponse{HTML: html})
 }

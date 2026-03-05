@@ -506,6 +506,30 @@ export interface Asset {
   is_shared?: boolean
 }
 
+export interface GraphNode {
+  id: number
+  project_id: number
+  entity_type: 'wiki' | 'task'
+  entity_id: number
+  entity_number?: number | null
+  title: string
+  created_at: string
+  updated_at: string
+}
+
+export interface GraphEdge {
+  id: number
+  source_node_id: number
+  target_node_id: number
+  relation_type: string
+  created_at: string
+}
+
+export interface GraphData {
+  nodes: GraphNode[]
+  edges: GraphEdge[]
+}
+
 // API Client Configuration
 // Use relative URL in production (served behind nginx proxy)
 // or VITE_API_URL for development override
@@ -1441,6 +1465,11 @@ class ApiClient {
       }),
       signal,
     })
+  }
+
+  // Knowledge Graph endpoints
+  async getProjectGraph(projectId: number): Promise<GraphData> {
+    return this.request<GraphData>(`/api/projects/${projectId}/graph`)
   }
 
   // Version endpoint

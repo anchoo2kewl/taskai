@@ -1,4 +1,5 @@
 import { useEffect, useState, useCallback, useRef } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { WikiPage, WikiPageVersion, WikiPageVersionWithContent, apiClient } from '../lib/api'
 import { useAuth } from '../state/AuthContext'
 import SearchSelect from './ui/SearchSelect'
@@ -815,6 +816,7 @@ function PreviewContent({ previewHTML, content, previewRef }: Readonly<{
 // ── Component ────────────────────────────────────────────────────
 
 export default function WikiEditor({ page }: Readonly<WikiEditorProps>) {
+  const navigate = useNavigate()
   const { user } = useAuth()
   const [content, setContent] = useState('')
   const [isPreview, setIsPreview] = useState(true)
@@ -1037,6 +1039,29 @@ export default function WikiEditor({ page }: Readonly<WikiEditorProps>) {
       return () => clearTimeout(t)
     }
   }, [isFullscreen, fsPreviewHTML, previewUpdateContent])
+
+  // Handle clicks on graph link chips rendered in preview HTML.
+  useEffect(() => {
+    const containers = [previewRef.current, fsPreviewRef.current].filter(Boolean)
+    if (containers.length === 0) return
+
+    const handleClick = (e: MouseEvent) => {
+      const el = (e.target as Element).closest('[data-graph-type]') as HTMLElement | null
+      if (!el) return
+      e.preventDefault()
+      const type = el.dataset.graphType
+      const entityId = el.dataset.entityId
+      if (!type || !entityId) return
+      if (type === 'wiki') {
+        navigate(`/app/projects/${page.project_id}?tab=wiki&page=${entityId}`)
+      } else if (type === 'task') {
+        navigate(`/app/projects/${page.project_id}`)
+      }
+    }
+
+    containers.forEach(c => c?.addEventListener('click', handleClick))
+    return () => containers.forEach(c => c?.removeEventListener('click', handleClick))
+  }, [previewHTML, fsPreviewHTML, navigate, page.project_id])
 
   // ── Keyboard shortcuts ───────────────────────────────────────
 

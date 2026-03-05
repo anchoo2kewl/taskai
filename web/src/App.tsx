@@ -20,6 +20,7 @@ const Admin = lazy(() => import('./routes/Admin'))
 const Settings = lazy(() => import('./routes/Settings'))
 const Assets = lazy(() => import('./routes/Assets'))
 const AcceptTeamInvite = lazy(() => import('./routes/AcceptTeamInvite'))
+const KnowledgeGraphPage = lazy(() => import('./routes/KnowledgeGraphPage'))
 
 function HomeRoute() {
   const { user } = useAuth()
@@ -86,6 +87,7 @@ function AppRoutes() {
           <Route path="projects/:projectId/sprints" element={<Sprints />} />
           <Route path="projects/:projectId/tags" element={<Tags />} />
           <Route path="projects/:projectId/assets" element={<Assets />} />
+          <Route path="projects/:projectId/graph" element={<KnowledgeGraphPage />} />
           <Route path="admin" element={<Admin />} />
           <Route path="settings" element={<Settings />} />
         </Route>

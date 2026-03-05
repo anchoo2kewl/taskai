@@ -504,6 +504,9 @@ func (s *Server) HandleUpdateWikiPageContent(w http.ResponseWriter, r *http.Requ
 		)
 	}
 
+	// Sync knowledge graph links in background (best-effort).
+	go s.syncGraphLinks(context.Background(), page.ProjectID, "wiki", pageID, nil, page.Title, req.Content)
+
 	respondJSON(w, http.StatusOK, WikiPageContentResponse{
 		PageID:    updatedPage.ID,
 		Content:   updatedPage.Content,

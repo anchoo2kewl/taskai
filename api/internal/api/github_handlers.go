@@ -1426,6 +1426,9 @@ func (s *Server) handleGitHubImport(w http.ResponseWriter, r *http.Request, doUp
 		}
 
 		for i, issue := range allIssues {
+			if issue.PullRequest != nil {
+				continue // skip pull requests — import issues only
+			}
 			if i%25 == 0 && i > 0 {
 				progress("issues", fmt.Sprintf("Processed %d/%d issues...", i, len(allIssues)), i, len(allIssues))
 			}

@@ -1,5 +1,5 @@
 import { lazy, Suspense } from 'react'
-import { BrowserRouter, Routes, Route, Navigate, useLocation, useNavigate } from 'react-router-dom'
+import { BrowserRouter, Routes, Route, Navigate, useLocation, useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import { AuthProvider, useAuth } from './state/AuthContext'
 import { SyncProvider } from './state/SyncContext'
 import ProtectedRoute from './components/ProtectedRoute'
@@ -12,7 +12,6 @@ import OAuthCallback from './routes/OAuthCallback'
 // Lazy-loaded route components (code-split per route)
 const Projects = lazy(() => import('./routes/Projects'))
 const ProjectDetail = lazy(() => import('./routes/ProjectDetail'))
-const ProjectSettings = lazy(() => import('./routes/ProjectSettings'))
 const TaskDetail = lazy(() => import('./routes/TaskDetail'))
 const Sprints = lazy(() => import('./routes/Sprints'))
 const Tags = lazy(() => import('./routes/Tags'))
@@ -20,7 +19,6 @@ const Admin = lazy(() => import('./routes/Admin'))
 const Settings = lazy(() => import('./routes/Settings'))
 const Assets = lazy(() => import('./routes/Assets'))
 const AcceptTeamInvite = lazy(() => import('./routes/AcceptTeamInvite'))
-const Wiki = lazy(() => import('./routes/Wiki'))
 
 function HomeRoute() {
   const { user } = useAuth()
@@ -34,6 +32,26 @@ function RouteSpinner() {
       <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary-400" />
     </div>
   )
+}
+
+function WikiRedirect() {
+  const { projectId } = useParams()
+  const [searchParams] = useSearchParams()
+  const page = searchParams.get('page')
+  const target = page
+    ? `/app/projects/${projectId}?tab=wiki&page=${page}`
+    : `/app/projects/${projectId}?tab=wiki`
+  return <Navigate to={target} replace />
+}
+
+function SettingsRedirect() {
+  const { projectId } = useParams()
+  const [searchParams] = useSearchParams()
+  const github = searchParams.get('github')
+  const target = github
+    ? `/app/projects/${projectId}?tab=settings&github=${github}`
+    : `/app/projects/${projectId}?tab=settings`
+  return <Navigate to={target} replace />
 }
 
 function AppRoutes() {
@@ -61,8 +79,8 @@ function AppRoutes() {
         >
           <Route index element={<Projects />} />
           <Route path="projects/:projectId" element={<ProjectDetail />} />
-          <Route path="projects/:projectId/wiki" element={<Wiki />} />
-          <Route path="projects/:projectId/settings" element={<ProjectSettings />} />
+          <Route path="projects/:projectId/wiki" element={<WikiRedirect />} />
+          <Route path="projects/:projectId/settings" element={<SettingsRedirect />} />
           <Route path="projects/:projectId/tasks/:taskNumber" element={<TaskDetail />} />
           <Route path="projects/:projectId/sprints" element={<Sprints />} />
           <Route path="projects/:projectId/tags" element={<Tags />} />

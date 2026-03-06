@@ -240,6 +240,9 @@ func main() {
 		// Swagger UI (public)
 		r.Get("/docs", server.HandleSwaggerUI)
 
+		// go-wiki annotation module (public static JS, no auth needed)
+		r.Get("/wiki/annotations.js", server.HandleWikiAnnotationsJS)
+
 		// Build OAuth login handler before registering routes (needed for callback dispatch).
 		var loginOAuthHandler *gologin.Handler
 		if (cfg.GoogleClientID != "" || cfg.LoginGitHubClientID != "") && cfg.OAuthStateSecret != "" {
@@ -357,7 +360,6 @@ func main() {
 			r.Get("/wiki/pages/{pageId}/versions/{versionNumber}", server.HandleGetWikiPageVersion)
 			r.Post("/wiki/pages/{pageId}/versions/{versionNumber}/restore", server.HandleRestoreWikiPageVersion)
 			r.Post("/wiki/preview", server.HandleWikiPreview)
-			r.Get("/wiki/annotations.js", server.HandleWikiAnnotationsJS)
 
 			// Wiki WebSocket route for real-time collaboration
 			r.Get("/wiki/collab", server.HandleWikiWebSocket)

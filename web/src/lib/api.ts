@@ -365,6 +365,20 @@ export interface UserActivity {
   created_at: string
 }
 
+export interface AdminInvitation {
+  id: number
+  type: 'team' | 'project'
+  status: string
+  inviter_name: string
+  inviter_email: string
+  invitee_name: string
+  invitee_email: string
+  invitee_id: number | null
+  context: string
+  role?: string
+  created_at: string
+}
+
 export interface APIKey {
   id: number
   name: string
@@ -1040,6 +1054,28 @@ class ApiClient {
     return this.request<{ message: string }>(`/api/admin/users/${userId}/reset-password`, {
       method: 'POST',
       body: JSON.stringify(data),
+    })
+  }
+
+  async adminGetInvitations(params?: { status?: string; type?: string }): Promise<AdminInvitation[]> {
+    const q = new URLSearchParams()
+    if (params?.status) q.set('status', params.status)
+    if (params?.type) q.set('type', params.type)
+    const qs = q.toString()
+    return this.request<AdminInvitation[]>(`/api/admin/invitations${qs ? `?${qs}` : ''}`)
+  }
+
+  async adminResolveTeamInvitation(id: number, action: 'accept' | 'reject'): Promise<{ message: string }> {
+    return this.request<{ message: string }>(`/api/admin/team-invitations/${id}/resolve`, {
+      method: 'POST',
+      body: JSON.stringify({ action }),
+    })
+  }
+
+  async adminResolveProjectInvitation(id: number, action: 'accept' | 'reject'): Promise<{ message: string }> {
+    return this.request<{ message: string }>(`/api/admin/project-invitations/${id}/resolve`, {
+      method: 'POST',
+      body: JSON.stringify({ action }),
     })
   }
 

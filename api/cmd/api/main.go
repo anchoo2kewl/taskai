@@ -522,6 +522,11 @@ func main() {
 			r.Delete("/admin/settings/email", server.HandleDeleteEmailProvider)
 			r.Post("/admin/settings/email/test", server.HandleTestEmailProvider)
 
+			// Admin invitation routes
+			r.Get("/admin/invitations", server.HandleAdminGetInvitations)
+			r.Post("/admin/team-invitations/{id}/resolve", server.HandleAdminResolveTeamInvitation)
+			r.Post("/admin/project-invitations/{id}/resolve", server.HandleAdminResolveProjectInvitation)
+
 			// Admin backup/restore routes
 			r.Get("/admin/backup/export", server.HandleExportData)
 			r.Post("/admin/backup/import", server.HandleImportData)

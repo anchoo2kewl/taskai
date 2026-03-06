@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"crypto/rand"
+	"database/sql"
 	"encoding/hex"
 	"fmt"
 	"net/http"
@@ -545,4 +546,335 @@ func (s *Server) HandleAdminResetPassword(w http.ResponseWriter, r *http.Request
 	}
 	s.logger.Info("Admin set password for user", zap.Int64("admin_id", adminID), zap.Int64("target_user_id", targetUserID))
 	respondJSON(w, http.StatusOK, map[string]string{"message": "Password updated successfully"})
+}
+
+// AdminInvitation is the unified view of a team or project invitation for the admin panel.
+type AdminInvitation struct {
+	ID           int64   `json:"id"`
+	Type         string  `json:"type"` // "team" | "project"
+	Status       string  `json:"status"`
+	InviterName  string  `json:"inviter_name"`
+	InviterEmail string  `json:"inviter_email"`
+	InviteeName  string  `json:"invitee_name"` // display name or email
+	InviteeEmail string  `json:"invitee_email"`
+	InviteeID    *int64  `json:"invitee_id"` // nil when invitee hasn't registered yet
+	Context      string  `json:"context"`    // team name or project name
+	Role         string  `json:"role,omitempty"`
+	CreatedAt    string  `json:"created_at"`
+}
+
+// HandleAdminGetInvitations returns all team + project invitations (admin only).
+// Optional query params: ?status=pending (default all), ?type=team|project
+func (s *Server) HandleAdminGetInvitations(w http.ResponseWriter, r *http.Request) {
+	adminID, ok := GetUserID(r)
+	if !ok {
+		respondError(w, http.StatusUnauthorized, "user not authenticated", "unauthorized")
+		return
+	}
+	if !s.isAdmin(r.Context(), adminID) {
+		respondError(w, http.StatusForbidden, "admin access required", "forbidden")
+		return
+	}
+
+	statusFilter := r.URL.Query().Get("status") // "" = all
+	typeFilter := r.URL.Query().Get("type")     // "" = all
+
+	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
+	defer cancel()
+
+	var results []AdminInvitation
+
+	// ── Team invitations ──────────────────────────────────────────────────────
+	if typeFilter == "" || typeFilter == "team" {
+		teamQuery := `
+			SELECT ti.id, ti.status,
+			       COALESCE(NULLIF(TRIM(COALESCE(invtr.first_name,'') || ' ' || COALESCE(invtr.last_name,'')), ''), invtr.name, invtr.email) AS inviter_name,
+			       invtr.email AS inviter_email,
+			       COALESCE(NULLIF(TRIM(COALESCE(invte.first_name,'') || ' ' || COALESCE(invte.last_name,'')), ''), invte.name, ti.invitee_email) AS invitee_name,
+			       ti.invitee_email,
+			       ti.invitee_id,
+			       t.name AS context,
+			       ti.created_at
+			FROM team_invitations ti
+			JOIN teams t ON ti.team_id = t.id
+			JOIN users invtr ON ti.inviter_id = invtr.id
+			LEFT JOIN users invte ON ti.invitee_id = invte.id`
+		args := []interface{}{}
+		if statusFilter != "" {
+			teamQuery += " WHERE ti.status = $1"
+			args = append(args, statusFilter)
+		}
+		teamQuery += " ORDER BY ti.created_at DESC"
+
+		rows, err := s.db.QueryContext(ctx, teamQuery, args...)
+		if err != nil {
+			s.logger.Error("Failed to query team invitations", zap.Error(err))
+			respondError(w, http.StatusInternalServerError, "failed to get invitations", "internal_error")
+			return
+		}
+		defer rows.Close()
+		for rows.Next() {
+			var inv AdminInvitation
+			inv.Type = "team"
+			var createdAt time.Time
+			if err := rows.Scan(&inv.ID, &inv.Status, &inv.InviterName, &inv.InviterEmail,
+				&inv.InviteeName, &inv.InviteeEmail, &inv.InviteeID, &inv.Context, &createdAt); err != nil {
+				continue
+			}
+			inv.CreatedAt = createdAt.Format(time.RFC3339)
+			results = append(results, inv)
+		}
+	}
+
+	// ── Project invitations ───────────────────────────────────────────────────
+	if typeFilter == "" || typeFilter == "project" {
+		projQuery := `
+			SELECT pi.id, pi.status,
+			       COALESCE(NULLIF(TRIM(COALESCE(invtr.first_name,'') || ' ' || COALESCE(invtr.last_name,'')), ''), invtr.name, invtr.email) AS inviter_name,
+			       invtr.email AS inviter_email,
+			       COALESCE(NULLIF(TRIM(COALESCE(invte.first_name,'') || ' ' || COALESCE(invte.last_name,'')), ''), invte.name, invte.email) AS invitee_name,
+			       invte.email AS invitee_email,
+			       pi.invitee_user_id,
+			       p.name AS context,
+			       pi.role,
+			       pi.invited_at
+			FROM project_invitations pi
+			JOIN projects p ON pi.project_id = p.id
+			JOIN users invtr ON pi.inviter_id = invtr.id
+			JOIN users invte ON pi.invitee_user_id = invte.id`
+		args := []interface{}{}
+		if statusFilter != "" {
+			projQuery += " WHERE pi.status = $1"
+			args = append(args, statusFilter)
+		}
+		projQuery += " ORDER BY pi.invited_at DESC"
+
+		rows, err := s.db.QueryContext(ctx, projQuery, args...)
+		if err != nil {
+			s.logger.Error("Failed to query project invitations", zap.Error(err))
+			respondError(w, http.StatusInternalServerError, "failed to get invitations", "internal_error")
+			return
+		}
+		defer rows.Close()
+		for rows.Next() {
+			var inv AdminInvitation
+			inv.Type = "project"
+			var createdAt time.Time
+			if err := rows.Scan(&inv.ID, &inv.Status, &inv.InviterName, &inv.InviterEmail,
+				&inv.InviteeName, &inv.InviteeEmail, &inv.InviteeID, &inv.Context, &inv.Role, &createdAt); err != nil {
+				continue
+			}
+			inv.CreatedAt = createdAt.Format(time.RFC3339)
+			results = append(results, inv)
+		}
+	}
+
+	if results == nil {
+		results = []AdminInvitation{}
+	}
+	respondJSON(w, http.StatusOK, results)
+}
+
+// HandleAdminResolveTeamInvitation force-accepts or force-rejects a team invitation (admin only).
+// Body: { "action": "accept" | "reject" }
+func (s *Server) HandleAdminResolveTeamInvitation(w http.ResponseWriter, r *http.Request) {
+	adminID, ok := GetUserID(r)
+	if !ok {
+		respondError(w, http.StatusUnauthorized, "user not authenticated", "unauthorized")
+		return
+	}
+	if !s.isAdmin(r.Context(), adminID) {
+		respondError(w, http.StatusForbidden, "admin access required", "forbidden")
+		return
+	}
+
+	var invID int64
+	if _, err := fmt.Sscanf(r.PathValue("id"), "%d", &invID); err != nil {
+		respondError(w, http.StatusBadRequest, "invalid invitation id", "validation_error")
+		return
+	}
+
+	var req struct {
+		Action string `json:"action"` // "accept" | "reject"
+	}
+	if err := decodeJSON(r, &req); err != nil || (req.Action != "accept" && req.Action != "reject") {
+		respondError(w, http.StatusBadRequest, "action must be 'accept' or 'reject'", "validation_error")
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
+	defer cancel()
+
+	entInv, err := s.db.Client.TeamInvitation.Get(ctx, invID)
+	if err != nil {
+		if ent.IsNotFound(err) {
+			respondError(w, http.StatusNotFound, "invitation not found", "not_found")
+			return
+		}
+		s.logger.Error("Failed to get team invitation", zap.Error(err))
+		respondError(w, http.StatusInternalServerError, "failed to get invitation", "internal_error")
+		return
+	}
+	if entInv.Status != "pending" {
+		respondError(w, http.StatusConflict, "invitation is not pending", "not_pending")
+		return
+	}
+
+	now := time.Now()
+
+	if req.Action == "reject" {
+		_, err = s.db.Client.TeamInvitation.UpdateOneID(invID).
+			SetStatus("rejected").
+			SetRespondedAt(now).
+			Save(ctx)
+		if err != nil {
+			s.logger.Error("Failed to reject team invitation", zap.Error(err))
+			respondError(w, http.StatusInternalServerError, "failed to reject invitation", "internal_error")
+			return
+		}
+		s.logger.Info("Admin force-rejected team invitation", zap.Int64("admin_id", adminID), zap.Int64("inv_id", invID))
+		respondJSON(w, http.StatusOK, map[string]string{"message": "Invitation rejected"})
+		return
+	}
+
+	// accept — requires invitee_id to be set (user must be registered)
+	if entInv.InviteeID == nil {
+		respondError(w, http.StatusBadRequest, "cannot force-accept: invitee has not registered yet", "invitee_not_registered")
+		return
+	}
+	inviteeID := *entInv.InviteeID
+
+	tx, err := s.db.Client.Tx(ctx)
+	if err != nil {
+		s.logger.Error("Failed to begin transaction", zap.Error(err))
+		respondError(w, http.StatusInternalServerError, "failed to process invitation", "internal_error")
+		return
+	}
+	defer tx.Rollback()
+
+	_, err = tx.TeamInvitation.UpdateOneID(invID).
+		SetStatus("accepted").
+		SetRespondedAt(now).
+		Save(ctx)
+	if err != nil {
+		s.logger.Error("Failed to update team invitation", zap.Error(err))
+		respondError(w, http.StatusInternalServerError, "failed to accept invitation", "internal_error")
+		return
+	}
+
+	_, err = tx.TeamMember.Create().
+		SetTeamID(entInv.TeamID).
+		SetUserID(inviteeID).
+		SetRole("member").
+		SetStatus("active").
+		Save(ctx)
+	if err != nil {
+		// If already a member, that's fine — just commit the status update
+		s.logger.Warn("Team member may already exist", zap.Error(err))
+	}
+
+	if err := tx.Commit(); err != nil {
+		s.logger.Error("Failed to commit transaction", zap.Error(err))
+		respondError(w, http.StatusInternalServerError, "failed to accept invitation", "internal_error")
+		return
+	}
+
+	s.logger.Info("Admin force-accepted team invitation", zap.Int64("admin_id", adminID), zap.Int64("inv_id", invID), zap.Int64("invitee_id", inviteeID))
+	respondJSON(w, http.StatusOK, map[string]string{"message": "Invitation accepted"})
+}
+
+// HandleAdminResolveProjectInvitation force-accepts or force-rejects a project invitation (admin only).
+// Body: { "action": "accept" | "reject" }
+func (s *Server) HandleAdminResolveProjectInvitation(w http.ResponseWriter, r *http.Request) {
+	adminID, ok := GetUserID(r)
+	if !ok {
+		respondError(w, http.StatusUnauthorized, "user not authenticated", "unauthorized")
+		return
+	}
+	if !s.isAdmin(r.Context(), adminID) {
+		respondError(w, http.StatusForbidden, "admin access required", "forbidden")
+		return
+	}
+
+	var invID int64
+	if _, err := fmt.Sscanf(r.PathValue("id"), "%d", &invID); err != nil {
+		respondError(w, http.StatusBadRequest, "invalid invitation id", "validation_error")
+		return
+	}
+
+	var req struct {
+		Action string `json:"action"` // "accept" | "reject"
+	}
+	if err := decodeJSON(r, &req); err != nil || (req.Action != "accept" && req.Action != "reject") {
+		respondError(w, http.StatusBadRequest, "action must be 'accept' or 'reject'", "validation_error")
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
+	defer cancel()
+
+	var projectID, inviteeUserID, inviterID int64
+	var role, status string
+	err := s.db.QueryRowContext(ctx,
+		`SELECT project_id, invitee_user_id, inviter_id, role, status FROM project_invitations WHERE id = $1`, invID,
+	).Scan(&projectID, &inviteeUserID, &inviterID, &role, &status)
+	if err == sql.ErrNoRows {
+		respondError(w, http.StatusNotFound, "invitation not found", "not_found")
+		return
+	}
+	if err != nil {
+		s.logger.Error("Failed to get project invitation", zap.Error(err))
+		respondError(w, http.StatusInternalServerError, "failed to get invitation", "internal_error")
+		return
+	}
+	if status != "pending" {
+		respondError(w, http.StatusConflict, "invitation is not pending", "not_pending")
+		return
+	}
+
+	if req.Action == "reject" {
+		_, err = s.db.ExecContext(ctx,
+			`UPDATE project_invitations SET status = 'rejected', responded_at = CURRENT_TIMESTAMP WHERE id = $1`, invID)
+		if err != nil {
+			s.logger.Error("Failed to reject project invitation", zap.Error(err))
+			respondError(w, http.StatusInternalServerError, "failed to reject invitation", "internal_error")
+			return
+		}
+		s.logger.Info("Admin force-rejected project invitation", zap.Int64("admin_id", adminID), zap.Int64("inv_id", invID))
+		respondJSON(w, http.StatusOK, map[string]string{"message": "Invitation rejected"})
+		return
+	}
+
+	// accept — insert into project_members
+	dbtx, err := s.db.Begin()
+	if err != nil {
+		s.logger.Error("Failed to begin transaction", zap.Error(err))
+		respondError(w, http.StatusInternalServerError, "failed to process invitation", "internal_error")
+		return
+	}
+	defer dbtx.Rollback()
+
+	_, err = dbtx.ExecContext(ctx,
+		`UPDATE project_invitations SET status = 'accepted', responded_at = CURRENT_TIMESTAMP WHERE id = $1`, invID)
+	if err != nil {
+		respondError(w, http.StatusInternalServerError, "failed to accept invitation", "internal_error")
+		return
+	}
+	_, err = dbtx.ExecContext(ctx,
+		`INSERT INTO project_members (project_id, user_id, role, granted_by, granted_at)
+		 VALUES ($1, $2, $3, $4, CURRENT_TIMESTAMP)
+		 ON CONFLICT(project_id, user_id) DO NOTHING`,
+		projectID, inviteeUserID, role, inviterID)
+	if err != nil {
+		respondError(w, http.StatusInternalServerError, "failed to add project member", "internal_error")
+		return
+	}
+	if err := dbtx.Commit(); err != nil {
+		respondError(w, http.StatusInternalServerError, "failed to accept invitation", "internal_error")
+		return
+	}
+
+	s.BroadcastToUser(inviteeUserID, "project_membership", map[string]interface{}{"project_id": projectID})
+	s.logger.Info("Admin force-accepted project invitation", zap.Int64("admin_id", adminID), zap.Int64("inv_id", invID), zap.Int64("invitee_id", inviteeUserID))
+	respondJSON(w, http.StatusOK, map[string]string{"message": "Invitation accepted"})
 }

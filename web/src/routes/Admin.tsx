@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import { useAuth } from '../state/AuthContext'
-import { api, type EmailProviderResponse } from '../lib/api'
+import { api, type EmailProviderResponse, type AdminInvitation } from '../lib/api'
 import { version as frontendVersion } from '../lib/version'
 
 // API URL with fallback for production (empty string = relative URL)
@@ -32,7 +32,7 @@ interface UserActivity {
   created_at: string
 }
 
-type AdminTab = 'users' | 'email' | 'backup' | 'system'
+type AdminTab = 'users' | 'invitations' | 'email' | 'backup' | 'system'
 
 interface VersionInfo {
   version: string
@@ -80,6 +80,14 @@ export default function Admin() {
   const [resetPasswordError, setResetPasswordError] = useState('')
   const [resetPasswordSuccess, setResetPasswordSuccess] = useState('')
 
+  // Invitations state
+  const [invitations, setInvitations] = useState<AdminInvitation[]>([])
+  const [invitationsLoading, setInvitationsLoading] = useState(false)
+  const [invitationsError, setInvitationsError] = useState('')
+  const [invStatusFilter, setInvStatusFilter] = useState('pending')
+  const [invTypeFilter, setInvTypeFilter] = useState('')
+  const [resolvingId, setResolvingId] = useState<string | null>(null) // "team-123" or "project-456"
+
   // Email provider state
   const [emailProvider, setEmailProvider] = useState<EmailProviderResponse | null>(null)
   const [emailApiKey, setEmailApiKey] = useState('')
@@ -124,6 +132,13 @@ export default function Admin() {
     loadEmailProvider()
     loadVersionInfo()
   }, [user, navigate])
+
+  // Load invitations when the tab becomes active or filters change
+  useEffect(() => {
+    if (activeTab === 'invitations') {
+      loadInvitations(invStatusFilter, invTypeFilter)
+    }
+  }, [activeTab, invStatusFilter, invTypeFilter])
 
   // === User Management ===
   const loadUsers = async () => {
@@ -256,6 +271,40 @@ export default function Admin() {
       setResetPasswordError(err instanceof Error ? err.message : 'Failed to reset password')
     } finally {
       setResetPasswordLoading(false)
+    }
+  }
+
+  // === Invitations ===
+  const loadInvitations = async (status: string, type: string) => {
+    setInvitationsLoading(true)
+    setInvitationsError('')
+    try {
+      const data = await api.adminGetInvitations({
+        status: status || undefined,
+        type: type || undefined,
+      })
+      setInvitations(data)
+    } catch (err) {
+      setInvitationsError(err instanceof Error ? err.message : 'Failed to load invitations')
+    } finally {
+      setInvitationsLoading(false)
+    }
+  }
+
+  const handleResolveInvitation = async (inv: AdminInvitation, action: 'accept' | 'reject') => {
+    const key = `${inv.type}-${inv.id}`
+    setResolvingId(key)
+    try {
+      if (inv.type === 'team') {
+        await api.adminResolveTeamInvitation(inv.id, action)
+      } else {
+        await api.adminResolveProjectInvitation(inv.id, action)
+      }
+      await loadInvitations(invStatusFilter, invTypeFilter)
+    } catch (err) {
+      setInvitationsError(err instanceof Error ? err.message : 'Failed to resolve invitation')
+    } finally {
+      setResolvingId(null)
     }
   }
 
@@ -435,6 +484,16 @@ export default function Admin() {
               }`}
             >
               Users ({users.length})
+            </button>
+            <button
+              onClick={() => handleTabChange('invitations')}
+              className={`px-4 py-2 text-sm font-medium rounded-lg transition-colors ${
+                activeTab === 'invitations'
+                  ? 'bg-primary-500/10 text-primary-400 border border-primary-500/30'
+                  : 'text-dark-text-secondary hover:text-dark-text-primary hover:bg-dark-bg-tertiary/30'
+              }`}
+            >
+              Invitations
             </button>
             <button
               onClick={() => handleTabChange('email')}
@@ -815,6 +874,138 @@ export default function Admin() {
                   {isSavingEmail ? 'Saving...' : emailProvider ? 'Update Provider' : 'Save Provider'}
                 </button>
               </form>
+            </div>
+          )}
+
+          {/* Invitations Tab */}
+          {activeTab === 'invitations' && (
+            <div className="space-y-4">
+              {/* Filters */}
+              <div className="flex flex-wrap gap-3 items-center">
+                <div className="flex items-center gap-2">
+                  <label className="text-xs text-dark-text-tertiary">Status</label>
+                  <select
+                    value={invStatusFilter}
+                    onChange={(e) => setInvStatusFilter(e.target.value)}
+                    className="text-sm bg-dark-bg-secondary border border-dark-border-subtle rounded-lg px-3 py-1.5 text-dark-text-primary focus:outline-none focus:border-primary-500"
+                  >
+                    <option value="">All</option>
+                    <option value="pending">Pending</option>
+                    <option value="accepted">Accepted</option>
+                    <option value="rejected">Rejected</option>
+                    <option value="cancelled">Cancelled</option>
+                    <option value="withdrawn">Withdrawn</option>
+                  </select>
+                </div>
+                <div className="flex items-center gap-2">
+                  <label className="text-xs text-dark-text-tertiary">Type</label>
+                  <select
+                    value={invTypeFilter}
+                    onChange={(e) => setInvTypeFilter(e.target.value)}
+                    className="text-sm bg-dark-bg-secondary border border-dark-border-subtle rounded-lg px-3 py-1.5 text-dark-text-primary focus:outline-none focus:border-primary-500"
+                  >
+                    <option value="">All</option>
+                    <option value="team">Team</option>
+                    <option value="project">Project</option>
+                  </select>
+                </div>
+                <button
+                  onClick={() => loadInvitations(invStatusFilter, invTypeFilter)}
+                  disabled={invitationsLoading}
+                  className="text-xs px-3 py-1.5 bg-dark-bg-secondary border border-dark-border-subtle rounded-lg text-dark-text-secondary hover:text-dark-text-primary transition-colors disabled:opacity-50"
+                >
+                  {invitationsLoading ? 'Loading…' : 'Refresh'}
+                </button>
+              </div>
+
+              {invitationsError && (
+                <div className="p-3 bg-red-500/10 border border-red-500/30 rounded-lg text-sm text-red-400">
+                  {invitationsError}
+                </div>
+              )}
+
+              {invitationsLoading ? (
+                <div className="space-y-2">
+                  {[1,2,3].map(i => (
+                    <div key={i} className="h-16 bg-dark-bg-secondary rounded-lg animate-pulse" />
+                  ))}
+                </div>
+              ) : invitations.length === 0 ? (
+                <div className="text-center py-16 text-dark-text-tertiary text-sm">
+                  No invitations found
+                </div>
+              ) : (
+                <div className="space-y-2">
+                  {invitations.map((inv) => {
+                    const key = `${inv.type}-${inv.id}`
+                    const isResolving = resolvingId === key
+                    const isPending = inv.status === 'pending'
+                    return (
+                      <div key={key} className="bg-dark-bg-secondary border border-dark-border-subtle rounded-lg px-5 py-4">
+                        <div className="flex items-start gap-4">
+                          <div className="flex-1 min-w-0 space-y-1">
+                            <div className="flex items-center gap-2 flex-wrap">
+                              <span className={`inline-flex px-2 py-0.5 rounded text-xs font-medium border ${
+                                inv.type === 'team'
+                                  ? 'bg-blue-500/10 text-blue-400 border-blue-500/30'
+                                  : 'bg-violet-500/10 text-violet-400 border-violet-500/30'
+                              }`}>
+                                {inv.type}
+                              </span>
+                              <span className={`inline-flex px-2 py-0.5 rounded text-xs font-medium border ${
+                                inv.status === 'pending' ? 'bg-yellow-500/10 text-yellow-400 border-yellow-500/30' :
+                                inv.status === 'accepted' ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/30' :
+                                inv.status === 'rejected' ? 'bg-red-500/10 text-red-400 border-red-500/30' :
+                                'bg-gray-500/10 text-gray-400 border-gray-500/30'
+                              }`}>
+                                {inv.status}
+                              </span>
+                              {inv.role && (
+                                <span className="text-xs text-dark-text-tertiary">role: {inv.role}</span>
+                              )}
+                            </div>
+                            <div className="text-sm text-dark-text-primary font-medium truncate">
+                              {inv.context}
+                            </div>
+                            <div className="text-xs text-dark-text-secondary">
+                              <span className="text-dark-text-tertiary">From: </span>
+                              <span>{inv.inviter_name}</span>
+                              <span className="text-dark-text-tertiary mx-1">→</span>
+                              <span>{inv.invitee_name}</span>
+                              {inv.invitee_email !== inv.invitee_name && (
+                                <span className="text-dark-text-tertiary ml-1">({inv.invitee_email})</span>
+                              )}
+                            </div>
+                            <div className="text-xs text-dark-text-tertiary">
+                              {new Date(inv.created_at).toLocaleString()}
+                            </div>
+                          </div>
+
+                          {isPending && (
+                            <div className="flex items-center gap-2 flex-shrink-0">
+                              <button
+                                onClick={() => handleResolveInvitation(inv, 'accept')}
+                                disabled={isResolving || (inv.type === 'team' && inv.invitee_id === null)}
+                                title={inv.type === 'team' && inv.invitee_id === null ? 'Cannot accept: user has not registered yet' : 'Force accept'}
+                                className="px-3 py-1.5 text-xs font-medium bg-emerald-500/10 text-emerald-400 border border-emerald-500/30 rounded-lg hover:bg-emerald-500/20 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+                              >
+                                {isResolving ? '…' : 'Accept'}
+                              </button>
+                              <button
+                                onClick={() => handleResolveInvitation(inv, 'reject')}
+                                disabled={isResolving}
+                                className="px-3 py-1.5 text-xs font-medium bg-red-500/10 text-red-400 border border-red-500/30 rounded-lg hover:bg-red-500/20 transition-colors disabled:opacity-40"
+                              >
+                                {isResolving ? '…' : 'Reject'}
+                              </button>
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    )
+                  })}
+                </div>
+              )}
             </div>
           )}
 

@@ -304,21 +304,43 @@ EOF
         echo -e "${CYAN}Monitor:${NC} https://github.com/anchoo2kewl/taskai/actions"
 
     elif [[ "$dst" == "prod" ]]; then
-        local ref="main"
+        # Resolve source SHA: uat HEAD or main HEAD
+        local src_ref
         if [[ "$src" == "uat" ]]; then
-            # Resolve the current HEAD of the uat branch as the ref to deploy
-            ref=$(git ls-remote origin uat | awk '{print $1}')
-            [[ -z "$ref" ]] && ref="main"
+            src_ref=$(git ls-remote origin uat | awk '{print $1}')
+        else
+            src_ref=$(git ls-remote origin main | awk '{print $1}')
         fi
+        [[ -z "$src_ref" ]] && { print_error "Could not resolve $src SHA"; return 1; }
+
         print_header "Promoting $src → Production"
-        echo -e "${CYAN}Ref:${NC} $ref"
+        echo -e "${CYAN}SHA:${NC} $src_ref"
         echo ""
-        print_status "Triggering production deployment..."
-        gh workflow run deploy-production.yml -f ref="$ref" || {
-            print_error "Failed to trigger production deployment"
+        print_status "Temporarily enabling force pushes on production branch..."
+        gh api repos/anchoo2kewl/taskai/branches/production/protection -X PUT \
+            -H "Accept: application/vnd.github+json" \
+            --input - <<'EOF'
+{"required_status_checks":{"strict":true,"contexts":[]},"enforce_admins":false,"required_pull_request_reviews":null,"restrictions":{"users":["anchoo2kewl"],"teams":[]},"allow_force_pushes":true,"required_linear_history":false}
+EOF
+        print_status "Force-pushing $src → production..."
+        git push origin "$src_ref":production --force || {
+            print_error "Force push to production failed"
+            # Re-lock before returning
+            gh api repos/anchoo2kewl/taskai/branches/production/protection -X PUT \
+                -H "Accept: application/vnd.github+json" \
+                --input - <<'EOF'
+{"required_status_checks":{"strict":true,"contexts":[]},"enforce_admins":false,"required_pull_request_reviews":null,"restrictions":{"users":["anchoo2kewl"],"teams":[]},"allow_force_pushes":false,"required_linear_history":false}
+EOF
             return 1
         }
-        print_success "Production deployment triggered!"
+        print_status "Re-locking production branch..."
+        gh api repos/anchoo2kewl/taskai/branches/production/protection -X PUT \
+            -H "Accept: application/vnd.github+json" \
+            --input - <<'EOF'
+{"required_status_checks":{"strict":true,"contexts":[]},"enforce_admins":false,"required_pull_request_reviews":null,"restrictions":{"users":["anchoo2kewl"],"teams":[]},"allow_force_pushes":false,"required_linear_history":false}
+EOF
+        print_success "Production deployment triggered via production branch push!"
+        echo -e "${CYAN}Production URL:${NC} https://taskai.cc"
         echo -e "${CYAN}Monitor:${NC} https://github.com/anchoo2kewl/taskai/actions"
         echo ""
         print_status "After deployment completes, verify: $0 prod health"

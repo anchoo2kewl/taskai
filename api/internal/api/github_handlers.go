@@ -1295,15 +1295,26 @@ func (s *Server) handleGitHubImport(w http.ResponseWriter, r *http.Request, doUp
 				`, projectID, m.Number).Scan(&existingID)
 
 				if err == sql.ErrNoRows {
-					// Insert new
-					err = s.db.QueryRowContext(ctx, `
-						INSERT INTO sprints (user_id, project_id, name, status, end_date, github_milestone_number)
-						VALUES ($1, $2, $3, $4, $5, $6)
-						ON CONFLICT (project_id, github_milestone_number) DO NOTHING
-						RETURNING id
-					`, userID, projectID, m.Title, status, dueDate, m.Number).Scan(&existingID)
-					if err == nil {
-						result.CreatedSprints++
+					// Try name-based match for manually-created sprints missing github_milestone_number.
+					// Backfill the number so future syncs resolve correctly without creating duplicates.
+					nameErr := s.db.QueryRowContext(ctx, `
+						SELECT id FROM sprints WHERE project_id = $1 AND name = $2 AND github_milestone_number IS NULL
+					`, projectID, m.Title).Scan(&existingID)
+					if nameErr == nil {
+						_, _ = s.db.ExecContext(ctx, `
+							UPDATE sprints SET github_milestone_number = $1, status = $2, end_date = COALESCE($3, end_date) WHERE id = $4
+						`, m.Number, status, dueDate, existingID)
+					} else {
+						// Insert new sprint from milestone
+						err = s.db.QueryRowContext(ctx, `
+							INSERT INTO sprints (user_id, project_id, name, status, end_date, github_milestone_number)
+							VALUES ($1, $2, $3, $4, $5, $6)
+							ON CONFLICT (project_id, github_milestone_number) DO NOTHING
+							RETURNING id
+						`, userID, projectID, m.Title, status, dueDate, m.Number).Scan(&existingID)
+						if err == nil {
+							result.CreatedSprints++
+						}
 					}
 				} else if err == nil {
 					// Update existing
@@ -1313,14 +1324,24 @@ func (s *Server) handleGitHubImport(w http.ResponseWriter, r *http.Request, doUp
 				}
 			} else {
 				var newID int64
-				err := s.db.QueryRowContext(ctx, `
-					INSERT INTO sprints (user_id, project_id, name, status, end_date, github_milestone_number)
-					VALUES ($1, $2, $3, $4, $5, $6)
-					ON CONFLICT (project_id, github_milestone_number) DO NOTHING
-					RETURNING id
-				`, userID, projectID, m.Title, status, dueDate, m.Number).Scan(&newID)
-				if err == nil {
-					result.CreatedSprints++
+				// Try name-based match first to avoid duplicating manually-created sprints.
+				nameErr := s.db.QueryRowContext(ctx, `
+					SELECT id FROM sprints WHERE project_id = $1 AND name = $2 AND github_milestone_number IS NULL
+				`, projectID, m.Title).Scan(&newID)
+				if nameErr == nil {
+					_, _ = s.db.ExecContext(ctx, `
+						UPDATE sprints SET github_milestone_number = $1, status = $2, end_date = COALESCE($3, end_date) WHERE id = $4
+					`, m.Number, status, dueDate, newID)
+				} else {
+					err := s.db.QueryRowContext(ctx, `
+						INSERT INTO sprints (user_id, project_id, name, status, end_date, github_milestone_number)
+						VALUES ($1, $2, $3, $4, $5, $6)
+						ON CONFLICT (project_id, github_milestone_number) DO NOTHING
+						RETURNING id
+					`, userID, projectID, m.Title, status, dueDate, m.Number).Scan(&newID)
+					if err == nil {
+						result.CreatedSprints++
+					}
 				}
 			}
 		}
@@ -1422,9 +1443,10 @@ func (s *Server) handleGitHubImport(w http.ResponseWriter, r *http.Request, doUp
 			}
 		}
 
-		// Build a milestone_number→sprint_id map
+		// Build a milestone_number→sprint_id map from all sprints that have been linked
+		// to a GitHub milestone (regardless of whether PullSprints was requested this run).
 		milestoneToSprintID := map[int]int64{}
-		if req.PullSprints {
+		{
 			rows, err := s.db.QueryContext(ctx, `
 				SELECT github_milestone_number, id FROM sprints
 				WHERE project_id = $1 AND github_milestone_number IS NOT NULL
@@ -1520,17 +1542,27 @@ func (s *Server) handleGitHubImport(w http.ResponseWriter, r *http.Request, doUp
 				taskStatus = "done"
 			}
 
-			// Resolve assignee
+			// Resolve assignees — collect all mapped user IDs from issue.Assignees.
+			// The first mapped user becomes the legacy assignee_id; all go into task_assignees.
 			var assigneeID *int64
-			primaryLogin := ""
+			var allAssigneeIDs []int64
+			seen := map[int64]bool{}
+			logins := make([]string, 0, len(issue.Assignees))
 			if issue.Assignee != nil {
-				primaryLogin = issue.Assignee.Login
-			} else if len(issue.Assignees) > 0 {
-				primaryLogin = issue.Assignees[0].Login
+				logins = append(logins, issue.Assignee.Login)
 			}
-			if primaryLogin != "" {
-				if uid, ok := req.UserAssignments[primaryLogin]; ok && uid != 0 {
-					assigneeID = &uid
+			for _, a := range issue.Assignees {
+				if a.Login != "" && (len(logins) == 0 || logins[0] != a.Login) {
+					logins = append(logins, a.Login)
+				}
+			}
+			for _, login := range logins {
+				if uid, ok := req.UserAssignments[login]; ok && uid != 0 && !seen[uid] {
+					seen[uid] = true
+					allAssigneeIDs = append(allAssigneeIDs, uid)
+					if assigneeID == nil {
+						assigneeID = &allAssigneeIDs[0]
+					}
 				}
 			}
 
@@ -1612,6 +1644,7 @@ func (s *Server) handleGitHubImport(w http.ResponseWriter, r *http.Request, doUp
 						result.CreatedTasks++
 						s.insertTaskTags(ctx, existingID, issue.Labels, labelToTagID)
 						s.upsertReactions(ctx, existingID, 0, issue.Reactions)
+						s.syncGitHubTaskAssignees(ctx, existingID, allAssigneeIDs)
 					} else {
 						result.SkippedTasks++
 					}
@@ -1625,6 +1658,7 @@ func (s *Server) handleGitHubImport(w http.ResponseWriter, r *http.Request, doUp
 					_, _ = s.db.ExecContext(ctx, `DELETE FROM task_tags WHERE task_id = $1`, existingID)
 					s.insertTaskTags(ctx, existingID, issue.Labels, labelToTagID)
 					s.upsertReactions(ctx, existingID, 0, issue.Reactions)
+					s.syncGitHubTaskAssignees(ctx, existingID, allAssigneeIDs)
 					result.UpdatedTasks++
 				}
 			} else {
@@ -1640,6 +1674,7 @@ func (s *Server) handleGitHubImport(w http.ResponseWriter, r *http.Request, doUp
 					result.CreatedTasks++
 					s.insertTaskTags(ctx, newID, issue.Labels, labelToTagID)
 					s.upsertReactions(ctx, newID, 0, issue.Reactions)
+					s.syncGitHubTaskAssignees(ctx, newID, allAssigneeIDs)
 				} else {
 					result.SkippedTasks++
 				}
@@ -1788,6 +1823,21 @@ func (s *Server) insertTaskTags(ctx context.Context, taskID int64, labels []ghLa
 			INSERT INTO task_tags (task_id, tag_id) VALUES ($1, $2)
 			ON CONFLICT DO NOTHING
 		`, taskID, tagID)
+	}
+}
+
+// syncGitHubTaskAssignees replaces the task_assignees rows for a GitHub-synced task
+// with the resolved TaskAI user IDs. Safe to call with an empty slice (no-op).
+func (s *Server) syncGitHubTaskAssignees(ctx context.Context, taskID int64, userIDs []int64) {
+	if len(userIDs) == 0 {
+		return
+	}
+	_, _ = s.db.ExecContext(ctx, `DELETE FROM task_assignees WHERE task_id = $1`, taskID)
+	for _, uid := range userIDs {
+		_, _ = s.db.ExecContext(ctx, `
+			INSERT INTO task_assignees (task_id, user_id) VALUES ($1, $2)
+			ON CONFLICT (task_id, user_id) DO NOTHING
+		`, taskID, uid)
 	}
 }
 

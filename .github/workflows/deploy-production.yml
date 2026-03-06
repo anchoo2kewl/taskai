@@ -11,8 +11,11 @@ on:
         default: 'main'
 
 env:
-  GO_VERSION: "1.26"
-  NODE_VERSION: "20"
+  IMAGE_PREFIX: ghcr.io/anchoo2kewl
+
+permissions:
+  contents: read
+  packages: write
 
 jobs:
   security-scan:
@@ -20,6 +23,8 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.inputs.ref }}
 
       - name: Run Trivy vulnerability scanner
         uses: aquasecurity/trivy-action@master
@@ -31,17 +36,19 @@ jobs:
           exit-code: '1'
           ignore-unfixed: true
 
-  deploy-production:
+  build-and-push:
     needs: security-scan
     runs-on: ubuntu-latest
-    environment: production
+    outputs:
+      image_tag: ${{ steps.version.outputs.GIT_COMMIT }}
+      version: ${{ steps.version.outputs.VERSION }}
+      build_time: ${{ steps.version.outputs.BUILD_TIME }}
 
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
         with:
           ref: ${{ github.event.inputs.ref }}
-          fetch-depth: 0
 
       - name: Set version information
         id: version
@@ -49,24 +56,98 @@ jobs:
           VERSION=$(cat VERSION 2>/dev/null || echo "dev")
           GIT_COMMIT=${GITHUB_SHA::7}
           BUILD_TIME=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
-
           echo "VERSION=$VERSION" >> $GITHUB_OUTPUT
           echo "GIT_COMMIT=$GIT_COMMIT" >> $GITHUB_OUTPUT
           echo "BUILD_TIME=$BUILD_TIME" >> $GITHUB_OUTPUT
+          echo "🏷️  Version: $VERSION | Commit: $GIT_COMMIT"
 
-          echo "🏷️  Version: $VERSION"
-          echo "📝 Commit: $GIT_COMMIT"
-          echo "🕐 Build Time: $BUILD_TIME"
+      - name: Set up QEMU (for ARM64 cross-build)
+        uses: docker/setup-qemu-action@v3
+        with:
+          platforms: arm64
 
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push API
+        uses: docker/build-push-action@v5
+        with:
+          context: ./api
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: |
+            ${{ env.IMAGE_PREFIX }}/taskai-api:${{ steps.version.outputs.GIT_COMMIT }}
+            ${{ env.IMAGE_PREFIX }}/taskai-api:latest
+          build-args: |
+            VERSION=${{ steps.version.outputs.VERSION }}
+            GIT_COMMIT=${{ steps.version.outputs.GIT_COMMIT }}
+            BUILD_TIME=${{ steps.version.outputs.BUILD_TIME }}
+          cache-from: type=gha,scope=taskai-api
+          cache-to: type=gha,mode=max,scope=taskai-api
+
+      - name: Build and push Web
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: ./web/Dockerfile
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: |
+            ${{ env.IMAGE_PREFIX }}/taskai-web:${{ steps.version.outputs.GIT_COMMIT }}
+            ${{ env.IMAGE_PREFIX }}/taskai-web:latest
+          build-args: |
+            VERSION=${{ steps.version.outputs.VERSION }}
+            GIT_COMMIT=${{ steps.version.outputs.GIT_COMMIT }}
+            BUILD_TIME=${{ steps.version.outputs.BUILD_TIME }}
+          cache-from: type=gha,scope=taskai-web
+          cache-to: type=gha,mode=max,scope=taskai-web
+
+      - name: Build and push MCP
+        uses: docker/build-push-action@v5
+        with:
+          context: ./mcp
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: |
+            ${{ env.IMAGE_PREFIX }}/taskai-mcp:${{ steps.version.outputs.GIT_COMMIT }}
+            ${{ env.IMAGE_PREFIX }}/taskai-mcp:latest
+          cache-from: type=gha,scope=taskai-mcp
+          cache-to: type=gha,mode=max,scope=taskai-mcp
+
+      - name: Build and push YJS Processor
+        uses: docker/build-push-action@v5
+        with:
+          context: ./api/internal/yjs-processor
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: |
+            ${{ env.IMAGE_PREFIX }}/taskai-yjs:${{ steps.version.outputs.GIT_COMMIT }}
+            ${{ env.IMAGE_PREFIX }}/taskai-yjs:latest
+          cache-from: type=gha,scope=taskai-yjs
+          cache-to: type=gha,mode=max,scope=taskai-yjs
+
+  deploy-production:
+    needs: build-and-push
+    runs-on: ubuntu-latest
+    environment: production
+
+    steps:
       - name: Deploy to Production server
         env:
           SSH_PRIVATE_KEY: ${{ secrets.SSH_PRIVATE_KEY }}
-          DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
-          DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
+          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          IMAGE_TAG: ${{ needs.build-and-push.outputs.image_tag }}
+          VERSION: ${{ needs.build-and-push.outputs.version }}
+          GIT_COMMIT: ${{ needs.build-and-push.outputs.image_tag }}
+          BUILD_TIME: ${{ needs.build-and-push.outputs.build_time }}
           COMMIT_SHA: ${{ github.sha }}
-          VERSION: ${{ steps.version.outputs.VERSION }}
-          GIT_COMMIT: ${{ steps.version.outputs.GIT_COMMIT }}
-          BUILD_TIME: ${{ steps.version.outputs.BUILD_TIME }}
           DB_DRIVER: postgres
           DB_DSN: ${{ secrets.PRODUCTION_DB_DSN }}
           JWT_SECRET: ${{ secrets.PRODUCTION_JWT_SECRET }}
@@ -84,79 +165,50 @@ jobs:
           chmod 600 ~/.ssh/deploy_key
           ssh-keyscan 31.97.102.48 >> ~/.ssh/known_hosts
 
-          echo "🚀 Deploying TaskAI to Production..."
+          echo "🚀 Deploying TaskAI to Production (image: $IMAGE_TAG)..."
 
           ssh -i ~/.ssh/deploy_key ubuntu@31.97.102.48 bash -s << ENDSSH
             set -ex
-            echo "📂 Changing to source directory..."
             cd /home/ubuntu/taskai/source
-
-            echo "📥 Fetching from origin..."
             git fetch origin
-
-            echo "🔄 Resetting to commit: $COMMIT_SHA"
             git reset --hard "$COMMIT_SHA"
-
-            echo "📂 Moving to parent directory..."
             cd ..
 
-            echo "📌 Setting version info..."
             export VERSION="$VERSION"
             export GIT_COMMIT="$GIT_COMMIT"
             export BUILD_TIME="$BUILD_TIME"
             export DB_DRIVER="$DB_DRIVER"
             export DB_DSN="$DB_DSN"
             export JWT_SECRET="$JWT_SECRET"
+            export APP_URL="$APP_URL"
+            export OAUTH_SUCCESS_URL="https://taskai.cc/oauth/callback"
+            export OAUTH_ERROR_URL="https://taskai.cc/login"
+            export ENV=production
+
             if [ -n "$GH_OAUTH_CLIENT_ID" ] && [ "$GH_OAUTH_CLIENT_ID" != "-" ]; then
-              if grep -q '^GITHUB_CLIENT_ID=' /home/ubuntu/taskai/.env 2>/dev/null; then
-                sed -i 's|^GITHUB_CLIENT_ID=.*|GITHUB_CLIENT_ID=$GH_OAUTH_CLIENT_ID|' /home/ubuntu/taskai/.env
-              else
-                echo 'GITHUB_CLIENT_ID=$GH_OAUTH_CLIENT_ID' >> /home/ubuntu/taskai/.env
-              fi
-              if grep -q '^GITHUB_CLIENT_SECRET=' /home/ubuntu/taskai/.env 2>/dev/null; then
-                sed -i 's|^GITHUB_CLIENT_SECRET=.*|GITHUB_CLIENT_SECRET=$GH_OAUTH_CLIENT_SECRET|' /home/ubuntu/taskai/.env
-              else
-                echo 'GITHUB_CLIENT_SECRET=$GH_OAUTH_CLIENT_SECRET' >> /home/ubuntu/taskai/.env
-              fi
+              export GITHUB_CLIENT_ID="$GH_OAUTH_CLIENT_ID"
+              export GITHUB_CLIENT_SECRET="$GH_OAUTH_CLIENT_SECRET"
             fi
             export LOGIN_GITHUB_CLIENT_ID="$LOGIN_GH_CLIENT_ID"
             export LOGIN_GITHUB_CLIENT_SECRET="$LOGIN_GH_CLIENT_SECRET"
             export OAUTH_STATE_SECRET="$OAUTH_STATE_SECRET"
             export GOOGLE_CLIENT_ID="$GOOGLE_CLIENT_ID"
             export GOOGLE_CLIENT_SECRET="$GOOGLE_CLIENT_SECRET"
-            export APP_URL="$APP_URL"
-            export OAUTH_SUCCESS_URL="https://taskai.cc/oauth/callback"
-            export OAUTH_ERROR_URL="https://taskai.cc/login"
-            export ENV=production
-            echo "Version: \$VERSION, Commit: \$GIT_COMMIT, Build Time: \$BUILD_TIME"
-            echo "DB Driver: \$DB_DRIVER"
 
-            echo "🔐 Login to Docker Hub..."
-            echo '$DOCKERHUB_TOKEN' | docker login -u '$DOCKERHUB_USERNAME' --password-stdin
+            # Login to GHCR (no rate limits, uses GITHUB_TOKEN)
+            echo "$GHCR_TOKEN" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
 
-            # Ensure nginx has the /draw/ route BEFORE starting containers
-            echo "🔧 Ensuring nginx /draw/ route..."
             chmod +x source/deployment/scripts/ensure-draw-route.sh
             sudo source/deployment/scripts/ensure-draw-route.sh taskai.cc
 
-            echo "🛑 Stopping containers..."
             docker compose down || true
+            docker image prune -f || true
 
-            echo "🧹 Cleaning up Docker build cache and unused images..."
-            docker builder prune -af || true
-            docker image prune -af || true
-
-            echo "🔨 Building containers (no cache)..."
-            docker compose build --no-cache --build-arg VERSION="\$VERSION" --build-arg GIT_COMMIT="\$GIT_COMMIT" --build-arg BUILD_TIME="\$BUILD_TIME"
-
-            echo "🚀 Starting containers..."
-            docker compose up -d --force-recreate --remove-orphans
-
-            echo "⏳ Waiting for containers to be healthy..."
+            export IMAGE_TAG="$IMAGE_TAG"
+            docker compose -f docker-compose.yml -f source/docker-compose.ghcr.yml pull
+            docker compose -f docker-compose.yml -f source/docker-compose.ghcr.yml up -d --no-build --force-recreate --remove-orphans
             sleep 15
-
-            echo "📊 Container status:"
-            docker compose ps
+            docker compose -f docker-compose.yml -f source/docker-compose.ghcr.yml ps
           ENDSSH
 
       - name: Capture container logs on failure
@@ -166,14 +218,8 @@ jobs:
         run: |
           ssh -i ~/.ssh/deploy_key ubuntu@31.97.102.48 bash -s << 'ENDSSH'
             cd /home/ubuntu/taskai
-            echo "=== Container status ==="
             docker compose ps -a
-            echo ""
-            echo "=== API container logs ==="
             docker compose logs --tail=100 api
-            echo ""
-            echo "=== All container logs ==="
-            docker compose logs --tail=50
           ENDSSH
 
       - name: Verify deployment
@@ -182,10 +228,8 @@ jobs:
           CF_ACCESS_CLIENT_SECRET: ${{ secrets.CF_ACCESS_CLIENT_SECRET }}
         run: |
           sleep 10
-          echo "Checking API health..."
           curl -f -H "CF-Access-Client-Id: $CF_ACCESS_CLIENT_ID" -H "CF-Access-Client-Secret: $CF_ACCESS_CLIENT_SECRET" https://taskai.cc/api/health || exit 1
 
-          echo "Checking go-draw canvas.js is up to date..."
           CANVAS_JS=$(curl -sL -H "CF-Access-Client-Id: $CF_ACCESS_CLIENT_ID" -H "CF-Access-Client-Secret: $CF_ACCESS_CLIENT_SECRET" -H "Cache-Control: no-cache" "https://taskai.cc/draw/static/canvas.js?v=$(date +%s)")
           if echo "$CANVAS_JS" | grep -q 'isRotating'; then
             echo "✅ canvas.js contains rotation support"
@@ -199,5 +243,5 @@ jobs:
         run: |
           echo "## 🚀 Production Deployed" >> $GITHUB_STEP_SUMMARY
           echo "- **Server:** 31.97.102.48" >> $GITHUB_STEP_SUMMARY
-          echo "- **Version:** ${{ steps.version.outputs.VERSION }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Image tag:** ${{ needs.build-and-push.outputs.image_tag }}" >> $GITHUB_STEP_SUMMARY
           echo "- **URL:** https://taskai.cc" >> $GITHUB_STEP_SUMMARY

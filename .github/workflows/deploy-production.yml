@@ -11,11 +11,8 @@ on:
         default: 'main'
 
 env:
-  IMAGE_PREFIX: ghcr.io/anchoo2kewl
-
-permissions:
-  contents: read
-  packages: write
+  GO_VERSION: "1.26"
+  NODE_VERSION: "20"
 
 jobs:
   security-scan:
@@ -23,8 +20,6 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
-        with:
-          ref: ${{ github.event.inputs.ref }}
 
       - name: Run Trivy vulnerability scanner
         uses: aquasecurity/trivy-action@master
@@ -36,19 +31,17 @@ jobs:
           exit-code: '1'
           ignore-unfixed: true
 
-  build-and-push:
+  deploy-production:
     needs: security-scan
     runs-on: ubuntu-latest
-    outputs:
-      image_tag: ${{ steps.version.outputs.GIT_COMMIT }}
-      version: ${{ steps.version.outputs.VERSION }}
-      build_time: ${{ steps.version.outputs.BUILD_TIME }}
+    environment: production
 
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
         with:
           ref: ${{ github.event.inputs.ref }}
+          fetch-depth: 0
 
       - name: Set version information
         id: version
@@ -56,98 +49,30 @@ jobs:
           VERSION=$(cat VERSION 2>/dev/null || echo "dev")
           GIT_COMMIT=${GITHUB_SHA::7}
           BUILD_TIME=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+
           echo "VERSION=$VERSION" >> $GITHUB_OUTPUT
           echo "GIT_COMMIT=$GIT_COMMIT" >> $GITHUB_OUTPUT
           echo "BUILD_TIME=$BUILD_TIME" >> $GITHUB_OUTPUT
-          echo "🏷️  Version: $VERSION | Commit: $GIT_COMMIT"
 
-      - name: Set up QEMU (for ARM64 cross-build)
-        uses: docker/setup-qemu-action@v3
-        with:
-          platforms: arm64
+          echo "🏷️  Version: $VERSION"
+          echo "📝 Commit: $GIT_COMMIT"
+          echo "🕐 Build Time: $BUILD_TIME"
 
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
-
-      - name: Login to GHCR
+      - name: Login to Docker Hub
         uses: docker/login-action@v3
         with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
 
-      - name: Build and push API
-        uses: docker/build-push-action@v5
-        with:
-          context: ./api
-          platforms: linux/amd64,linux/arm64
-          push: true
-          tags: |
-            ${{ env.IMAGE_PREFIX }}/taskai-api:${{ steps.version.outputs.GIT_COMMIT }}
-            ${{ env.IMAGE_PREFIX }}/taskai-api:latest
-          build-args: |
-            VERSION=${{ steps.version.outputs.VERSION }}
-            GIT_COMMIT=${{ steps.version.outputs.GIT_COMMIT }}
-            BUILD_TIME=${{ steps.version.outputs.BUILD_TIME }}
-          cache-from: type=gha,scope=taskai-api
-          cache-to: type=gha,mode=max,scope=taskai-api
-
-      - name: Build and push Web
-        uses: docker/build-push-action@v5
-        with:
-          context: .
-          file: ./web/Dockerfile
-          platforms: linux/amd64,linux/arm64
-          push: true
-          tags: |
-            ${{ env.IMAGE_PREFIX }}/taskai-web:${{ steps.version.outputs.GIT_COMMIT }}
-            ${{ env.IMAGE_PREFIX }}/taskai-web:latest
-          build-args: |
-            VERSION=${{ steps.version.outputs.VERSION }}
-            GIT_COMMIT=${{ steps.version.outputs.GIT_COMMIT }}
-            BUILD_TIME=${{ steps.version.outputs.BUILD_TIME }}
-          cache-from: type=gha,scope=taskai-web
-          cache-to: type=gha,mode=max,scope=taskai-web
-
-      - name: Build and push MCP
-        uses: docker/build-push-action@v5
-        with:
-          context: ./mcp
-          platforms: linux/amd64,linux/arm64
-          push: true
-          tags: |
-            ${{ env.IMAGE_PREFIX }}/taskai-mcp:${{ steps.version.outputs.GIT_COMMIT }}
-            ${{ env.IMAGE_PREFIX }}/taskai-mcp:latest
-          cache-from: type=gha,scope=taskai-mcp
-          cache-to: type=gha,mode=max,scope=taskai-mcp
-
-      - name: Build and push YJS Processor
-        uses: docker/build-push-action@v5
-        with:
-          context: ./api/internal/yjs-processor
-          platforms: linux/amd64,linux/arm64
-          push: true
-          tags: |
-            ${{ env.IMAGE_PREFIX }}/taskai-yjs:${{ steps.version.outputs.GIT_COMMIT }}
-            ${{ env.IMAGE_PREFIX }}/taskai-yjs:latest
-          cache-from: type=gha,scope=taskai-yjs
-          cache-to: type=gha,mode=max,scope=taskai-yjs
-
-  deploy-production:
-    needs: build-and-push
-    runs-on: ubuntu-latest
-    environment: production
-
-    steps:
       - name: Deploy to Production server
         env:
           SSH_PRIVATE_KEY: ${{ secrets.SSH_PRIVATE_KEY }}
-          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          IMAGE_TAG: ${{ needs.build-and-push.outputs.image_tag }}
-          VERSION: ${{ needs.build-and-push.outputs.version }}
-          GIT_COMMIT: ${{ needs.build-and-push.outputs.image_tag }}
-          BUILD_TIME: ${{ needs.build-and-push.outputs.build_time }}
+          DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
+          DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
           COMMIT_SHA: ${{ github.sha }}
+          VERSION: ${{ steps.version.outputs.VERSION }}
+          GIT_COMMIT: ${{ steps.version.outputs.GIT_COMMIT }}
+          BUILD_TIME: ${{ steps.version.outputs.BUILD_TIME }}
           DB_DRIVER: postgres
           DB_DSN: ${{ secrets.PRODUCTION_DB_DSN }}
           JWT_SECRET: ${{ secrets.PRODUCTION_JWT_SECRET }}
@@ -165,7 +90,7 @@ jobs:
           chmod 600 ~/.ssh/deploy_key
           ssh-keyscan 31.97.102.48 >> ~/.ssh/known_hosts
 
-          echo "🚀 Deploying TaskAI to Production (image: $IMAGE_TAG)..."
+          echo "🚀 Deploying TaskAI to Production..."
 
           ssh -i ~/.ssh/deploy_key ubuntu@31.97.102.48 bash -s << ENDSSH
             set -ex
@@ -195,20 +120,19 @@ jobs:
             export GOOGLE_CLIENT_ID="$GOOGLE_CLIENT_ID"
             export GOOGLE_CLIENT_SECRET="$GOOGLE_CLIENT_SECRET"
 
-            # Login to GHCR (no rate limits, uses GITHUB_TOKEN)
-            echo "$GHCR_TOKEN" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
+            # Login to Docker Hub
+            echo "$DOCKERHUB_TOKEN" | docker login -u "$DOCKERHUB_USERNAME" --password-stdin
 
             chmod +x source/deployment/scripts/ensure-draw-route.sh
             sudo source/deployment/scripts/ensure-draw-route.sh taskai.cc
 
             docker compose down || true
+            docker builder prune -f || true
             docker image prune -f || true
-
-            export IMAGE_TAG="$IMAGE_TAG"
-            docker compose -f docker-compose.yml -f source/docker-compose.ghcr.yml pull
-            docker compose -f docker-compose.yml -f source/docker-compose.ghcr.yml up -d --no-build --force-recreate --remove-orphans
+            docker compose build --build-arg VERSION="\$VERSION" --build-arg GIT_COMMIT="\$GIT_COMMIT" --build-arg BUILD_TIME="\$BUILD_TIME"
+            docker compose up -d --force-recreate --remove-orphans
             sleep 15
-            docker compose -f docker-compose.yml -f source/docker-compose.ghcr.yml ps
+            docker compose ps
           ENDSSH
 
       - name: Capture container logs on failure
@@ -243,5 +167,5 @@ jobs:
         run: |
           echo "## 🚀 Production Deployed" >> $GITHUB_STEP_SUMMARY
           echo "- **Server:** 31.97.102.48" >> $GITHUB_STEP_SUMMARY
-          echo "- **Image tag:** ${{ needs.build-and-push.outputs.image_tag }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Version:** ${{ steps.version.outputs.VERSION }}" >> $GITHUB_STEP_SUMMARY
           echo "- **URL:** https://taskai.cc" >> $GITHUB_STEP_SUMMARY

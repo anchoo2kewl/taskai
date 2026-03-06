@@ -23,6 +23,7 @@ export default function WikiContent({ projectId }: WikiContentProps) {
   const [annotations, setAnnotations] = useState<WikiAnnotation[]>([])
   const [selectedAnnotationId, setSelectedAnnotationId] = useState<number | null>(null)
   const [showAnnotationSidebar, setShowAnnotationSidebar] = useState(false)
+  const [showResolved, setShowResolved] = useState(false)
 
   useEffect(() => {
     if (projectId) loadPages()
@@ -277,13 +278,14 @@ export default function WikiContent({ projectId }: WikiContentProps) {
           <WikiAnnotationSidebar
             annotations={annotations}
             selectedAnnotationId={selectedAnnotationId}
+            showResolved={showResolved}
             onAnnotationSelect={setSelectedAnnotationId}
             onAnnotationUpdate={handleAnnotationUpdate}
             onAnnotationDelete={handleAnnotationDelete}
             onCommentCreate={handleCommentCreate}
             onCommentUpdate={handleCommentUpdate}
             onCommentDelete={handleCommentDelete}
-            onClose={() => setShowAnnotationSidebar(false)}
+            onToggleShowResolved={() => setShowResolved(v => !v)}
           />
         )}
       </div>

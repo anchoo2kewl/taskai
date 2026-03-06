@@ -310,6 +310,34 @@ func (s *Server) HandleListTasks(w http.ResponseWriter, r *http.Request) {
 		tasks = append(tasks, t)
 	}
 
+	// Bulk-fetch GitHub reactions for all tasks in this project, including user_reacted
+	if len(tasks) > 0 {
+		reactionMap := map[int64][]GitHubReaction{}
+		rRows, rErr := s.db.QueryContext(ctx, `
+			SELECT gr.task_id, gr.reaction, gr.count, (ur.id IS NOT NULL) AS user_reacted
+			FROM github_reactions gr
+			LEFT JOIN user_reactions ur ON
+			    ur.reaction = gr.reaction AND ur.user_id = $1 AND ur.task_id = gr.task_id
+			WHERE gr.task_id IN (SELECT id FROM tasks WHERE project_id = $2)
+			  AND gr.count > 0
+		`, userID, projectID)
+		if rErr == nil {
+			for rRows.Next() {
+				var tid int64
+				var gr GitHubReaction
+				if rRows.Scan(&tid, &gr.Reaction, &gr.Count, &gr.UserReacted) == nil {
+					reactionMap[tid] = append(reactionMap[tid], gr)
+				}
+			}
+			rRows.Close()
+			for i := range tasks {
+				if reactions, ok := reactionMap[tasks[i].ID]; ok {
+					tasks[i].GithubReactions = reactions
+				}
+			}
+		}
+	}
+
 	respondJSON(w, http.StatusOK, tasks)
 }
 
@@ -1121,15 +1149,18 @@ func (s *Server) HandleGetTaskByNumber(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// Load GitHub reactions for this task
+	// Load GitHub reactions for this task, including user_reacted
 	reactionRows, err := s.db.QueryContext(ctx, `
-		SELECT reaction, count FROM github_reactions
-		WHERE task_id = $1 AND count > 0
-	`, taskEntity.ID)
+		SELECT gr.reaction, gr.count, (ur.id IS NOT NULL) AS user_reacted
+		FROM github_reactions gr
+		LEFT JOIN user_reactions ur ON
+		    ur.reaction = gr.reaction AND ur.user_id = $2 AND ur.task_id = gr.task_id
+		WHERE gr.task_id = $1 AND gr.count > 0
+	`, taskEntity.ID, userID)
 	if err == nil {
 		for reactionRows.Next() {
 			var gr GitHubReaction
-			if reactionRows.Scan(&gr.Reaction, &gr.Count) == nil {
+			if reactionRows.Scan(&gr.Reaction, &gr.Count, &gr.UserReacted) == nil {
 				t.GithubReactions = append(t.GithubReactions, gr)
 			}
 		}

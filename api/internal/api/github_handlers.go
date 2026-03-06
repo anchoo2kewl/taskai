@@ -1895,6 +1895,76 @@ func (s *Server) tryPushCommentToGitHub(ctx context.Context, taskID, commentID i
 	_, _ = s.db.ExecContext(ctx, `UPDATE task_comments SET github_comment_id = $1 WHERE id = $2`, ghCommentID, commentID)
 }
 
+// pushReactionToGitHub adds a reaction to a GitHub issue or comment.
+// targetType: "issue" or "comment". targetID: issue number or GitHub comment ID.
+// Returns GitHub's reaction ID (needed for deletion).
+func pushReactionToGitHub(ctx context.Context, token, owner, repo string, targetID int64, reaction, targetType string) (int64, error) {
+	var url string
+	if targetType == "comment" {
+		url = fmt.Sprintf("https://api.github.com/repos/%s/%s/issues/comments/%d/reactions", owner, repo, targetID)
+	} else {
+		url = fmt.Sprintf("https://api.github.com/repos/%s/%s/issues/%d/reactions", owner, repo, targetID)
+	}
+	payload, _ := json.Marshal(map[string]string{"content": reaction})
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(payload))
+	if err != nil {
+		return 0, err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer "+token)
+	req.Header.Set("Accept", "application/vnd.github+json")
+	req.Header.Set("X-GitHub-Api-Version", "2022-11-28")
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return 0, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode >= 400 {
+		b, _ := io.ReadAll(resp.Body)
+		return 0, fmt.Errorf("github reaction push error %d: %s", resp.StatusCode, strings.TrimSpace(string(b)))
+	}
+	var created struct {
+		ID int64 `json:"id"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&created); err != nil {
+		return 0, err
+	}
+	return created.ID, nil
+}
+
+// deleteReactionFromGitHub removes a reaction from a GitHub issue or comment.
+// 404 is treated as success (already deleted).
+func deleteReactionFromGitHub(ctx context.Context, token, owner, repo string, targetID, reactionID int64, targetType string) error {
+	var url string
+	if targetType == "comment" {
+		url = fmt.Sprintf("https://api.github.com/repos/%s/%s/issues/comments/%d/reactions/%d", owner, repo, targetID, reactionID)
+	} else {
+		url = fmt.Sprintf("https://api.github.com/repos/%s/%s/issues/%d/reactions/%d", owner, repo, targetID, reactionID)
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodDelete, url, nil)
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Authorization", "Bearer "+token)
+	req.Header.Set("Accept", "application/vnd.github+json")
+	req.Header.Set("X-GitHub-Api-Version", "2022-11-28")
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode == http.StatusNotFound {
+		return nil // already gone
+	}
+	if resp.StatusCode >= 400 {
+		b, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("github reaction delete error %d: %s", resp.StatusCode, strings.TrimSpace(string(b)))
+	}
+	return nil
+}
+
 // GitHubMappingsResponse is returned by HandleGetGitHubMappings.
 type GitHubMappingsResponse struct {
 	StatusMappings map[string]int64 `json:"status_mappings"` // github_status_key → swim_lane_id (0 = unset)

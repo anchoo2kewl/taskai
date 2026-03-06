@@ -370,6 +370,15 @@ func main() {
 			r.Post("/wiki/search", server.HandleSearchWiki)
 			r.Get("/wiki/autocomplete", server.HandleAutocompletePages)
 
+			// Wiki annotation routes
+			r.Get("/wiki/pages/{pageId}/annotations", server.HandleListWikiAnnotations)
+			r.Post("/wiki/pages/{pageId}/annotations", server.HandleCreateWikiAnnotation)
+			r.Patch("/wiki/annotations/{annotationId}", server.HandleUpdateWikiAnnotation)
+			r.Delete("/wiki/annotations/{annotationId}", server.HandleDeleteWikiAnnotation)
+			r.Post("/wiki/annotations/{annotationId}/comments", server.HandleCreateAnnotationComment)
+			r.Patch("/wiki/annotation-comments/{commentId}", server.HandleUpdateAnnotationComment)
+			r.Delete("/wiki/annotation-comments/{commentId}", server.HandleDeleteAnnotationComment)
+
 			// Knowledge graph routes
 			r.Get("/projects/{id}/graph", server.HandleGetProjectGraph)
 
@@ -379,6 +388,9 @@ func main() {
 			// Task comment routes
 			r.Get("/tasks/{taskId}/comments", server.HandleListTaskComments)
 			r.Post("/tasks/{taskId}/comments", server.HandleCreateTaskComment)
+
+			// Task reactions (bidirectional)
+			r.Post("/tasks/{taskId}/reactions", server.HandleToggleReaction)
 
 			// Task GitHub push
 			r.Post("/tasks/{taskId}/github/push", server.HandleGitHubPushTask)

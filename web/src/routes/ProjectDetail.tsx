@@ -3,6 +3,7 @@ import { useParams, useNavigate, useLocation, useSearchParams } from 'react-rout
 import { DndContext, DragEndEvent, DragOverlay, DragStartEvent, PointerSensor, useSensor, useSensors } from '@dnd-kit/core'
 import { api, Project, Task, type SwimLane, type Sprint, type Tag } from '../lib/api'
 import { useLocalTasks } from '../hooks/useLocalTasks'
+import { REACTION_EMOJI, REACTION_ORDER } from '../lib/reactionUtils'
 
 const WikiContent = lazy(() => import('../components/WikiContent'))
 const ProjectSettings = lazy(() => import('./ProjectSettings'))
@@ -877,6 +878,21 @@ function TaskCard({ task, isDragging }: {
           </div>
         )
       })()}
+      {task.github_reactions && task.github_reactions.length > 0 && (
+        <div className="flex flex-wrap gap-1 mt-1.5">
+          {REACTION_ORDER
+            .filter(r => (task.github_reactions ?? []).find(gr => gr.reaction === r && gr.count > 0))
+            .map(r => {
+              const gr = task.github_reactions!.find(g => g.reaction === r)!
+              return (
+                <span key={r}
+                  className="inline-flex items-center gap-0.5 text-xs bg-dark-bg-secondary border border-dark-border-subtle rounded-full px-1.5 py-0.5 text-dark-text-tertiary">
+                  {REACTION_EMOJI[r]} {gr.count}
+                </span>
+              )
+            })}
+        </div>
+      )}
     </div>
   )
 }

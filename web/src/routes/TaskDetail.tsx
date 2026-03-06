@@ -9,24 +9,33 @@ import MultiSelectDropdown from '../components/ui/MultiSelectDropdown'
 import ImagePickerModal from '../components/ImagePickerModal'
 import { apiClient, Task, type UpdateTaskRequest, type SwimLane, type Sprint, type ProjectMember, type Attachment, type TaskComment, type GitHubPushTaskResponse, type Tag, type GitHubReaction } from '../lib/api'
 import { preprocessGraphLinks, parseGraphLinkUrl } from '../lib/graphLinks'
+import { REACTION_EMOJI, REACTION_ORDER } from '../lib/reactionUtils'
 
-const REACTION_EMOJI: Record<string, string> = {
-  '+1': '👍', '-1': '👎', laugh: '😄', hooray: '🎉',
-  confused: '😕', heart: '❤️', rocket: '🚀', eyes: '👀',
-}
-const REACTION_ORDER = ['+1', '-1', 'laugh', 'hooray', 'confused', 'heart', 'rocket', 'eyes']
-
-function ReactionBar({ reactions }: { reactions?: GitHubReaction[] }) {
-  const byType = Object.fromEntries((reactions ?? []).map(r => [r.reaction, r.count]))
-  const nonZero = REACTION_ORDER.filter(r => byType[r] > 0)
+function ReactionBar({
+  reactions,
+  onToggle,
+}: {
+  reactions?: GitHubReaction[]
+  onToggle?: (reaction: string) => void
+}) {
+  const byType = Object.fromEntries((reactions ?? []).map(r => [r.reaction, r]))
+  const nonZero = REACTION_ORDER.filter(r => byType[r]?.count > 0)
   if (!nonZero.length) return null
   return (
     <div className="flex flex-wrap gap-1.5 mt-2">
       {nonZero.map(r => (
-        <span key={r}
-          className="inline-flex items-center gap-1 text-xs bg-dark-bg-secondary border border-dark-border-subtle rounded-full px-2 py-0.5 text-dark-text-secondary">
-          {REACTION_EMOJI[r]} {byType[r]}
-        </span>
+        <button
+          key={r}
+          type="button"
+          onClick={() => onToggle?.(r)}
+          className={`inline-flex items-center gap-1 text-xs border rounded-full px-2 py-0.5 transition-colors
+            ${byType[r].user_reacted
+              ? 'bg-primary-500/20 border-primary-500/50 text-primary-300'
+              : 'bg-dark-bg-secondary border-dark-border-subtle text-dark-text-secondary hover:border-dark-border-medium'}
+            ${onToggle ? 'cursor-pointer' : 'cursor-default'}`}
+        >
+          {REACTION_EMOJI[r]} {byType[r].count}
+        </button>
       ))}
     </div>
   )
@@ -81,6 +90,88 @@ export default function TaskDetail({ isModal, onClose }: TaskDetailProps) {
   const [pushingToGitHub, setPushingToGitHub] = useState(false)
   const [githubPushResult, setGithubPushResult] = useState<GitHubPushTaskResponse | null>(null)
   const [githubRepo, setGithubRepo] = useState<{ github_owner: string; github_repo_name: string } | null>(null)
+
+  // Reaction toggle with optimistic updates
+  const handleToggleReaction = useCallback(async (reaction: string, commentId?: number) => {
+    if (!task) return
+    const taskIdNum = Number(task.id)
+
+    // Optimistic update
+    const applyOptimistic = (reactions: GitHubReaction[] | undefined, toggling: boolean): GitHubReaction[] => {
+      const list = reactions ? [...reactions] : []
+      const idx = list.findIndex(r => r.reaction === reaction)
+      if (toggling) {
+        // Adding
+        if (idx >= 0) {
+          list[idx] = { ...list[idx], count: list[idx].count + 1, user_reacted: true }
+        } else {
+          list.push({ reaction, count: 1, user_reacted: true })
+        }
+      } else {
+        // Removing
+        if (idx >= 0) {
+          const newCount = Math.max(0, list[idx].count - 1)
+          list[idx] = { ...list[idx], count: newCount, user_reacted: false }
+        }
+      }
+      return list
+    }
+
+    const wasReacted = commentId
+      ? comments.find(c => c.id === commentId)?.github_reactions?.find(r => r.reaction === reaction)?.user_reacted ?? false
+      : task.github_reactions?.find(r => r.reaction === reaction)?.user_reacted ?? false
+
+    if (commentId) {
+      setComments(prev => prev.map(c =>
+        c.id === commentId
+          ? { ...c, github_reactions: applyOptimistic(c.github_reactions, !wasReacted) }
+          : c
+      ))
+    } else {
+      setTask(prev => prev ? { ...prev, github_reactions: applyOptimistic(prev.github_reactions, !wasReacted) } : prev)
+    }
+
+    try {
+      const result = await apiClient.toggleReaction(taskIdNum, reaction, commentId)
+      // Apply authoritative result
+      if (commentId) {
+        setComments(prev => prev.map(c => {
+          if (c.id !== commentId) return c
+          const list = c.github_reactions ? [...c.github_reactions] : []
+          const idx = list.findIndex(r => r.reaction === reaction)
+          if (idx >= 0) {
+            list[idx] = { reaction, count: result.count, user_reacted: result.user_reacted }
+          } else {
+            list.push({ reaction, count: result.count, user_reacted: result.user_reacted })
+          }
+          return { ...c, github_reactions: list }
+        }))
+      } else {
+        setTask(prev => {
+          if (!prev) return prev
+          const list = prev.github_reactions ? [...prev.github_reactions] : []
+          const idx = list.findIndex(r => r.reaction === reaction)
+          if (idx >= 0) {
+            list[idx] = { reaction, count: result.count, user_reacted: result.user_reacted }
+          } else {
+            list.push({ reaction, count: result.count, user_reacted: result.user_reacted })
+          }
+          return { ...prev, github_reactions: list }
+        })
+      }
+    } catch {
+      // Revert optimistic update
+      if (commentId) {
+        setComments(prev => prev.map(c =>
+          c.id === commentId
+            ? { ...c, github_reactions: applyOptimistic(c.github_reactions, wasReacted) }
+            : c
+        ))
+      } else {
+        setTask(prev => prev ? { ...prev, github_reactions: applyOptimistic(prev.github_reactions, wasReacted) } : prev)
+      }
+    }
+  }, [task, comments])
 
   useEffect(() => {
     loadTask()
@@ -661,7 +752,7 @@ export default function TaskDetail({ isModal, onClose }: TaskDetailProps) {
                   >
                     {preprocessGraphLinks(task.description)}
                   </ReactMarkdown>
-                  <ReactionBar reactions={task.github_reactions} />
+                  <ReactionBar reactions={task.github_reactions} onToggle={(r) => handleToggleReaction(r)} />
                 </div>
               ) : (
                 <p
@@ -846,7 +937,7 @@ export default function TaskDetail({ isModal, onClose }: TaskDetailProps) {
                             <ReactMarkdown remarkPlugins={[remarkGfm, remarkEmoji]}>
                               {comment.comment}
                             </ReactMarkdown>
-                            <ReactionBar reactions={comment.github_reactions} />
+                            <ReactionBar reactions={comment.github_reactions} onToggle={(r) => handleToggleReaction(r, comment.id)} />
                           </div>
                         </div>
                       </div>

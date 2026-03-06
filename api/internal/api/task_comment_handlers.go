@@ -14,8 +14,9 @@ import (
 )
 
 type GitHubReaction struct {
-	Reaction string `json:"reaction"`
-	Count    int    `json:"count"`
+	Reaction    string `json:"reaction"`
+	Count       int    `json:"count"`
+	UserReacted bool   `json:"user_reacted,omitempty"`
 }
 
 type TaskComment struct {
@@ -98,20 +99,24 @@ func (s *Server) HandleListTaskComments(w http.ResponseWriter, r *http.Request) 
 		comments = append(comments, c)
 	}
 
-	// Bulk-fetch GitHub reactions for all comments via task_id join
+	// Bulk-fetch GitHub reactions for all comments via task_id join, including user_reacted
 	if len(comments) > 0 {
 		reactionRows, rErr := s.db.QueryContext(ctx, `
-			SELECT gr.task_comment_id, gr.reaction, gr.count
+			SELECT gr.task_comment_id, gr.reaction, gr.count,
+			       (ur.id IS NOT NULL) AS user_reacted
 			FROM github_reactions gr
+			LEFT JOIN user_reactions ur ON
+			    ur.reaction = gr.reaction AND ur.user_id = $2 AND
+			    ur.task_comment_id = gr.task_comment_id
 			JOIN task_comments tc ON tc.id = gr.task_comment_id
 			WHERE tc.task_id = $1 AND gr.count > 0
-		`, taskID)
+		`, taskID, userID)
 		if rErr == nil {
 			reactionMap := map[int64][]GitHubReaction{}
 			for reactionRows.Next() {
 				var cid int64
 				var gr GitHubReaction
-				if reactionRows.Scan(&cid, &gr.Reaction, &gr.Count) == nil {
+				if reactionRows.Scan(&cid, &gr.Reaction, &gr.Count, &gr.UserReacted) == nil {
 					reactionMap[cid] = append(reactionMap[cid], gr)
 				}
 			}

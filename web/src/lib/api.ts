@@ -13,6 +13,7 @@ export type ApiError = components['schemas']['Error']
 export interface GitHubReaction {
   reaction: string
   count: number
+  user_reacted?: boolean
 }
 
 // Types with required fields for commonly used API responses
@@ -136,6 +137,34 @@ export interface WikiPage {
   updater_name?: string
   created_at: string
   updated_at: string
+}
+
+export type AnnotationColor = 'yellow' | 'blue' | 'green' | 'red'
+
+export interface AnnotationComment {
+  id: number
+  annotation_id: number
+  author_id: number
+  author_name?: string | null
+  parent_comment_id?: number | null
+  content: string
+  resolved: boolean
+  created_at: string
+  updated_at: string
+}
+
+export interface WikiAnnotation {
+  id: number
+  wiki_page_id: number
+  author_id: number
+  author_name?: string | null
+  start_offset: number
+  end_offset: number
+  selected_text: string
+  color: AnnotationColor
+  resolved: boolean
+  created_at: string
+  comments: AnnotationComment[]
 }
 
 export interface WikiPageVersion {
@@ -741,6 +770,13 @@ class ApiClient {
     return this.request<TaskComment>(`/api/tasks/${taskId}/comments`, {
       method: 'POST',
       body: JSON.stringify({ comment }),
+    })
+  }
+
+  async toggleReaction(taskId: number, reaction: string, commentId?: number): Promise<GitHubReaction> {
+    return this.request<GitHubReaction>(`/api/tasks/${taskId}/reactions`, {
+      method: 'POST',
+      body: JSON.stringify({ reaction, comment_id: commentId ?? 0 }),
     })
   }
 
@@ -1477,6 +1513,59 @@ class ApiClient {
   // Knowledge Graph endpoints
   async getProjectGraph(projectId: number): Promise<GraphData> {
     return this.request<GraphData>(`/api/projects/${projectId}/graph`)
+  }
+
+  // Wiki annotation endpoints
+  async listWikiAnnotations(pageId: number): Promise<WikiAnnotation[]> {
+    return this.request<WikiAnnotation[]>(`/api/wiki/pages/${pageId}/annotations`)
+  }
+
+  async createWikiAnnotation(
+    pageId: number,
+    data: { start_offset: number; end_offset: number; selected_text: string; color: AnnotationColor; comment?: string }
+  ): Promise<WikiAnnotation> {
+    return this.request<WikiAnnotation>(`/api/wiki/pages/${pageId}/annotations`, {
+      method: 'POST',
+      body: JSON.stringify(data),
+    })
+  }
+
+  async updateWikiAnnotation(
+    annotationId: number,
+    data: { color?: AnnotationColor; resolved?: boolean }
+  ): Promise<WikiAnnotation> {
+    return this.request<WikiAnnotation>(`/api/wiki/annotations/${annotationId}`, {
+      method: 'PATCH',
+      body: JSON.stringify(data),
+    })
+  }
+
+  async deleteWikiAnnotation(annotationId: number): Promise<void> {
+    return this.request<void>(`/api/wiki/annotations/${annotationId}`, { method: 'DELETE' })
+  }
+
+  async createAnnotationComment(
+    annotationId: number,
+    data: { content: string; parent_comment_id?: number }
+  ): Promise<AnnotationComment> {
+    return this.request<AnnotationComment>(`/api/wiki/annotations/${annotationId}/comments`, {
+      method: 'POST',
+      body: JSON.stringify(data),
+    })
+  }
+
+  async updateAnnotationComment(
+    commentId: number,
+    data: { content?: string; resolved?: boolean }
+  ): Promise<AnnotationComment> {
+    return this.request<AnnotationComment>(`/api/wiki/annotation-comments/${commentId}`, {
+      method: 'PATCH',
+      body: JSON.stringify(data),
+    })
+  }
+
+  async deleteAnnotationComment(commentId: number): Promise<void> {
+    return this.request<void>(`/api/wiki/annotation-comments/${commentId}`, { method: 'DELETE' })
   }
 
   // Version endpoint

@@ -168,7 +168,8 @@ export interface UserProfile {
   user: {
     id: number
     name?: string | null
-    user_name?: string | null
+    first_name?: string | null
+    last_name?: string | null
     email: string
     joined_at?: string | null
   }

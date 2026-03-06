@@ -14,7 +14,8 @@ import (
 type UserProfileInfo struct {
 	ID        int64     `json:"id"`
 	Name      *string   `json:"name,omitempty"`
-	UserName  *string   `json:"user_name,omitempty"`
+	FirstName *string   `json:"first_name,omitempty"`
+	LastName  *string   `json:"last_name,omitempty"`
 	Email     string    `json:"email"`
 	JoinedAt  time.Time `json:"joined_at"`
 }
@@ -65,8 +66,8 @@ func (s *Server) HandleGetUserProfile(w http.ResponseWriter, r *http.Request) {
 	// Fetch user info including created_at
 	var u UserProfileInfo
 	if err := s.db.QueryRowContext(ctx, `
-		SELECT id, name, user_name, email, created_at FROM users WHERE id = $1 AND deleted_at IS NULL
-	`, targetUserID).Scan(&u.ID, &u.Name, &u.UserName, &u.Email, &u.JoinedAt); err != nil {
+		SELECT id, name, first_name, last_name, email, created_at FROM users WHERE id = $1 AND deleted_at IS NULL
+	`, targetUserID).Scan(&u.ID, &u.Name, &u.FirstName, &u.LastName, &u.Email, &u.JoinedAt); err != nil {
 		respondError(w, http.StatusNotFound, "user not found", "not_found")
 		return
 	}

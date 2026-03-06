@@ -104,7 +104,9 @@ export default function UserProfile() {
   }
 
   const { user, recent_activity } = profile
-  const displayName = user.name ?? user.user_name ?? user.email
+  const displayName = user.name
+    ?? (user.first_name || user.last_name ? [user.first_name, user.last_name].filter(Boolean).join(' ') : null)
+    ?? user.email
 
   // Group activities by date
   const groups: { label: string; items: UserProfileActivity[] }[] = []
@@ -134,8 +136,8 @@ export default function UserProfile() {
           </div>
           <div>
             <h1 className="text-xl font-semibold text-dark-text-primary">{displayName}</h1>
-            {user.user_name && user.name && (
-              <p className="text-sm text-dark-text-tertiary">@{user.user_name}</p>
+            {(user.first_name || user.last_name) && user.name && user.name !== [user.first_name, user.last_name].filter(Boolean).join(' ') && (
+              <p className="text-sm text-dark-text-tertiary">{[user.first_name, user.last_name].filter(Boolean).join(' ')}</p>
             )}
             <p className="text-sm text-dark-text-tertiary">{user.email}</p>
             {user.joined_at && (

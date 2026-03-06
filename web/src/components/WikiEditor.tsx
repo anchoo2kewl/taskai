@@ -884,11 +884,10 @@ function DropOverlay({ isDragOver, isDropUploading }: Readonly<{ isDragOver: boo
   )
 }
 
-function PreviewContent({ previewHTML, content, previewRef, onMouseUp }: Readonly<{
+function PreviewContent({ previewHTML, content, previewRef }: Readonly<{
   previewHTML: string
   content: string
   previewRef: React.Ref<HTMLDivElement>
-  onMouseUp?: (e: React.MouseEvent<HTMLDivElement>) => void
 }>) {
   if (previewHTML) {
     return (
@@ -896,7 +895,6 @@ function PreviewContent({ previewHTML, content, previewRef, onMouseUp }: Readonl
         ref={previewRef}
         className="prose prose-invert max-w-none"
         dangerouslySetInnerHTML={{ __html: previewHTML }}
-        onMouseUp={onMouseUp}
       />
     )
   }
@@ -969,60 +967,76 @@ export default function WikiEditor({ page, annotations, selectedAnnotationId, on
     x: number; y: number
     startOffset: number; endOffset: number; selectedText: string
   } | null>(null)
+  const annotationPopupRef = useRef(annotationPopup)
+  useEffect(() => { annotationPopupRef.current = annotationPopup }, [annotationPopup])
 
-  // Apply annotation highlights whenever previewHTML or annotations change
+  // Native mouseup listener on the preview div — more reliable than React onMouseUp
+  // on dangerouslySetInnerHTML content
+  useEffect(() => {
+    const el = previewRef.current
+    if (!el || !isPreview) return
+
+    const handleMouseUp = (e: MouseEvent) => {
+      // Click on an existing annotation mark → select it
+      const target = e.target as HTMLElement
+      const mark = target.closest('mark[data-ann-id]') as HTMLElement | null
+      if (mark) {
+        const annId = Number(mark.dataset.annId)
+        if (!isNaN(annId) && onAnnotationClick) {
+          onAnnotationClick(annId)
+          return
+        }
+      }
+
+      if (!onAnnotationCreate) return
+
+      const selection = window.getSelection()
+      if (!selection || selection.isCollapsed || !selection.rangeCount) {
+        setAnnotationPopup(null)
+        return
+      }
+      const range = selection.getRangeAt(0)
+      if (!el.contains(range.commonAncestorContainer)) {
+        setAnnotationPopup(null)
+        return
+      }
+      const selectedText = selection.toString().trim()
+      if (!selectedText) return
+
+      const startOffset = getTextOffset(el, range.startContainer, range.startOffset)
+      const endOffset = getTextOffset(el, range.endContainer, range.endOffset)
+
+      // Position popup above the selection using its bounding rect
+      const rect = range.getBoundingClientRect()
+      const x = Math.max(8, rect.left + rect.width / 2 - 120)
+      const y = Math.max(8, rect.top - 52)
+
+      setAnnotationPopup({ x, y, startOffset, endOffset, selectedText })
+    }
+
+    el.addEventListener('mouseup', handleMouseUp)
+    return () => el.removeEventListener('mouseup', handleMouseUp)
+  }, [isPreview, onAnnotationCreate, onAnnotationClick, previewHTML]) // re-bind when html changes
+
+  // Apply highlights after previewHTML renders or annotations change
   useEffect(() => {
     const el = previewRef.current
     if (!el) return
     applyAnnotationHighlights(el, annotations ?? [], selectedAnnotationId)
-  }) // run after every render to catch previewHTML DOM updates
-
-  // Handle clicks on annotation marks in preview
-  const handlePreviewMouseUp = useCallback((e: React.MouseEvent<HTMLDivElement>) => {
-    // Check if user clicked on an existing annotation mark
-    const target = e.target as HTMLElement
-    const mark = target.closest('mark[data-ann-id]') as HTMLElement | null
-    if (mark && onAnnotationClick) {
-      const annId = Number(mark.dataset.annId)
-      if (!isNaN(annId)) {
-        onAnnotationClick(annId)
-        return
-      }
-    }
-
-    if (!onAnnotationCreate) return
-
-    const selection = window.getSelection()
-    if (!selection || selection.isCollapsed || !selection.rangeCount) {
-      setAnnotationPopup(null)
-      return
-    }
-    const range = selection.getRangeAt(0)
-    const previewEl = previewRef.current
-    if (!previewEl?.contains(range.commonAncestorContainer)) {
-      setAnnotationPopup(null)
-      return
-    }
-    const selectedText = selection.toString().trim()
-    if (!selectedText) return
-
-    const startOffset = getTextOffset(previewEl, range.startContainer, range.startOffset)
-    const endOffset = getTextOffset(previewEl, range.endContainer, range.endOffset)
-
-    setAnnotationPopup({ x: e.clientX, y: e.clientY - 56, startOffset, endOffset, selectedText })
-  }, [onAnnotationCreate, onAnnotationClick])
+  }, [previewHTML, annotations, selectedAnnotationId])
 
   const handleAnnotationColorPick = useCallback((color: AnnotationColor) => {
-    if (!annotationPopup || !onAnnotationCreate) return
+    const popup = annotationPopupRef.current
+    if (!popup || !onAnnotationCreate) return
     onAnnotationCreate({
-      startOffset: annotationPopup.startOffset,
-      endOffset: annotationPopup.endOffset,
-      selectedText: annotationPopup.selectedText,
+      startOffset: popup.startOffset,
+      endOffset: popup.endOffset,
+      selectedText: popup.selectedText,
       color,
     })
     setAnnotationPopup(null)
     window.getSelection()?.removeAllRanges()
-  }, [annotationPopup, onAnnotationCreate])
+  }, [onAnnotationCreate])
 
   // ── Keep contentRef in sync ──────────────────────────────────
   useEffect(() => { contentRef.current = content }, [content])
@@ -1622,7 +1636,7 @@ export default function WikiEditor({ page, annotations, selectedAnnotationId, on
           <div className="flex-1 overflow-hidden flex flex-col">
             {isPreview ? (
               <div className="h-full overflow-y-auto px-6 py-4 relative">
-                <PreviewContent previewHTML={previewHTML} content={content} previewRef={previewRef} onMouseUp={onAnnotationCreate ? handlePreviewMouseUp : undefined} />
+                <PreviewContent previewHTML={previewHTML} content={content} previewRef={previewRef} />
                 {/* Annotation color picker popup */}
                 {annotationPopup && (
                   <div

@@ -1,5 +1,5 @@
 import { useEffect, useState, useCallback, useRef } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useNavigate, Link } from 'react-router-dom'
 import { WikiPage, WikiPageVersion, WikiPageVersionWithContent, WikiAnnotation, AnnotationColor, AnnotationComment, apiClient } from '../lib/api'
 import WikiAnnotationSidebar from './WikiAnnotationSidebar'
 import { useAuth } from '../state/AuthContext'
@@ -1469,13 +1469,22 @@ export default function WikiEditor({ page, annotations, selectedAnnotationId, sh
                 <h1 className="text-2xl font-semibold text-dark-text-primary">{page.title}</h1>
                 <div className="flex items-center gap-2 mt-1 text-xs text-dark-text-tertiary">
                   {page.creator_name && (
-                    <span>Created by <span className="text-dark-text-secondary">{page.creator_name}</span> · {new Date(page.created_at).toLocaleDateString()}</span>
+                    <span>Created by{' '}
+                      <Link to={`/app/users/${page.created_by}`} className="text-dark-text-secondary hover:text-primary-400 transition-colors">
+                        {page.creator_name}
+                      </Link>
+                      {' '}· {new Date(page.created_at).toLocaleDateString()}
+                    </span>
                   )}
                   {(lastEditedBy || lastEditedAt) && (
                     <>
                       <span className="text-dark-border-subtle">·</span>
                       <span>
-                        Last edited{lastEditedBy ? <> by <span className="text-dark-text-secondary">{lastEditedBy}</span></> : ''}{' '}
+                        Last edited{lastEditedBy ? <> by{' '}
+                          <Link to={`/app/users/${page.updated_by ?? page.created_by}`} className="text-dark-text-secondary hover:text-primary-400 transition-colors">
+                            {lastEditedBy}
+                          </Link>
+                        </> : ''}{' '}
                         · {new Date(lastEditedAt).toLocaleString()}
                       </span>
                     </>

@@ -136,7 +136,7 @@ func (s *Server) fetchUserActivity(ctx context.Context, viewerID, targetUserID i
 
 	// Annotation comments
 	annRows, err := s.db.QueryContext(ctx, `
-		SELECT wac.id, wp.title, wp.project_id, p.name, wac.created_at
+		SELECT wac.id, wp.title, wp.project_id, p.name, wp.id, wa.id, wac.created_at
 		FROM wiki_annotation_comments wac
 		JOIN wiki_annotations wa ON wa.id = wac.annotation_id
 		JOIN wiki_pages wp ON wp.id = wa.wiki_page_id
@@ -150,9 +150,10 @@ func (s *Server) fetchUserActivity(ctx context.Context, viewerID, targetUserID i
 		defer annRows.Close()
 		for annRows.Next() {
 			var item UserActivityItem
-			if annRows.Scan(&item.EntityID, &item.EntityTitle, &item.ProjectID, &item.ProjectName, &item.CreatedAt) == nil {
+			var pageID, annotationID int64
+			if annRows.Scan(&item.EntityID, &item.EntityTitle, &item.ProjectID, &item.ProjectName, &pageID, &annotationID, &item.CreatedAt) == nil {
 				item.Type = "annotation_comment"
-				item.Link = "/app/projects/" + int64ToStr(item.ProjectID) + "/wiki?page=" + int64ToStr(item.EntityID)
+				item.Link = "/app/projects/" + int64ToStr(item.ProjectID) + "/wiki?page=" + int64ToStr(pageID) + "&annotation=" + int64ToStr(annotationID)
 				items = append(items, item)
 			}
 		}

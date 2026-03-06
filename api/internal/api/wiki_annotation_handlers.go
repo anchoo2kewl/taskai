@@ -422,7 +422,7 @@ func (s *Server) HandleCreateAnnotationComment(w http.ResponseWriter, r *http.Re
 		if comment.AuthorName != nil {
 			commenterName = *comment.AuthorName
 		}
-		annLink := "/app/projects/" + int64ToStr(projectID) + "?tab=wiki"
+		annLink := "/app/projects/" + int64ToStr(projectID) + "/wiki?page=" + int64ToStr(pageID) + "&annotation=" + int64ToStr(annotationID)
 		go s.notifyAnnotationComment(context.Background(), annotationID, projectID, userID, commentID, req.Content, commenterName, annLink, req.ParentCommentID)
 	}
 

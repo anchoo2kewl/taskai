@@ -9,6 +9,7 @@ export default function Wiki() {
   const navigate = useNavigate()
   const [searchParams, setSearchParams] = useSearchParams()
   const selectedPageId = searchParams.get('page')
+  const annotationParam = searchParams.get('annotation')
 
   const [project, setProject] = useState<Project | null>(null)
   const [pages, setPages] = useState<WikiPage[]>([])
@@ -38,8 +39,18 @@ export default function Wiki() {
       loadAnnotations(Number(selectedPageId))
     } else {
       setAnnotations([])
+      setSelectedAnnotationId(null)
     }
-  }, [selectedPageId])
+  }, [selectedPageId]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Deep-link to a specific annotation from ?annotation=X (e.g. from notifications)
+  useEffect(() => {
+    if (!annotationParam || !annotations.length) return
+    const id = Number(annotationParam)
+    if (!id) return
+    setSelectedAnnotationId(id)
+    setShowAnnotationSidebar(true)
+  }, [annotationParam, annotations])
 
   const loadProject = async () => {
     try {

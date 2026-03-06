@@ -63,7 +63,7 @@ func New(cfg Config, logger *zap.Logger) (*DB, error) {
 	// Determine driver and connection string
 	driver := cfg.Driver
 	if driver == "" {
-		driver = "sqlite" // Default to SQLite for backward compatibility
+		driver = "postgres" // SQLite is for tests only; production/staging/UAT use postgres
 	}
 
 	switch driver {

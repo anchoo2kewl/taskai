@@ -60,7 +60,7 @@ type Config struct {
 
 // Load reads configuration from environment variables
 func Load() *Config {
-	dbDriver := getEnv("DB_DRIVER", "sqlite")
+	dbDriver := getEnv("DB_DRIVER", "postgres")
 
 	cfg := &Config{
 		Port:                    getEnv("PORT", "8080"),

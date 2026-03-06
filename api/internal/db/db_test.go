@@ -155,6 +155,7 @@ func TestNew_NonExistentMigrationsDir(t *testing.T) {
 	logger := zaptest.NewLogger(t)
 
 	cfg := Config{
+		Driver:         "sqlite",
 		DBPath:         ":memory:",
 		MigrationsPath: "/nonexistent/path/migrations",
 	}
@@ -171,6 +172,7 @@ func TestClose(t *testing.T) {
 	logger := zaptest.NewLogger(t)
 
 	cfg := Config{
+		Driver:         "sqlite",
 		DBPath:         ":memory:",
 		MigrationsPath: "",
 	}
@@ -197,6 +199,7 @@ func TestHealthCheck(t *testing.T) {
 	logger := zaptest.NewLogger(t)
 
 	cfg := Config{
+		Driver:         "sqlite",
 		DBPath:         ":memory:",
 		MigrationsPath: "",
 	}
@@ -218,6 +221,7 @@ func TestHealthCheck_ClosedDB(t *testing.T) {
 	logger := zaptest.NewLogger(t)
 
 	cfg := Config{
+		Driver:         "sqlite",
 		DBPath:         ":memory:",
 		MigrationsPath: "",
 	}
@@ -240,6 +244,7 @@ func TestNew_PragmasApplied(t *testing.T) {
 	logger := zaptest.NewLogger(t)
 
 	cfg := Config{
+		Driver:         "sqlite",
 		DBPath:         ":memory:",
 		MigrationsPath: "",
 	}
@@ -277,6 +282,7 @@ func TestRunMigrations_AppliesInOrder(t *testing.T) {
 	logger := zaptest.NewLogger(t)
 
 	cfg := Config{
+		Driver:         "sqlite",
 		DBPath:         ":memory:",
 		MigrationsPath: "./migrations",
 	}
@@ -330,6 +336,7 @@ func TestRunMigrations_WithTempDir(t *testing.T) {
 	}
 
 	cfg := Config{
+		Driver:         "sqlite",
 		DBPath:         ":memory:",
 		MigrationsPath: tmpDir,
 	}
@@ -372,6 +379,7 @@ func TestRunMigrations_InvalidSQL(t *testing.T) {
 	}
 
 	cfg := Config{
+		Driver:         "sqlite",
 		DBPath:         ":memory:",
 		MigrationsPath: tmpDir,
 	}

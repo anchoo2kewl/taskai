@@ -75,6 +75,8 @@ jobs:
           GOOGLE_CLIENT_ID: ${{ secrets.STAGING_GOOGLE_CLIENT_ID }}
           GOOGLE_CLIENT_SECRET: ${{ secrets.STAGING_GOOGLE_CLIENT_SECRET }}
           APP_URL: https://staging.taskai.cc
+          DB_DRIVER: postgres
+          DB_DSN: ${{ secrets.STAGING_DB_DSN }}
         run: |
           mkdir -p ~/.ssh
           echo "$SSH_PRIVATE_KEY" > ~/.ssh/deploy_key
@@ -94,6 +96,8 @@ jobs:
             export GIT_COMMIT='$GIT_COMMIT'
             export BUILD_TIME='$BUILD_TIME'
             export APP_URL='$APP_URL'
+            export DB_DRIVER='$DB_DRIVER'
+            export DB_DSN='$DB_DSN'
             GH_ID='$GH_OAUTH_CLIENT_ID'
             GH_SECRET='$GH_OAUTH_CLIENT_SECRET'
             if [ -n "\$GH_ID" ] && [ "\$GH_ID" != "-" ]; then

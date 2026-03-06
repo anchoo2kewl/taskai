@@ -10,10 +10,10 @@ services:
     ports:
       - "${TASKAI_API_PORT:-8083}:8080"
     environment:
-      # Database config - defaults to SQLite for backward compatibility
-      - DB_DRIVER=${DB_DRIVER:-sqlite}
+      # Database config - postgres by default; SQLite is for tests only
+      - DB_DRIVER=${DB_DRIVER:-postgres}
       - DB_PATH=/data/taskai.db
-      - DB_DSN=${DB_DSN:-}
+      - DB_DSN=${DB_DSN:-postgresql://taskai:taskai-dev-password@postgres:5432/taskai?sslmode=disable}
       # Postgres connection (when DB_DRIVER=postgres)
       - POSTGRES_HOST=${POSTGRES_HOST:-postgres}
       - POSTGRES_PORT=${POSTGRES_PORT:-5432}

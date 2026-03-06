@@ -340,6 +340,7 @@ export default function Wiki() {
               page={selectedPage}
               annotations={annotations}
               selectedAnnotationId={selectedAnnotationId}
+              showAnnotationHighlights={showAnnotationSidebar}
               onAnnotationCreate={handleAnnotationCreate}
               onAnnotationClick={handleAnnotationClick}
             />

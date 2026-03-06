@@ -42,6 +42,7 @@ interface WikiEditorProps {
   page: WikiPage
   annotations?: WikiAnnotation[]
   selectedAnnotationId?: number | null
+  showAnnotationHighlights?: boolean
   onAnnotationCreate?: (info: { startOffset: number; endOffset: number; selectedText: string; color: AnnotationColor }) => void
   onAnnotationClick?: (annotationId: number) => void
 }
@@ -822,7 +823,7 @@ function PreviewContent({ previewHTML, content, previewRef }: Readonly<{
 
 // ── Component ────────────────────────────────────────────────────
 
-export default function WikiEditor({ page, annotations, selectedAnnotationId, onAnnotationCreate, onAnnotationClick }: Readonly<WikiEditorProps>) {
+export default function WikiEditor({ page, annotations, selectedAnnotationId, showAnnotationHighlights = true, onAnnotationCreate, onAnnotationClick }: Readonly<WikiEditorProps>) {
   const navigate = useNavigate()
   const { user } = useAuth()
   const [content, setContent] = useState('')
@@ -881,8 +882,29 @@ export default function WikiEditor({ page, annotations, selectedAnnotationId, on
   useEffect(() => {
     const el = previewRef.current
     if (!el || !window.GoWikiAnnotations) return
-    window.GoWikiAnnotations.apply(el, annotations ?? [], selectedAnnotationId)
-  }, [previewHTML, annotations, selectedAnnotationId])
+    window.GoWikiAnnotations.apply(el, showAnnotationHighlights ? (annotations ?? []) : [], selectedAnnotationId)
+  }, [previewHTML, annotations, selectedAnnotationId, showAnnotationHighlights])
+
+  // ── Fullscreen annotation support ────────────────────────────
+  // Attach color picker to the fullscreen preview pane
+  useEffect(() => {
+    const el = fsPreviewRef.current
+    if (!el || !isFullscreen || !window.GoWikiAnnotations) return
+    const detach = window.GoWikiAnnotations.attach(el, {
+      onAnnotationCreate: onAnnotationCreate
+        ? (data) => onAnnotationCreate({ startOffset: data.startOffset, endOffset: data.endOffset, selectedText: data.selectedText, color: data.color as AnnotationColor })
+        : undefined,
+      onAnnotationClick,
+    })
+    return detach
+  }, [isFullscreen, onAnnotationCreate, onAnnotationClick, fsPreviewHTML])
+
+  // Apply highlights in fullscreen preview
+  useEffect(() => {
+    const el = fsPreviewRef.current
+    if (!el || !window.GoWikiAnnotations) return
+    window.GoWikiAnnotations.apply(el, showAnnotationHighlights ? (annotations ?? []) : [], selectedAnnotationId)
+  }, [fsPreviewHTML, annotations, selectedAnnotationId, showAnnotationHighlights])
 
   // ── Keep contentRef in sync ──────────────────────────────────
   useEffect(() => { contentRef.current = content }, [content])

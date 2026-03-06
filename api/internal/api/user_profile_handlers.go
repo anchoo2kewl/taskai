@@ -22,7 +22,7 @@ type UserProfileInfo struct {
 
 // UserActivityItem represents a single activity entry.
 type UserActivityItem struct {
-	Type        string    `json:"type"`         // task_comment, wiki_page, wiki_edit, annotation_comment, task_created, annotation_created
+	Type        string    `json:"type"`
 	EntityID    int64     `json:"entity_id"`
 	EntityTitle string    `json:"entity_title"`
 	ProjectID   int64     `json:"project_id"`
@@ -72,7 +72,7 @@ func (s *Server) HandleGetUserProfile(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Collect recent activity (visible only for shared projects)
+	// Collect recent activity (scoped to projects shared between viewer and target)
 	activity, err := s.fetchUserActivity(ctx, viewerID, targetUserID)
 	if err != nil {
 		s.logger.Error("Failed to fetch user activity", zap.Error(err), zap.Int64("target", targetUserID))
@@ -85,7 +85,17 @@ func (s *Server) HandleGetUserProfile(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// fetchUserActivity returns recent activity for a user across shared projects.
+// sharedProjectsSubquery returns a SQL fragment for projects shared between viewer and target.
+// Both must be current members. Used as: WHERE t.project_id IN (<subquery>)
+const sharedProjectsSubquery = `
+	SELECT pm1.project_id
+	FROM project_members pm1
+	JOIN project_members pm2 ON pm2.project_id = pm1.project_id AND pm2.user_id = $2
+	WHERE pm1.user_id = $1
+`
+
+// fetchUserActivity returns recent activity for a user scoped to projects
+// shared between viewer and target (both must currently be members).
 func (s *Server) fetchUserActivity(ctx context.Context, viewerID, targetUserID int64) ([]UserActivityItem, error) {
 	items := []UserActivityItem{}
 
@@ -95,8 +105,8 @@ func (s *Server) fetchUserActivity(ctx context.Context, viewerID, targetUserID i
 		FROM task_comments tc
 		JOIN tasks t ON t.id = tc.task_id
 		JOIN projects p ON p.id = t.project_id
-		JOIN project_members pm ON pm.project_id = t.project_id AND pm.user_id = $1
 		WHERE tc.user_id = $2
+		  AND t.project_id IN (`+sharedProjectsSubquery+`)
 		ORDER BY tc.created_at DESC
 		LIMIT 20
 	`, viewerID, targetUserID)
@@ -118,8 +128,8 @@ func (s *Server) fetchUserActivity(ctx context.Context, viewerID, targetUserID i
 		SELECT wp.id, wp.title, wp.project_id, p.name, wp.created_at
 		FROM wiki_pages wp
 		JOIN projects p ON p.id = wp.project_id
-		JOIN project_members pm ON pm.project_id = wp.project_id AND pm.user_id = $1
 		WHERE wp.created_by = $2
+		  AND wp.project_id IN (`+sharedProjectsSubquery+`)
 		ORDER BY wp.created_at DESC
 		LIMIT 20
 	`, viewerID, targetUserID)
@@ -142,8 +152,8 @@ func (s *Server) fetchUserActivity(ctx context.Context, viewerID, targetUserID i
 		JOIN wiki_annotations wa ON wa.id = wac.annotation_id
 		JOIN wiki_pages wp ON wp.id = wa.wiki_page_id
 		JOIN projects p ON p.id = wp.project_id
-		JOIN project_members pm ON pm.project_id = wp.project_id AND pm.user_id = $1
 		WHERE wac.author_id = $2
+		  AND wp.project_id IN (`+sharedProjectsSubquery+`)
 		ORDER BY wac.created_at DESC
 		LIMIT 20
 	`, viewerID, targetUserID)
@@ -165,8 +175,8 @@ func (s *Server) fetchUserActivity(ctx context.Context, viewerID, targetUserID i
 		SELECT t.id, t.title, t.project_id, p.name, t.task_number, t.created_at
 		FROM tasks t
 		JOIN projects p ON p.id = t.project_id
-		JOIN project_members pm ON pm.project_id = t.project_id AND pm.user_id = $1
 		WHERE t.created_by = $2
+		  AND t.project_id IN (`+sharedProjectsSubquery+`)
 		ORDER BY t.created_at DESC
 		LIMIT 20
 	`, viewerID, targetUserID)
@@ -189,8 +199,8 @@ func (s *Server) fetchUserActivity(ctx context.Context, viewerID, targetUserID i
 		FROM wiki_annotations wa
 		JOIN wiki_pages wp ON wp.id = wa.wiki_page_id
 		JOIN projects p ON p.id = wp.project_id
-		JOIN project_members pm ON pm.project_id = wp.project_id AND pm.user_id = $1
 		WHERE wa.author_id = $2
+		  AND wp.project_id IN (`+sharedProjectsSubquery+`)
 		ORDER BY wa.created_at DESC
 		LIMIT 20
 	`, viewerID, targetUserID)
@@ -207,14 +217,14 @@ func (s *Server) fetchUserActivity(ctx context.Context, viewerID, targetUserID i
 		}
 	}
 
-	// Wiki edits (most recent edit per page, compatible with both SQLite and Postgres)
+	// Wiki edits (most recent edit per page)
 	weRows, err := s.db.QueryContext(ctx, `
 		SELECT yu.page_id, wp.title, wp.project_id, p.name, MAX(yu.created_at)
 		FROM yjs_updates yu
 		JOIN wiki_pages wp ON wp.id = yu.page_id
 		JOIN projects p ON p.id = wp.project_id
-		JOIN project_members pm ON pm.project_id = wp.project_id AND pm.user_id = $1
 		WHERE yu.created_by = $2
+		  AND wp.project_id IN (`+sharedProjectsSubquery+`)
 		GROUP BY yu.page_id, wp.title, wp.project_id, p.name
 		ORDER BY MAX(yu.created_at) DESC
 		LIMIT 20
@@ -239,7 +249,7 @@ func (s *Server) fetchUserActivity(ctx context.Context, viewerID, targetUserID i
 	return items, nil
 }
 
-// sortActivityItems sorts by CreatedAt descending (insertion sort-friendly for small slices).
+// sortActivityItems sorts by CreatedAt descending.
 func sortActivityItems(items []UserActivityItem) {
 	for i := 1; i < len(items); i++ {
 		for j := i; j > 0 && items[j].CreatedAt.After(items[j-1].CreatedAt); j-- {

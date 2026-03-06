@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useMemo } from 'react'
 import { useParams, useNavigate, Link } from 'react-router-dom'
 import { apiClient, UserProfile as UserProfileType, UserProfileActivity } from '../lib/api'
 
@@ -20,10 +20,21 @@ const activityLabel: Record<string, string> = {
   wiki_edit: 'Edited wiki page',
 }
 
+type FilterType = 'all' | 'task_comment' | 'task_created' | 'wiki_page' | 'wiki_edit' | 'annotation_created' | 'annotation_comment'
+
+const TYPE_FILTERS: { value: FilterType; label: string }[] = [
+  { value: 'all', label: 'All' },
+  { value: 'task_comment', label: 'Comments' },
+  { value: 'task_created', label: 'Tasks' },
+  { value: 'wiki_page', label: 'Wiki pages' },
+  { value: 'wiki_edit', label: 'Wiki edits' },
+  { value: 'annotation_created', label: 'Annotations' },
+  { value: 'annotation_comment', label: 'Ann. comments' },
+]
+
 function getDateGroup(date: Date): string {
   const now = new Date()
-  const diffMs = now.getTime() - date.getTime()
-  const diffDays = diffMs / (1000 * 60 * 60 * 24)
+  const diffDays = (now.getTime() - date.getTime()) / (1000 * 60 * 60 * 24)
   if (diffDays < 1) return 'Today'
   if (diffDays < 7) return 'This week'
   return 'Earlier'
@@ -33,7 +44,7 @@ function ActivityItem({ item }: { item: UserProfileActivity }) {
   return (
     <Link
       to={item.link}
-      className="flex items-start gap-3 px-4 py-3 hover:bg-dark-bg-secondary rounded-lg transition-colors group"
+      className="flex items-start gap-3 px-4 py-3 hover:bg-dark-bg-tertiary rounded-lg transition-colors group"
     >
       <span className="text-base mt-0.5 shrink-0">{activityIcon[item.type] ?? '🔔'}</span>
       <div className="min-w-0 flex-1">
@@ -49,40 +60,79 @@ function ActivityItem({ item }: { item: UserProfileActivity }) {
   )
 }
 
-function ActivitySummary({ activities }: { activities: UserProfileActivity[] }) {
-  const counts: Record<string, number> = {}
-  for (const a of activities) {
-    counts[a.type] = (counts[a.type] ?? 0) + 1
-  }
-  const parts: string[] = []
-  if (counts.task_comment) parts.push(`${counts.task_comment} comment${counts.task_comment !== 1 ? 's' : ''}`)
-  if (counts.task_created) parts.push(`${counts.task_created} task${counts.task_created !== 1 ? 's' : ''} created`)
-  if (counts.wiki_page) parts.push(`${counts.wiki_page} wiki page${counts.wiki_page !== 1 ? 's' : ''}`)
-  if (counts.annotation_created) parts.push(`${counts.annotation_created} annotation${counts.annotation_created !== 1 ? 's' : ''}`)
-  if (counts.annotation_comment) parts.push(`${counts.annotation_comment} annotation comment${counts.annotation_comment !== 1 ? 's' : ''}`)
-  if (counts.wiki_edit) parts.push(`${counts.wiki_edit} wiki edit${counts.wiki_edit !== 1 ? 's' : ''}`)
-  if (!parts.length) return null
-  return (
-    <p className="text-xs text-dark-text-tertiary mt-1">{parts.join(' · ')}</p>
-  )
-}
-
 export default function UserProfile() {
   const { userId } = useParams<{ userId: string }>()
   const navigate = useNavigate()
   const [profile, setProfile] = useState<UserProfileType | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
+  const [search, setSearch] = useState('')
+  const [typeFilter, setTypeFilter] = useState<FilterType>('all')
+  const [projectFilter, setProjectFilter] = useState<string>('all')
 
   useEffect(() => {
     if (!userId) return
     setLoading(true)
     setError('')
+    setSearch('')
+    setTypeFilter('all')
+    setProjectFilter('all')
     apiClient.getUserProfile(parseInt(userId, 10))
       .then(setProfile)
       .catch(err => setError(err instanceof Error ? err.message : 'Failed to load profile'))
       .finally(() => setLoading(false))
   }, [userId])
+
+  const { user, recent_activity } = profile ?? { user: null, recent_activity: [] as UserProfileActivity[] }
+
+  // Derive unique projects from all activity
+  const projects = useMemo(() => {
+    const map = new Map<string, string>()
+    for (const a of recent_activity) {
+      map.set(String(a.project_id), a.project_name)
+    }
+    return Array.from(map.entries()).map(([id, name]) => ({ id, name }))
+  }, [recent_activity])
+
+  // Apply filters
+  const filtered = useMemo(() => {
+    const q = search.toLowerCase().trim()
+    return recent_activity.filter(a => {
+      if (typeFilter !== 'all' && a.type !== typeFilter) return false
+      if (projectFilter !== 'all' && String(a.project_id) !== projectFilter) return false
+      if (q && !a.entity_title.toLowerCase().includes(q) && !a.project_name.toLowerCase().includes(q)) return false
+      return true
+    })
+  }, [recent_activity, search, typeFilter, projectFilter])
+
+  // Group filtered activities by date
+  const groups = useMemo(() => {
+    const groupMap = new Map<string, UserProfileActivity[]>()
+    for (const item of filtered) {
+      const label = getDateGroup(new Date(item.created_at))
+      if (!groupMap.has(label)) groupMap.set(label, [])
+      groupMap.get(label)!.push(item)
+    }
+    return ['Today', 'This week', 'Earlier']
+      .filter(l => groupMap.has(l))
+      .map(label => ({ label, items: groupMap.get(label)! }))
+  }, [filtered])
+
+  // Activity count summary (total, not filtered)
+  const summary = useMemo(() => {
+    const counts: Record<string, number> = {}
+    for (const a of recent_activity) counts[a.type] = (counts[a.type] ?? 0) + 1
+    const parts: string[] = []
+    if (counts.task_comment) parts.push(`${counts.task_comment} comment${counts.task_comment !== 1 ? 's' : ''}`)
+    if (counts.task_created) parts.push(`${counts.task_created} task${counts.task_created !== 1 ? 's' : ''} created`)
+    if (counts.wiki_page) parts.push(`${counts.wiki_page} wiki page${counts.wiki_page !== 1 ? 's' : ''}`)
+    if (counts.annotation_created) parts.push(`${counts.annotation_created} annotation${counts.annotation_created !== 1 ? 's' : ''}`)
+    if (counts.annotation_comment) parts.push(`${counts.annotation_comment} ann. comment${counts.annotation_comment !== 1 ? 's' : ''}`)
+    if (counts.wiki_edit) parts.push(`${counts.wiki_edit} wiki edit${counts.wiki_edit !== 1 ? 's' : ''}`)
+    return parts.join(' · ')
+  }, [recent_activity])
+
+  const filtersActive = typeFilter !== 'all' || projectFilter !== 'all' || search.trim() !== ''
 
   if (loading) {
     return (
@@ -92,7 +142,7 @@ export default function UserProfile() {
     )
   }
 
-  if (error || !profile) {
+  if (error || !profile || !user) {
     return (
       <div className="max-w-2xl mx-auto px-4 py-8">
         <button onClick={() => navigate(-1)} className="text-sm text-dark-text-tertiary hover:text-dark-text-secondary mb-4 flex items-center gap-1">
@@ -103,24 +153,9 @@ export default function UserProfile() {
     )
   }
 
-  const { user, recent_activity } = profile
   const displayName = user.name
     ?? (user.first_name || user.last_name ? [user.first_name, user.last_name].filter(Boolean).join(' ') : null)
     ?? user.email
-
-  // Group activities by date
-  const groups: { label: string; items: UserProfileActivity[] }[] = []
-  const groupMap = new Map<string, UserProfileActivity[]>()
-  const groupOrder = ['Today', 'This week', 'Earlier']
-  for (const item of recent_activity) {
-    const label = getDateGroup(new Date(item.created_at))
-    if (!groupMap.has(label)) groupMap.set(label, [])
-    groupMap.get(label)!.push(item)
-  }
-  for (const label of groupOrder) {
-    const items = groupMap.get(label)
-    if (items?.length) groups.push({ label, items })
-  }
 
   return (
     <div className="max-w-2xl mx-auto px-4 py-8">
@@ -145,20 +180,70 @@ export default function UserProfile() {
                 Joined {new Date(user.joined_at).toLocaleDateString(undefined, { year: 'numeric', month: 'long' })}
               </p>
             )}
-            <ActivitySummary activities={recent_activity} />
+            {summary && <p className="text-xs text-dark-text-tertiary mt-0.5">{summary}</p>}
           </div>
         </div>
       </div>
 
       {/* Activity feed */}
       <div className="bg-dark-bg-secondary border border-dark-border-subtle rounded-xl">
-        <div className="px-4 py-3 border-b border-dark-border-subtle">
-          <h2 className="text-sm font-semibold text-dark-text-primary">Recent Activity</h2>
+        <div className="px-4 py-3 border-b border-dark-border-subtle space-y-3">
+          <div className="flex items-center justify-between gap-3">
+            <h2 className="text-sm font-semibold text-dark-text-primary shrink-0">Recent Activity</h2>
+            {/* Search */}
+            <input
+              type="text"
+              placeholder="Search…"
+              value={search}
+              onChange={e => setSearch(e.target.value)}
+              className="flex-1 min-w-0 px-3 py-1.5 bg-dark-bg-primary border border-dark-border-subtle rounded text-xs text-dark-text-primary placeholder-dark-text-tertiary/60 focus:outline-none focus:border-primary-500"
+            />
+            {/* Project filter */}
+            {projects.length > 1 && (
+              <select
+                value={projectFilter}
+                onChange={e => setProjectFilter(e.target.value)}
+                className="shrink-0 px-2 py-1.5 bg-dark-bg-primary border border-dark-border-subtle rounded text-xs text-dark-text-primary focus:outline-none focus:border-primary-500"
+              >
+                <option value="all">All projects</option>
+                {projects.map(p => (
+                  <option key={p.id} value={p.id}>{p.name}</option>
+                ))}
+              </select>
+            )}
+          </div>
+          {/* Type filter chips */}
+          {recent_activity.length > 0 && (
+            <div className="flex flex-wrap gap-1.5">
+              {TYPE_FILTERS.filter(f => f.value === 'all' || recent_activity.some(a => a.type === f.value)).map(f => (
+                <button
+                  key={f.value}
+                  onClick={() => setTypeFilter(f.value)}
+                  className={`px-2.5 py-1 rounded-full text-xs font-medium transition-colors ${
+                    typeFilter === f.value
+                      ? 'bg-primary-500/20 text-primary-400 border border-primary-500/40'
+                      : 'bg-dark-bg-primary text-dark-text-tertiary border border-dark-border-subtle hover:text-dark-text-secondary'
+                  }`}
+                >
+                  {f.label}
+                </button>
+              ))}
+            </div>
+          )}
         </div>
-        {recent_activity.length === 0 ? (
-          <p className="px-4 py-6 text-sm text-center text-dark-text-tertiary">No recent activity</p>
+
+        {filtered.length === 0 ? (
+          <p className="px-4 py-6 text-sm text-center text-dark-text-tertiary">
+            {filtersActive ? 'No activity matches your filters' : 'No recent activity'}
+          </p>
         ) : (
           <div className="py-2">
+            {filtersActive && (
+              <p className="px-4 pb-1 text-xs text-dark-text-tertiary">
+                {filtered.length} result{filtered.length !== 1 ? 's' : ''}
+                {' '}<button onClick={() => { setSearch(''); setTypeFilter('all'); setProjectFilter('all') }} className="text-primary-400 hover:underline">clear</button>
+              </p>
+            )}
             {groups.map(group => (
               <div key={group.label}>
                 <p className="px-4 pt-3 pb-1 text-xs font-semibold text-dark-text-tertiary uppercase tracking-wide">

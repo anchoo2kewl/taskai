@@ -2498,6 +2498,88 @@ func (s *Server) tryPushSwimLaneToGitHub(ctx context.Context, taskID int64, newL
 	}
 }
 
+// tryPushAssigneesToGitHub pushes the current task assignees to the linked GitHub issue.
+// It's best-effort: errors are logged but do not affect the response.
+func (s *Server) tryPushAssigneesToGitHub(ctx context.Context, taskID int64) {
+	var (
+		issueNumber int64
+		projectID   int64
+		owner, repo string
+		token       string
+		pushEnabled bool
+	)
+	err := s.db.QueryRowContext(ctx, `
+		SELECT COALESCE(t.github_issue_number,0), t.project_id,
+		       COALESCE(p.github_owner,''), COALESCE(p.github_repo_name,''),
+		       COALESCE(p.github_token,''), p.github_push_enabled
+		FROM tasks t
+		JOIN projects p ON p.id = t.project_id
+		WHERE t.id = $1
+	`, taskID).Scan(&issueNumber, &projectID, &owner, &repo, &token, &pushEnabled)
+	if err != nil || !pushEnabled || issueNumber == 0 || owner == "" || token == "" {
+		return
+	}
+
+	// Collect GitHub logins from task_assignees join table
+	var logins []string
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT gum.github_login
+		FROM task_assignees ta
+		JOIN github_user_mappings gum ON gum.project_id = $1 AND gum.user_id = ta.user_id
+		WHERE ta.task_id = $2 AND gum.github_login IS NOT NULL
+	`, projectID, taskID)
+	if err == nil {
+		for rows.Next() {
+			var login string
+			if rows.Scan(&login) == nil && login != "" {
+				logins = append(logins, login)
+			}
+		}
+		rows.Close()
+	}
+
+	// Fall back to legacy assignee_id if no multi-assignees found
+	if len(logins) == 0 {
+		var login sql.NullString
+		_ = s.db.QueryRowContext(ctx, `
+			SELECT gum.github_login
+			FROM tasks t
+			JOIN github_user_mappings gum ON gum.project_id = t.project_id AND gum.user_id = t.assignee_id
+			WHERE t.id = $1 AND t.assignee_id IS NOT NULL AND gum.github_login IS NOT NULL
+		`, taskID).Scan(&login)
+		if login.Valid && login.String != "" {
+			logins = append(logins, login.String)
+		}
+	}
+
+	// PATCH the GitHub issue — send empty slice to unassign all
+	if logins == nil {
+		logins = []string{}
+	}
+	apiURL := fmt.Sprintf("https://api.github.com/repos/%s/%s/issues/%d", owner, repo, issueNumber)
+	payload := map[string]interface{}{"assignees": logins}
+	data, _ := json.Marshal(payload)
+	req, err := http.NewRequestWithContext(ctx, http.MethodPatch, apiURL, bytes.NewReader(data))
+	if err != nil {
+		return
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer "+token)
+	req.Header.Set("Accept", "application/vnd.github+json")
+	req.Header.Set("X-GitHub-Api-Version", "2022-11-28")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		s.logger.Warn("Failed to push assignees to GitHub", zap.Int64("task_id", taskID), zap.Error(err))
+		return
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode >= 400 {
+		b, _ := io.ReadAll(resp.Body)
+		s.logger.Warn("GitHub assignee push error", zap.Int64("task_id", taskID),
+			zap.Int("status", resp.StatusCode), zap.String("body", strings.TrimSpace(string(b))))
+	}
+}
+
 // GitHubSyncLog represents one sync log entry.
 type GitHubSyncLog struct {
 	ID              int64      `json:"id"`

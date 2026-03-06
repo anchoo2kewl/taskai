@@ -279,6 +279,10 @@ func (s *Server) HandleListTasks(w http.ResponseWriter, r *http.Request) {
 		if assignees, ok := assigneesMap[et.ID]; ok {
 			t.Assignees = assignees
 		}
+		// Backfill from legacy single assignee_id if no multi-assignees present
+		if len(t.Assignees) == 0 && t.AssigneeID != nil && t.AssigneeName != nil {
+			t.Assignees = []TaskAssigneeInfo{{UserID: *t.AssigneeID, UserName: *t.AssigneeName}}
+		}
 
 		// Add sprint info if present
 		if et.Edges.Sprint != nil {
@@ -576,6 +580,9 @@ func (s *Server) HandleCreateTask(w http.ResponseWriter, r *http.Request) {
 	if assignees, ok := s.loadTaskAssigneesMap(ctx, []int64{createdTask.ID})[createdTask.ID]; ok {
 		t.Assignees = assignees
 	}
+	if len(t.Assignees) == 0 && t.AssigneeID != nil && t.AssigneeName != nil {
+		t.Assignees = []TaskAssigneeInfo{{UserID: *t.AssigneeID, UserName: *t.AssigneeName}}
+	}
 
 	// Add sprint info if present
 	if createdTask.Edges.Sprint != nil {
@@ -811,11 +818,17 @@ func (s *Server) HandleUpdateTask(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Handle assignee_ids updates if provided
+	assigneesChanged := req.AssigneeIDs != nil || req.AssigneeID != nil
 	if req.AssigneeIDs != nil {
 		if err := s.replaceTaskAssignees(ctx, taskID, *req.AssigneeIDs); err != nil {
 			respondError(w, http.StatusInternalServerError, "failed to update assignees", "internal_error")
 			return
 		}
+	}
+
+	// Best-effort push assignee changes to GitHub
+	if assigneesChanged {
+		go s.tryPushAssigneesToGitHub(context.Background(), taskID)
 	}
 
 	// Fetch the updated task with all related entities
@@ -903,6 +916,9 @@ func (s *Server) HandleUpdateTask(w http.ResponseWriter, r *http.Request) {
 	// Add multi-assignees
 	if assignees, ok := s.loadTaskAssigneesMap(ctx, []int64{taskID})[taskID]; ok {
 		t.Assignees = assignees
+	}
+	if len(t.Assignees) == 0 && t.AssigneeID != nil && t.AssigneeName != nil {
+		t.Assignees = []TaskAssigneeInfo{{UserID: *t.AssigneeID, UserName: *t.AssigneeName}}
 	}
 
 	// Add sprint info
@@ -1112,6 +1128,10 @@ func (s *Server) HandleGetTaskByNumber(w http.ResponseWriter, r *http.Request) {
 	// Add multi-assignees
 	if assignees, ok := s.loadTaskAssigneesMap(ctx, []int64{taskEntity.ID})[taskEntity.ID]; ok {
 		t.Assignees = assignees
+	}
+	// Backfill from legacy single assignee_id if no multi-assignees present
+	if len(t.Assignees) == 0 && t.AssigneeID != nil && t.AssigneeName != nil {
+		t.Assignees = []TaskAssigneeInfo{{UserID: *t.AssigneeID, UserName: *t.AssigneeName}}
 	}
 
 	// Add sprint info

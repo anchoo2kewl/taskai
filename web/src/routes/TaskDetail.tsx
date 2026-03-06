@@ -18,11 +18,25 @@ function ReactionBar({
   reactions?: GitHubReaction[]
   onToggle?: (reaction: string) => void
 }) {
+  const [showPicker, setShowPicker] = useState(false)
+  const pickerRef = useRef<HTMLDivElement>(null)
   const byType = Object.fromEntries((reactions ?? []).map(r => [r.reaction, r]))
   const nonZero = REACTION_ORDER.filter(r => byType[r]?.count > 0)
-  if (!nonZero.length) return null
+
+  useEffect(() => {
+    if (!showPicker) return
+    const handler = (e: MouseEvent) => {
+      if (pickerRef.current && !pickerRef.current.contains(e.target as Node)) {
+        setShowPicker(false)
+      }
+    }
+    document.addEventListener('mousedown', handler)
+    return () => document.removeEventListener('mousedown', handler)
+  }, [showPicker])
+
+  if (!nonZero.length && !onToggle) return null
   return (
-    <div className="flex flex-wrap gap-1.5 mt-2">
+    <div className="flex flex-wrap items-center gap-1.5 mt-2">
       {nonZero.map(r => (
         <button
           key={r}
@@ -37,6 +51,33 @@ function ReactionBar({
           {REACTION_EMOJI[r]} {byType[r].count}
         </button>
       ))}
+      {onToggle && (
+        <div className="relative" ref={pickerRef}>
+          <button
+            type="button"
+            onClick={() => setShowPicker(p => !p)}
+            className="inline-flex items-center justify-center h-5 px-1.5 text-xs border border-dashed border-dark-border-subtle rounded-full text-dark-text-tertiary hover:text-dark-text-secondary hover:border-dark-border-medium transition-colors"
+            title="Add reaction"
+          >
+            😊 +
+          </button>
+          {showPicker && (
+            <div className="absolute bottom-full left-0 mb-1 bg-dark-bg-secondary border border-dark-border-subtle rounded-lg shadow-xl p-1.5 flex gap-0.5 z-50">
+              {REACTION_ORDER.map(r => (
+                <button
+                  key={r}
+                  type="button"
+                  onClick={() => { onToggle(r); setShowPicker(false) }}
+                  title={r}
+                  className={`text-base p-1 rounded hover:bg-dark-bg-tertiary transition-colors ${byType[r]?.user_reacted ? 'bg-primary-500/20' : ''}`}
+                >
+                  {REACTION_EMOJI[r]}
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
     </div>
   )
 }

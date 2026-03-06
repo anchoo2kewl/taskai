@@ -74,6 +74,7 @@ export default function UserProfile() {
   const [allActivity, setAllActivity] = useState<UserProfileActivity[]>([])
   const [hasMore, setHasMore] = useState(false)
   const [loadingMore, setLoadingMore] = useState(false)
+  const [loadError, setLoadError] = useState(false)
   const sentinelRef = useRef<HTMLDivElement>(null)
   const observerRef = useRef<IntersectionObserver | null>(null)
 
@@ -86,6 +87,7 @@ export default function UserProfile() {
     setProjectFilter('all')
     setAllActivity([])
     setHasMore(false)
+    setLoadError(false)
     apiClient.getUserProfile(parseInt(userId, 10))
       .then(p => {
         setProfile(p)
@@ -97,7 +99,7 @@ export default function UserProfile() {
   }, [userId])
 
   const loadMore = useCallback(() => {
-    if (!userId || loadingMore || !hasMore || allActivity.length === 0) return
+    if (!userId || loadingMore || !hasMore || loadError || allActivity.length === 0) return
     const cursor = allActivity[allActivity.length - 1].created_at
     setLoadingMore(true)
     apiClient.getUserActivityFeed(parseInt(userId, 10), cursor)
@@ -105,9 +107,9 @@ export default function UserProfile() {
         setAllActivity(prev => [...prev, ...page.items])
         setHasMore(page.has_more)
       })
-      .catch(() => { /* silently ignore — sentinel will retry on next intersection */ })
+      .catch(() => setLoadError(true))
       .finally(() => setLoadingMore(false))
-  }, [userId, loadingMore, hasMore, allActivity])
+  }, [userId, loadingMore, hasMore, loadError, allActivity])
 
   // Set up IntersectionObserver on sentinel
   useEffect(() => {
@@ -293,12 +295,23 @@ export default function UserProfile() {
           </div>
         )}
 
-        {/* Sentinel for infinite scroll */}
-        <div ref={sentinelRef} className="h-1" />
+        {/* Sentinel for infinite scroll — only render when eligible for more */}
+        {hasMore && !loadError && <div ref={sentinelRef} className="h-1" />}
 
         {loadingMore && (
           <div className="flex justify-center py-4">
             <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-primary-400" />
+          </div>
+        )}
+
+        {loadError && (
+          <div className="flex justify-center py-3">
+            <button
+              onClick={() => setLoadError(false)}
+              className="text-xs text-primary-400 hover:underline"
+            >
+              Failed to load more — tap to retry
+            </button>
           </div>
         )}
       </div>

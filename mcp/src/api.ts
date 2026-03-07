@@ -73,6 +73,18 @@ export interface ProjectDrawing {
   created_at: string;
 }
 
+export interface WikiPageContent {
+  page_id: number;
+  content: string;
+  updated_at: string;
+}
+
+export interface Drawing {
+  id: string;
+  title: string;
+  scene: unknown;
+}
+
 export interface WikiBlock {
   page_id: string;
   page_title: string;
@@ -209,13 +221,21 @@ export class TaskAIClient {
     return this.request<ProjectDrawing[]>(`/api/projects/${encodeURIComponent(projectId)}/drawings`);
   }
 
-  async createDrawing(projectId: string): Promise<{ draw_id: string; edit_url: string; view_url: string; shortcode: string }> {
+  async createDrawing(
+    projectId: string,
+    opts?: { title?: string; scene?: unknown }
+  ): Promise<{ draw_id: string; edit_url: string; view_url: string; shortcode: string }> {
     // go-draw /draw/api/new does not require auth — call without Authorization header
     const url = `${this.baseURL}/draw/api/new`;
-    const res = await fetch(url, { method: "POST" });
+    const body = opts ? JSON.stringify({ title: opts.title, scene: opts.scene }) : undefined;
+    const res = await fetch(url, {
+      method: "POST",
+      headers: body ? { "Content-Type": "application/json" } : undefined,
+      body,
+    });
     if (!res.ok) {
-      const body = await res.text();
-      throw new Error(`go-draw API error ${res.status}: ${body}`);
+      const text = await res.text();
+      throw new Error(`go-draw API error ${res.status}: ${text}`);
     }
     const draw = await res.json() as { id: string; edit_url: string; view_url: string };
 
@@ -231,6 +251,34 @@ export class TaskAIClient {
       view_url: draw.view_url,
       shortcode: `[draw:${draw.id}:edit:m]`,
     };
+  }
+
+  async saveDrawing(drawId: string, title: string, scene: unknown): Promise<{ ok: boolean; id: string }> {
+    const url = `${this.baseURL}/draw/${encodeURIComponent(drawId)}/save`;
+    const res = await fetch(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ title, scene }),
+    });
+    if (!res.ok) {
+      const text = await res.text();
+      throw new Error(`go-draw save error ${res.status}: ${text}`);
+    }
+    return res.json() as Promise<{ ok: boolean; id: string }>;
+  }
+
+  async getDrawing(drawId: string): Promise<Drawing> {
+    const url = `${this.baseURL}/draw/${encodeURIComponent(drawId)}/data`;
+    const res = await fetch(url);
+    if (!res.ok) {
+      const text = await res.text();
+      throw new Error(`go-draw data error ${res.status}: ${text}`);
+    }
+    return res.json() as Promise<Drawing>;
+  }
+
+  async getWikiPageContent(pageId: string): Promise<WikiPageContent> {
+    return this.request<WikiPageContent>(`/api/wiki/pages/${encodeURIComponent(pageId)}/content`);
   }
 
   async createWikiPage(projectId: string, title: string): Promise<WikiPage> {

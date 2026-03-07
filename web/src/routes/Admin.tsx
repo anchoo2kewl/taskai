@@ -1,11 +1,61 @@
 import { useEffect, useState } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import { useAuth } from '../state/AuthContext'
-import { api, type EmailProviderResponse, type AdminInvitation, type BackupStatus, type BackupSettings, type BackupRecord } from '../lib/api'
+import { api, type EmailProviderResponse, type AdminInvitation, type BackupStatus, type BackupSettings, type BackupRecord, type BackupFolder } from '../lib/api'
 import { version as frontendVersion } from '../lib/version'
 
 // API URL with fallback for production (empty string = relative URL)
 const API_URL = import.meta.env.VITE_API_URL || ''
+
+// ─── Schedule / cron helpers ─────────────────────────────────────────────────
+type ScheduleFreq = 'hourly' | 'daily' | 'weekly' | 'monthly' | 'custom'
+const DOW_LABELS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
+
+function scheduleToCron(freq: ScheduleFreq, hour: number, minute: number, dow: number, dom: number, custom: string): string {
+  const h = String(hour).padStart(2, '0')
+  const m = String(minute).padStart(2, '0')
+  switch (freq) {
+    case 'hourly':  return `${m} * * * *`
+    case 'daily':   return `${m} ${h} * * *`
+    case 'weekly':  return `${m} ${h} * * ${dow}`
+    case 'monthly': return `${m} ${h} ${dom} * *`
+    case 'custom':  return custom
+  }
+}
+
+function cronToSchedule(cron: string): { freq: ScheduleFreq; hour: number; minute: number; dow: number; dom: number } {
+  const parts = (cron || '0 3 * * *').trim().split(/\s+/)
+  if (parts.length !== 5) return { freq: 'custom', hour: 3, minute: 0, dow: 1, dom: 1 }
+  const [min, hr, dom, , dow] = parts
+  if (hr === '*' && dom === '*' && dow === '*') return { freq: 'hourly', hour: 0, minute: Number(min) || 0, dow: 1, dom: 1 }
+  if (dom === '*' && dow === '*') return { freq: 'daily', hour: Number(hr) || 3, minute: Number(min) || 0, dow: 1, dom: 1 }
+  if (dom === '*' && dow !== '*') return { freq: 'weekly', hour: Number(hr) || 3, minute: Number(min) || 0, dow: Number(dow) || 1, dom: 1 }
+  if (dom !== '*' && dow === '*') return { freq: 'monthly', hour: Number(hr) || 3, minute: Number(min) || 0, dow: 1, dom: Number(dom) || 1 }
+  return { freq: 'custom', hour: 3, minute: 0, dow: 1, dom: 1 }
+}
+
+function scheduleDesc(freq: ScheduleFreq, hour: number, minute: number, dow: number, dom: number): string {
+  const t = `${String(hour).padStart(2, '0')}:${String(minute).padStart(2, '0')} UTC`
+  switch (freq) {
+    case 'hourly':  return `Every hour at :${String(minute).padStart(2, '0')}`
+    case 'daily':   return `Every day at ${t}`
+    case 'weekly':  return `Every ${DOW_LABELS[dow]} at ${t}`
+    case 'monthly': return `On the ${dom}${dom === 1 ? 'st' : dom === 2 ? 'nd' : dom === 3 ? 'rd' : 'th'} of each month at ${t}`
+    case 'custom':  return 'Custom schedule'
+  }
+}
+
+function relativeTime(dateStr: string): string {
+  const diff = Date.now() - new Date(dateStr).getTime()
+  const secs = Math.floor(diff / 1000)
+  if (secs < 60) return 'just now'
+  const mins = Math.floor(secs / 60)
+  if (mins < 60) return `${mins}m ago`
+  const hrs = Math.floor(mins / 60)
+  if (hrs < 24) return `${hrs}h ago`
+  const days = Math.floor(hrs / 24)
+  return `${days}d ago`
+}
 
 // Types from backend
 interface UserWithStats {
@@ -120,8 +170,6 @@ export default function Admin() {
   const [autoBackupStatus, setAutoBackupStatus] = useState<BackupStatus | null>(null)
   const [autoBackupSettings, setAutoBackupSettings] = useState<BackupSettings | null>(null)
   const [autoBackupHistory, setAutoBackupHistory] = useState<BackupRecord[]>([])
-  const [autoBackupCron, setAutoBackupCron] = useState('0 3 * * *')
-  const [autoBackupFolderId, setAutoBackupFolderId] = useState('')
   const [autoBackupEnabled, setAutoBackupEnabled] = useState(false)
   const [isAutoBackupAvailable, setIsAutoBackupAvailable] = useState(false)
   const [isLoadingAutoBackup, setIsLoadingAutoBackup] = useState(false)
@@ -130,6 +178,23 @@ export default function Admin() {
   const [isDisconnectingAutoBackup, setIsDisconnectingAutoBackup] = useState(false)
   const [autoBackupError, setAutoBackupError] = useState('')
   const [autoBackupSuccess, setAutoBackupSuccess] = useState('')
+  // Visual schedule builder
+  const [schedFreq, setSchedFreq] = useState<ScheduleFreq>('daily')
+  const [schedHour, setSchedHour] = useState(3)
+  const [schedMinute, setSchedMinute] = useState(0)
+  const [schedDayOfWeek, setSchedDayOfWeek] = useState(1)
+  const [schedDayOfMonth, setSchedDayOfMonth] = useState(1)
+  const [schedCustomCron, setSchedCustomCron] = useState('0 3 * * *')
+  // Folder browser
+  const [folderBrowserOpen, setFolderBrowserOpen] = useState(false)
+  const [folderStack, setFolderStack] = useState<{ id: string; name: string }[]>([])
+  const [folderList, setFolderList] = useState<BackupFolder[]>([])
+  const [isFolderLoading, setIsFolderLoading] = useState(false)
+  const [newFolderName, setNewFolderName] = useState('')
+  const [isCreatingFolder, setIsCreatingFolder] = useState(false)
+  const [selectedFolderId, setSelectedFolderId] = useState('')
+  const [selectedFolderName, setSelectedFolderName] = useState('')
+  const [isDownloadingRecord, setIsDownloadingRecord] = useState<string | null>(null)
 
   // System/version state
   const [versionInfo, setVersionInfo] = useState<VersionInfo | null>(null)
@@ -444,14 +509,24 @@ export default function Admin() {
       const [status, settings, history] = await Promise.all([
         api.getBackupStatus(),
         api.getBackupSettings(),
-        api.listBackupHistory(10),
+        api.listBackupHistory(20),
       ])
       setAutoBackupStatus(status)
       setAutoBackupSettings(settings)
       setAutoBackupHistory(history)
       setAutoBackupEnabled(settings.enabled)
-      setAutoBackupCron(settings.cron_expression || '0 3 * * *')
-      setAutoBackupFolderId(settings.folder_id || '')
+      // Initialise visual schedule builder from stored cron
+      const cron = settings.cron_expression || '0 3 * * *'
+      const parsed = cronToSchedule(cron)
+      setSchedFreq(parsed.freq)
+      setSchedHour(parsed.hour)
+      setSchedMinute(parsed.minute)
+      setSchedDayOfWeek(parsed.dow)
+      setSchedDayOfMonth(parsed.dom)
+      setSchedCustomCron(cron)
+      // Initialise folder selection
+      setSelectedFolderId(settings.folder_id || '')
+      setSelectedFolderName(settings.folder_id ? `Folder: ${settings.folder_id}` : '')
       setIsAutoBackupAvailable(true)
     } catch {
       setIsAutoBackupAvailable(false)
@@ -475,19 +550,20 @@ export default function Admin() {
     }
   }
 
-  const handleSaveAutoBackupSettings = async (e: React.FormEvent) => {
-    e.preventDefault()
+  const handleSaveAutoBackupSettings = async () => {
     setIsSavingAutoBackupSettings(true)
     setAutoBackupError('')
     setAutoBackupSuccess('')
     try {
+      const cron = scheduleToCron(schedFreq, schedHour, schedMinute, schedDayOfWeek, schedDayOfMonth, schedCustomCron)
       const updated = await api.updateBackupSettings({
         enabled: autoBackupEnabled,
-        cron_expression: autoBackupCron,
-        folder_id: autoBackupFolderId,
+        cron_expression: cron,
+        folder_id: selectedFolderId,
       })
       setAutoBackupSettings(updated)
-      setAutoBackupSuccess('Backup settings saved')
+      setAutoBackupSuccess('Settings saved')
+      setTimeout(() => setAutoBackupSuccess(''), 3000)
     } catch (err) {
       setAutoBackupError(err instanceof Error ? err.message : 'Failed to save settings')
     } finally {
@@ -517,6 +593,73 @@ export default function Admin() {
       setAutoBackupHistory(prev => prev.filter(r => r.id !== id))
     } catch (err) {
       setAutoBackupError(err instanceof Error ? err.message : 'Failed to delete record')
+    }
+  }
+
+  const handleDownloadRecord = async (record: BackupRecord) => {
+    setIsDownloadingRecord(record.id)
+    try {
+      await api.downloadBackupRecord(record.id, record.filename || `backup-${record.id}.tar.gz`)
+    } catch (err) {
+      setAutoBackupError(err instanceof Error ? err.message : 'Download failed')
+    } finally {
+      setIsDownloadingRecord(null)
+    }
+  }
+
+  const openFolderBrowser = async () => {
+    setFolderBrowserOpen(true)
+    setFolderStack([])
+    setNewFolderName('')
+    await loadFolders('')
+  }
+
+  const loadFolders = async (parentId: string) => {
+    setIsFolderLoading(true)
+    try {
+      const folders = await api.listBackupFolders(parentId)
+      setFolderList(folders || [])
+    } catch {
+      setFolderList([])
+    } finally {
+      setIsFolderLoading(false)
+    }
+  }
+
+  const handleFolderClick = (folder: BackupFolder) => {
+    setFolderStack(prev => [...prev, { id: folder.id, name: folder.name }])
+    loadFolders(folder.id)
+  }
+
+  const handleFolderBreadcrumb = (idx: number) => {
+    const newStack = folderStack.slice(0, idx + 1)
+    setFolderStack(newStack)
+    loadFolders(newStack[newStack.length - 1]?.id ?? '')
+  }
+
+  const handleFolderBreadcrumbRoot = () => {
+    setFolderStack([])
+    loadFolders('')
+  }
+
+  const handleSelectFolder = (id: string, name: string) => {
+    setSelectedFolderId(id)
+    setSelectedFolderName(name)
+    setFolderBrowserOpen(false)
+  }
+
+  const handleCreateFolder = async () => {
+    if (!newFolderName.trim()) return
+    setIsCreatingFolder(true)
+    try {
+      const parentId = folderStack[folderStack.length - 1]?.id ?? ''
+      const folder = await api.createBackupFolder(newFolderName.trim(), parentId)
+      setFolderList(prev => [...prev, folder])
+      setNewFolderName('')
+    } catch (err) {
+      setAutoBackupError(err instanceof Error ? err.message : 'Failed to create folder')
+    } finally {
+      setIsCreatingFolder(false)
     }
   }
 
@@ -1421,196 +1564,420 @@ export default function Admin() {
 
               {/* Automated subtab — Google Drive backup */}
               {backupSubTab === 'automated' && (
-                <div className="space-y-6">
+                <div className="space-y-4">
                   {isLoadingAutoBackup && (
                     <div className="animate-pulse space-y-4">
-                      <div className="h-32 bg-dark-bg-secondary rounded-lg"></div>
+                      <div className="h-28 bg-dark-bg-secondary rounded-xl"></div>
+                      <div className="h-40 bg-dark-bg-secondary rounded-xl"></div>
                     </div>
                   )}
-                  {!isLoadingAutoBackup && !isAutoBackupAvailable && (
-                    <div className="bg-dark-bg-secondary rounded-lg border border-dark-border-subtle p-6">
-                      <p className="text-sm text-dark-text-tertiary">Google Drive backup is not configured on this server. Set <code className="font-mono text-xs bg-dark-bg-tertiary px-1 rounded">GOOGLE_CLIENT_ID</code> and ensure the database is PostgreSQL.</p>
-                    </div>
-                  )}
-                  {!isLoadingAutoBackup && isAutoBackupAvailable && (
-                    <div className="bg-dark-bg-secondary rounded-lg border border-dark-border-subtle p-6">
-                      <div className="flex items-center gap-3 mb-1">
-                        <h2 className="text-lg font-semibold text-dark-text-primary">Google Drive Backup</h2>
-                        {autoBackupStatus?.provider_connected ? (
-                          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs font-medium bg-green-500/15 text-green-400 border border-green-500/30">
-                            <span className="w-1.5 h-1.5 rounded-full bg-green-400"></span>
-                            Connected{autoBackupStatus.connected_email ? ` · ${autoBackupStatus.connected_email}` : ''}
-                          </span>
-                        ) : (
-                          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs font-medium bg-dark-bg-tertiary text-dark-text-secondary border border-dark-border-subtle">
-                            Not connected
-                          </span>
-                        )}
-                      </div>
-                      <p className="text-sm text-dark-text-secondary mb-6">
-                        Scheduled database backups to Google Drive with automatic retention policies
-                      </p>
 
+                  {!isLoadingAutoBackup && !isAutoBackupAvailable && (
+                    <div className="bg-dark-bg-secondary rounded-xl border border-dark-border-subtle p-6">
+                      <p className="text-sm text-dark-text-tertiary">
+                        Google Drive backup is not configured. Set{' '}
+                        <code className="font-mono text-xs bg-dark-bg-tertiary px-1 py-0.5 rounded">GOOGLE_CLIENT_ID</code>{' '}
+                        and ensure PostgreSQL is in use.
+                      </p>
+                    </div>
+                  )}
+
+                  {!isLoadingAutoBackup && isAutoBackupAvailable && (
+                    <>
+                      {/* Global alerts */}
                       {autoBackupSuccess && (
-                        <div className="mb-4 p-3 bg-green-500/10 border border-green-500/30 rounded text-sm text-green-400">{autoBackupSuccess}</div>
+                        <div className="p-3 bg-emerald-500/10 border border-emerald-500/30 rounded-lg text-sm text-emerald-400">{autoBackupSuccess}</div>
                       )}
                       {autoBackupError && (
-                        <div className="mb-4 p-3 bg-red-500/10 border border-red-500/30 rounded text-sm text-red-400">{autoBackupError}</div>
+                        <div className="p-3 bg-red-500/10 border border-red-500/30 rounded-lg text-sm text-red-400 flex items-center justify-between">
+                          <span>{autoBackupError}</span>
+                          <button onClick={() => setAutoBackupError('')} className="ml-3 text-red-400/60 hover:text-red-400">✕</button>
+                        </div>
                       )}
 
-                      {/* Connect / action row */}
-                      <div className="flex flex-wrap items-center gap-3 mb-6">
-                        {!autoBackupStatus?.provider_connected ? (
-                          <a
-                            href="/api/admin/backup/oauth/start"
-                            className="inline-flex items-center gap-2 px-4 py-2 bg-green-600 hover:bg-green-500 text-white rounded text-sm font-medium transition-colors"
-                          >
-                            <svg className="w-4 h-4" viewBox="0 0 24 24" fill="currentColor">
+                      {/* Card 1 — Connection */}
+                      <div className="bg-dark-bg-secondary rounded-xl border border-dark-border-subtle p-5">
+                        <div className="flex items-center gap-3 mb-4">
+                          <div className="w-9 h-9 rounded-lg bg-teal-500/15 flex items-center justify-center flex-shrink-0">
+                            <svg className="w-4.5 h-4.5 text-teal-400" viewBox="0 0 24 24" fill="currentColor" style={{ width: '18px', height: '18px' }}>
                               <path d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" />
                               <path d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" />
                               <path d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z" />
                               <path d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z" />
                             </svg>
-                            Connect Google Drive
-                          </a>
-                        ) : (
-                          <>
-                            <button
-                              onClick={handleTriggerAutoBackup}
-                              disabled={isTriggeringAutoBackup || autoBackupStatus?.running}
-                              className="px-4 py-2 bg-green-600 hover:bg-green-500 disabled:opacity-50 text-white rounded text-sm font-medium transition-colors"
+                          </div>
+                          <div className="flex-1 min-w-0">
+                            <h3 className="text-sm font-semibold text-dark-text-primary">Google Drive</h3>
+                            {autoBackupStatus?.provider_connected ? (
+                              <p className="text-xs text-emerald-400 flex items-center gap-1">
+                                <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 inline-block"></span>
+                                Connected{autoBackupStatus.connected_email ? ` · ${autoBackupStatus.connected_email}` : ''}
+                              </p>
+                            ) : (
+                              <p className="text-xs text-dark-text-tertiary">Not connected</p>
+                            )}
+                          </div>
+                          {autoBackupStatus?.provider_connected ? (
+                            <div className="flex items-center gap-2">
+                              <button
+                                onClick={handleTriggerAutoBackup}
+                                disabled={isTriggeringAutoBackup || !!autoBackupStatus?.running}
+                                className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-teal-600 hover:bg-teal-500 disabled:opacity-50 text-white rounded-lg text-xs font-medium transition-colors"
+                              >
+                                {isTriggeringAutoBackup || autoBackupStatus?.running ? (
+                                  <><div className="w-3 h-3 rounded-full border border-white border-t-transparent animate-spin"></div>Running…</>
+                                ) : (
+                                  <><svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z" /><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>Run Now</>
+                                )}
+                              </button>
+                              <button
+                                onClick={handleDisconnectAutoBackup}
+                                disabled={isDisconnectingAutoBackup}
+                                className="px-3 py-1.5 text-xs font-medium text-dark-text-secondary hover:text-red-400 hover:bg-red-500/10 rounded-lg transition-colors"
+                              >
+                                Disconnect
+                              </button>
+                            </div>
+                          ) : (
+                            <a
+                              href="/api/admin/backup/oauth/start"
+                              className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-teal-600 hover:bg-teal-500 text-white rounded-lg text-xs font-medium transition-colors"
                             >
-                              {isTriggeringAutoBackup || autoBackupStatus?.running ? 'Backing up…' : 'Run Backup Now'}
-                            </button>
-                            <button
-                              onClick={handleDisconnectAutoBackup}
-                              disabled={isDisconnectingAutoBackup}
-                              className="px-4 py-2 bg-dark-bg-tertiary hover:bg-red-500/20 text-dark-text-secondary hover:text-red-400 rounded text-sm font-medium transition-colors"
-                            >
-                              {isDisconnectingAutoBackup ? 'Disconnecting…' : 'Disconnect'}
-                            </button>
-                          </>
-                        )}
+                              <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1" /></svg>
+                              Connect
+                            </a>
+                          )}
+                        </div>
                         {autoBackupStatus?.next_run && (
-                          <span className="text-xs text-dark-text-tertiary">
-                            Next: {new Date(autoBackupStatus.next_run).toLocaleString()}
-                          </span>
+                          <p className="text-xs text-dark-text-tertiary border-t border-dark-border-subtle pt-3">
+                            Next scheduled run: {new Date(autoBackupStatus.next_run).toLocaleString()}
+                          </p>
+                        )}
+                        {autoBackupStatus?.last_backup && (
+                          <p className="text-xs text-dark-text-tertiary mt-1">
+                            Last backup: {relativeTime(autoBackupStatus.last_backup.started_at)} ·{' '}
+                            <span className={autoBackupStatus.last_backup.status === 'success' ? 'text-emerald-400' : 'text-red-400'}>
+                              {autoBackupStatus.last_backup.status}
+                            </span>
+                            {autoBackupStatus.last_backup.size_bytes > 0 && ` · ${formatBytes(autoBackupStatus.last_backup.size_bytes)}`}
+                          </p>
                         )}
                       </div>
 
-                      {/* Settings form — only when connected */}
+                      {/* Cards 2 & 3 — Schedule + Storage (only when connected) */}
                       {autoBackupStatus?.provider_connected && (
-                        <form onSubmit={handleSaveAutoBackupSettings} className="space-y-4 mb-6">
+                        <>
+                          {/* Card 2 — Schedule */}
+                          <div className="bg-dark-bg-secondary rounded-xl border border-dark-border-subtle p-5">
+                            <div className="flex items-center gap-3 mb-4">
+                              <div className="w-9 h-9 rounded-lg bg-violet-500/15 flex items-center justify-center flex-shrink-0">
+                                <svg className="w-4 h-4 text-violet-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
+                              </div>
+                              <div className="flex-1">
+                                <h3 className="text-sm font-semibold text-dark-text-primary">Schedule</h3>
+                                <p className="text-xs text-dark-text-tertiary">{scheduleDesc(schedFreq, schedHour, schedMinute, schedDayOfWeek, schedDayOfMonth)}</p>
+                              </div>
+                              <div className="flex items-center gap-2">
+                                <span className="text-xs text-dark-text-secondary">Enabled</span>
+                                <label className="relative inline-flex items-center cursor-pointer">
+                                  <input type="checkbox" checked={autoBackupEnabled} onChange={e => setAutoBackupEnabled(e.target.checked)} className="sr-only peer" />
+                                  <div className="w-8 h-4 bg-dark-bg-tertiary rounded-full peer peer-checked:after:translate-x-full after:content-[''] after:absolute after:top-0.5 after:left-[2px] after:bg-white after:rounded-full after:h-3 after:w-3 after:transition-all peer-checked:bg-teal-600"></div>
+                                </label>
+                              </div>
+                            </div>
+
+                            {/* Frequency pills */}
+                            <div className="flex flex-wrap gap-2 mb-4">
+                              {(['hourly', 'daily', 'weekly', 'monthly', 'custom'] as ScheduleFreq[]).map(f => (
+                                <button
+                                  key={f}
+                                  onClick={() => setSchedFreq(f)}
+                                  className={`px-3 py-1 rounded-full text-xs font-medium transition-colors capitalize ${
+                                    schedFreq === f
+                                      ? 'bg-violet-500/20 text-violet-300 border border-violet-500/40'
+                                      : 'bg-dark-bg-tertiary text-dark-text-secondary hover:text-dark-text-primary border border-dark-border-subtle'
+                                  }`}
+                                >
+                                  {f}
+                                </button>
+                              ))}
+                            </div>
+
+                            {/* Time / day pickers */}
+                            {schedFreq !== 'custom' && (
+                              <div className="flex flex-wrap gap-3 mb-4">
+                                {schedFreq !== 'hourly' && (
+                                  <div>
+                                    <label className="block text-xs text-dark-text-tertiary mb-1">Hour (UTC)</label>
+                                    <select
+                                      value={schedHour}
+                                      onChange={e => setSchedHour(Number(e.target.value))}
+                                      className="px-2 py-1.5 bg-dark-bg-primary border border-dark-border-subtle rounded text-sm text-dark-text-primary focus:outline-none focus:border-dark-accent-primary"
+                                    >
+                                      {Array.from({ length: 24 }, (_, i) => (
+                                        <option key={i} value={i}>{String(i).padStart(2, '0')}:00</option>
+                                      ))}
+                                    </select>
+                                  </div>
+                                )}
+                                <div>
+                                  <label className="block text-xs text-dark-text-tertiary mb-1">Minute</label>
+                                  <select
+                                    value={schedMinute}
+                                    onChange={e => setSchedMinute(Number(e.target.value))}
+                                    className="px-2 py-1.5 bg-dark-bg-primary border border-dark-border-subtle rounded text-sm text-dark-text-primary focus:outline-none focus:border-dark-accent-primary"
+                                  >
+                                    {[0, 5, 10, 15, 20, 25, 30, 35, 40, 45, 50, 55].map(m => (
+                                      <option key={m} value={m}>:{String(m).padStart(2, '0')}</option>
+                                    ))}
+                                  </select>
+                                </div>
+                                {schedFreq === 'weekly' && (
+                                  <div>
+                                    <label className="block text-xs text-dark-text-tertiary mb-1">Day of week</label>
+                                    <select
+                                      value={schedDayOfWeek}
+                                      onChange={e => setSchedDayOfWeek(Number(e.target.value))}
+                                      className="px-2 py-1.5 bg-dark-bg-primary border border-dark-border-subtle rounded text-sm text-dark-text-primary focus:outline-none focus:border-dark-accent-primary"
+                                    >
+                                      {DOW_LABELS.map((d, i) => <option key={i} value={i}>{d}</option>)}
+                                    </select>
+                                  </div>
+                                )}
+                                {schedFreq === 'monthly' && (
+                                  <div>
+                                    <label className="block text-xs text-dark-text-tertiary mb-1">Day of month</label>
+                                    <select
+                                      value={schedDayOfMonth}
+                                      onChange={e => setSchedDayOfMonth(Number(e.target.value))}
+                                      className="px-2 py-1.5 bg-dark-bg-primary border border-dark-border-subtle rounded text-sm text-dark-text-primary focus:outline-none focus:border-dark-accent-primary"
+                                    >
+                                      {Array.from({ length: 28 }, (_, i) => i + 1).map(d => <option key={d} value={d}>{d}</option>)}
+                                    </select>
+                                  </div>
+                                )}
+                              </div>
+                            )}
+
+                            {schedFreq === 'custom' && (
+                              <div className="mb-4">
+                                <label className="block text-xs text-dark-text-tertiary mb-1">Cron expression</label>
+                                <input
+                                  type="text"
+                                  value={schedCustomCron}
+                                  onChange={e => setSchedCustomCron(e.target.value)}
+                                  placeholder="0 3 * * *"
+                                  className="w-full max-w-xs px-3 py-1.5 bg-dark-bg-primary border border-dark-border-subtle rounded text-sm text-dark-text-primary font-mono focus:outline-none focus:border-dark-accent-primary"
+                                />
+                              </div>
+                            )}
+
+                            {/* Cron preview */}
+                            <div className="flex items-center justify-between">
+                              <p className="text-xs text-dark-text-tertiary font-mono">
+                                {scheduleToCron(schedFreq, schedHour, schedMinute, schedDayOfWeek, schedDayOfMonth, schedCustomCron)}
+                              </p>
+                              {autoBackupSettings && (
+                                <p className="text-xs text-dark-text-tertiary">
+                                  Retention: {autoBackupSettings.retention.full_days}d full · {autoBackupSettings.retention.alternate_days}d alternate · {autoBackupSettings.retention.weekly_days}d weekly
+                                </p>
+                              )}
+                            </div>
+                          </div>
+
+                          {/* Card 3 — Storage / Folder */}
+                          <div className="bg-dark-bg-secondary rounded-xl border border-dark-border-subtle p-5">
+                            <div className="flex items-center gap-3 mb-4">
+                              <div className="w-9 h-9 rounded-lg bg-amber-500/15 flex items-center justify-center flex-shrink-0">
+                                <svg className="w-4 h-4 text-amber-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z" /></svg>
+                              </div>
+                              <div className="flex-1">
+                                <h3 className="text-sm font-semibold text-dark-text-primary">Storage Folder</h3>
+                                <p className="text-xs text-dark-text-tertiary">
+                                  {selectedFolderName || (selectedFolderId ? `ID: ${selectedFolderId}` : 'Google Drive root')}
+                                </p>
+                              </div>
+                              <button
+                                onClick={openFolderBrowser}
+                                className="px-3 py-1.5 text-xs font-medium bg-dark-bg-tertiary hover:bg-dark-bg-primary border border-dark-border-subtle text-dark-text-secondary hover:text-dark-text-primary rounded-lg transition-colors"
+                              >
+                                Browse…
+                              </button>
+                              {selectedFolderId && (
+                                <button
+                                  onClick={() => { setSelectedFolderId(''); setSelectedFolderName('') }}
+                                  className="px-3 py-1.5 text-xs font-medium text-dark-text-tertiary hover:text-dark-text-secondary rounded-lg transition-colors"
+                                >
+                                  Use root
+                                </button>
+                              )}
+                            </div>
+
+                            {/* Folder browser inline */}
+                            {folderBrowserOpen && (
+                              <div className="border border-dark-border-subtle rounded-lg overflow-hidden mb-4">
+                                {/* Breadcrumb */}
+                                <div className="flex items-center gap-1 px-3 py-2 bg-dark-bg-tertiary border-b border-dark-border-subtle text-xs text-dark-text-secondary overflow-x-auto">
+                                  <button onClick={handleFolderBreadcrumbRoot} className="hover:text-dark-text-primary transition-colors shrink-0">Root</button>
+                                  {folderStack.map((f, i) => (
+                                    <span key={f.id} className="flex items-center gap-1 shrink-0">
+                                      <span className="text-dark-text-tertiary">/</span>
+                                      <button onClick={() => handleFolderBreadcrumb(i)} className="hover:text-dark-text-primary transition-colors">{f.name}</button>
+                                    </span>
+                                  ))}
+                                </div>
+
+                                {/* Folder list */}
+                                <div className="max-h-48 overflow-y-auto">
+                                  {isFolderLoading ? (
+                                    <div className="p-4 text-center text-xs text-dark-text-tertiary">Loading…</div>
+                                  ) : folderList.length === 0 ? (
+                                    <div className="p-4 text-center text-xs text-dark-text-tertiary">No folders here</div>
+                                  ) : (
+                                    folderList.map(folder => (
+                                      <div key={folder.id} className="flex items-center px-3 py-2 hover:bg-dark-bg-tertiary/50 border-b border-dark-border-subtle last:border-0 group">
+                                        <svg className="w-3.5 h-3.5 text-amber-400 mr-2 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z" /></svg>
+                                        <span className="flex-1 text-xs text-dark-text-primary truncate">{folder.name}</span>
+                                        <button
+                                          onClick={() => handleSelectFolder(folder.id, folder.name)}
+                                          className="opacity-0 group-hover:opacity-100 px-2 py-0.5 text-xs bg-teal-600 text-white rounded transition-all mr-1"
+                                        >
+                                          Use
+                                        </button>
+                                        <button
+                                          onClick={() => handleFolderClick(folder)}
+                                          className="opacity-0 group-hover:opacity-100 px-2 py-0.5 text-xs bg-dark-bg-primary border border-dark-border-subtle text-dark-text-secondary rounded transition-all"
+                                        >
+                                          Open
+                                        </button>
+                                      </div>
+                                    ))
+                                  )}
+                                </div>
+
+                                {/* New folder + actions */}
+                                <div className="flex items-center gap-2 px-3 py-2 border-t border-dark-border-subtle bg-dark-bg-tertiary/50">
+                                  <input
+                                    type="text"
+                                    value={newFolderName}
+                                    onChange={e => setNewFolderName(e.target.value)}
+                                    onKeyDown={e => e.key === 'Enter' && handleCreateFolder()}
+                                    placeholder="New folder name…"
+                                    className="flex-1 px-2 py-1 text-xs bg-dark-bg-primary border border-dark-border-subtle rounded text-dark-text-primary placeholder-dark-text-tertiary focus:outline-none focus:border-dark-accent-primary"
+                                  />
+                                  <button
+                                    onClick={handleCreateFolder}
+                                    disabled={isCreatingFolder || !newFolderName.trim()}
+                                    className="px-2 py-1 text-xs bg-teal-600 hover:bg-teal-500 disabled:opacity-40 text-white rounded transition-colors"
+                                  >
+                                    Create
+                                  </button>
+                                  <button
+                                    onClick={() => {
+                                      const currentId = folderStack[folderStack.length - 1]?.id ?? ''
+                                      const currentName = folderStack[folderStack.length - 1]?.name ?? 'Root'
+                                      handleSelectFolder(currentId, currentName === 'Root' ? '' : currentName)
+                                    }}
+                                    className="px-2 py-1 text-xs bg-dark-bg-primary border border-dark-border-subtle text-dark-text-secondary hover:text-dark-text-primary rounded transition-colors"
+                                  >
+                                    Use current
+                                  </button>
+                                </div>
+                              </div>
+                            )}
+                          </div>
+
+                          {/* Save settings button */}
                           <div className="flex items-center gap-3">
-                            <label className="relative inline-flex items-center cursor-pointer">
-                              <input
-                                type="checkbox"
-                                checked={autoBackupEnabled}
-                                onChange={e => setAutoBackupEnabled(e.target.checked)}
-                                className="sr-only peer"
-                              />
-                              <div className="w-9 h-5 bg-dark-bg-tertiary peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full after:content-[''] after:absolute after:top-0.5 after:left-[2px] after:bg-white after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-green-600"></div>
-                            </label>
-                            <span className="text-sm text-dark-text-primary">Enable scheduled backups</span>
+                            <button
+                              onClick={handleSaveAutoBackupSettings}
+                              disabled={isSavingAutoBackupSettings}
+                              className="px-4 py-2 bg-teal-600 hover:bg-teal-500 disabled:opacity-50 text-white rounded-lg text-sm font-medium transition-colors"
+                            >
+                              {isSavingAutoBackupSettings ? 'Saving…' : 'Save Settings'}
+                            </button>
+                            {autoBackupSettings && (
+                              <p className="text-xs text-dark-text-tertiary">
+                                Last saved {relativeTime(autoBackupSettings.updated_at)}
+                              </p>
+                            )}
                           </div>
+                        </>
+                      )}
 
-                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                            <div>
-                              <label className="block text-sm font-medium text-dark-text-secondary mb-1">Schedule (cron)</label>
-                              <input
-                                type="text"
-                                value={autoBackupCron}
-                                onChange={e => setAutoBackupCron(e.target.value)}
-                                placeholder="0 3 * * *"
-                                className="w-full px-3 py-2 bg-dark-bg-primary border border-dark-border-subtle rounded text-sm text-dark-text-primary placeholder-dark-text-tertiary focus:outline-none focus:border-dark-accent-primary font-mono"
-                              />
-                              <p className="mt-1 text-xs text-dark-text-tertiary">Default: daily at 3 AM UTC</p>
-                            </div>
-                            <div>
-                              <label className="block text-sm font-medium text-dark-text-secondary mb-1">Google Drive Folder ID <span className="text-dark-text-tertiary">(optional)</span></label>
-                              <input
-                                type="text"
-                                value={autoBackupFolderId}
-                                onChange={e => setAutoBackupFolderId(e.target.value)}
-                                placeholder="Leave blank for root"
-                                className="w-full px-3 py-2 bg-dark-bg-primary border border-dark-border-subtle rounded text-sm text-dark-text-primary placeholder-dark-text-tertiary focus:outline-none focus:border-dark-accent-primary"
-                              />
-                            </div>
+                      {/* Card 4 — History */}
+                      <div className="bg-dark-bg-secondary rounded-xl border border-dark-border-subtle overflow-hidden">
+                        <div className="flex items-center gap-3 px-5 py-4 border-b border-dark-border-subtle">
+                          <div className="w-9 h-9 rounded-lg bg-blue-500/15 flex items-center justify-center flex-shrink-0">
+                            <svg className="w-4 h-4 text-blue-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>
                           </div>
-
-                          {autoBackupSettings && (
-                            <div className="text-xs text-dark-text-tertiary">
-                              Retention: keep all for {autoBackupSettings.retention.full_days}d, every-other-day for {autoBackupSettings.retention.alternate_days}d, weekly for {autoBackupSettings.retention.weekly_days}d
-                            </div>
-                          )}
-
+                          <h3 className="text-sm font-semibold text-dark-text-primary flex-1">Backup History</h3>
                           <button
-                            type="submit"
-                            disabled={isSavingAutoBackupSettings}
-                            className="px-4 py-2 bg-dark-accent-primary hover:bg-dark-accent-primary/80 disabled:opacity-50 text-white rounded text-sm font-medium transition-colors"
+                            onClick={loadAutomatedBackup}
+                            className="text-xs text-dark-text-tertiary hover:text-dark-text-secondary transition-colors"
                           >
-                            {isSavingAutoBackupSettings ? 'Saving…' : 'Save Settings'}
+                            Refresh
                           </button>
-                        </form>
-                      )}
-
-                      {/* Backup history */}
-                      {autoBackupHistory.length > 0 && (
-                        <div>
-                          <h3 className="text-sm font-medium text-dark-text-secondary mb-3">Recent Backups</h3>
-                          <div className="rounded border border-dark-border-subtle overflow-hidden">
-                            <table className="w-full text-sm">
-                              <thead className="bg-dark-bg-tertiary">
-                                <tr>
-                                  <th className="px-3 py-2 text-left text-xs font-medium text-dark-text-tertiary">Status</th>
-                                  <th className="px-3 py-2 text-left text-xs font-medium text-dark-text-tertiary">Started</th>
-                                  <th className="px-3 py-2 text-left text-xs font-medium text-dark-text-tertiary">Size</th>
-                                  <th className="px-3 py-2 text-left text-xs font-medium text-dark-text-tertiary">Trigger</th>
-                                  <th className="px-3 py-2"></th>
-                                </tr>
-                              </thead>
-                              <tbody className="divide-y divide-dark-border-subtle">
-                                {autoBackupHistory.map(record => (
-                                  <tr key={record.id} className="hover:bg-dark-bg-tertiary/50">
-                                    <td className="px-3 py-2">
-                                      <span className={`inline-flex items-center gap-1 text-xs font-medium ${
-                                        record.status === 'success' ? 'text-green-400' :
-                                        record.status === 'failed' ? 'text-red-400' : 'text-yellow-400'
-                                      }`}>
-                                        {record.status === 'success' ? '✓' : record.status === 'failed' ? '✗' : '…'}
-                                        {record.status}
-                                      </span>
-                                    </td>
-                                    <td className="px-3 py-2 text-dark-text-secondary text-xs">
-                                      {new Date(record.started_at).toLocaleString()}
-                                    </td>
-                                    <td className="px-3 py-2 text-dark-text-secondary text-xs">
-                                      {record.size_bytes > 0 ? formatBytes(record.size_bytes) : '—'}
-                                    </td>
-                                    <td className="px-3 py-2 text-dark-text-tertiary text-xs">{record.triggered_by}</td>
-                                    <td className="px-3 py-2 text-right">
-                                      <button
-                                        onClick={() => handleDeleteAutoBackupRecord(record.id)}
-                                        className="text-dark-text-tertiary hover:text-red-400 transition-colors p-1"
-                                        title="Delete record"
-                                      >
-                                        <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
-                                        </svg>
-                                      </button>
-                                    </td>
-                                  </tr>
-                                ))}
-                              </tbody>
-                            </table>
-                          </div>
                         </div>
-                      )}
 
-                      {!isLoadingAutoBackup && autoBackupStatus?.provider_connected && autoBackupHistory.length === 0 && (
-                        <p className="text-sm text-dark-text-tertiary">No backups yet. Run your first backup manually above.</p>
-                      )}
-                    </div>
+                        {autoBackupHistory.length === 0 ? (
+                          <div className="px-5 py-8 text-center">
+                            <p className="text-sm text-dark-text-tertiary">No backups yet.</p>
+                            {autoBackupStatus?.provider_connected && (
+                              <p className="text-xs text-dark-text-tertiary mt-1">Run your first backup using the button above.</p>
+                            )}
+                          </div>
+                        ) : (
+                          <div className="divide-y divide-dark-border-subtle">
+                            {autoBackupHistory.map(record => (
+                              <div key={record.id} className="flex items-center gap-3 px-5 py-3 hover:bg-dark-bg-tertiary/30 transition-colors">
+                                {/* Status dot */}
+                                <span className={`w-2 h-2 rounded-full flex-shrink-0 ${
+                                  record.status === 'success' ? 'bg-emerald-400' :
+                                  record.status === 'failed' ? 'bg-red-400' : 'bg-amber-400 animate-pulse'
+                                }`}></span>
+                                {/* Filename + meta */}
+                                <div className="flex-1 min-w-0">
+                                  <p className="text-xs font-medium text-dark-text-primary truncate">{record.filename || `backup-${record.id.slice(0, 8)}`}</p>
+                                  <p className="text-xs text-dark-text-tertiary">
+                                    {relativeTime(record.started_at)} ·{' '}
+                                    {record.size_bytes > 0 ? formatBytes(record.size_bytes) : '—'} ·{' '}
+                                    {record.triggered_by}
+                                    {record.status === 'failed' && record.error_message && (
+                                      <span className="text-red-400 ml-1">· {record.error_message}</span>
+                                    )}
+                                  </p>
+                                </div>
+                                {/* Actions */}
+                                <div className="flex items-center gap-1 flex-shrink-0">
+                                  {record.status === 'success' && (
+                                    <button
+                                      onClick={() => handleDownloadRecord(record)}
+                                      disabled={isDownloadingRecord === record.id}
+                                      title="Download backup"
+                                      className="p-1.5 rounded text-dark-text-tertiary hover:text-teal-400 hover:bg-teal-500/10 transition-colors disabled:opacity-50"
+                                    >
+                                      {isDownloadingRecord === record.id ? (
+                                        <div className="w-3.5 h-3.5 rounded-full border border-current border-t-transparent animate-spin"></div>
+                                      ) : (
+                                        <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" /></svg>
+                                      )}
+                                    </button>
+                                  )}
+                                  <button
+                                    onClick={() => handleDeleteAutoBackupRecord(record.id)}
+                                    title="Delete record"
+                                    className="p-1.5 rounded text-dark-text-tertiary hover:text-red-400 hover:bg-red-500/10 transition-colors"
+                                  >
+                                    <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
+                                  </button>
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    </>
                   )}
                 </div>
               )}

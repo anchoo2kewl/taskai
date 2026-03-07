@@ -647,6 +647,12 @@ export interface BackupRecord {
   finished_at?: string
 }
 
+export interface BackupFolder {
+  id: string
+  name: string
+  parent_id: string
+}
+
 export interface Asset {
   id: number
   task_id: number
@@ -1498,6 +1504,32 @@ class ApiClient {
 
   async disconnectBackup(): Promise<void> {
     return this.request<void>('/api/admin/backup/oauth/disconnect', { method: 'DELETE' })
+  }
+
+  async listBackupFolders(parentId = ''): Promise<BackupFolder[]> {
+    const q = parentId ? `?parentId=${encodeURIComponent(parentId)}` : ''
+    return this.request<BackupFolder[]>(`/api/admin/backup/folders${q}`)
+  }
+
+  async createBackupFolder(name: string, parentId = ''): Promise<BackupFolder> {
+    return this.request<BackupFolder>('/api/admin/backup/folders', {
+      method: 'POST',
+      body: JSON.stringify({ name, parent_id: parentId }),
+    })
+  }
+
+  async downloadBackupRecord(id: string, filename: string): Promise<void> {
+    const url = `${this.baseURL}/api/admin/backup/history/${id}/download`
+    const resp = await fetch(url, {
+      headers: this.token ? { Authorization: `Bearer ${this.token}` } : {},
+    })
+    if (!resp.ok) throw new Error(`Download failed: ${resp.status}`)
+    const blob = await resp.blob()
+    const a = document.createElement('a')
+    a.href = URL.createObjectURL(blob)
+    a.download = filename
+    a.click()
+    URL.revokeObjectURL(a.href)
   }
 
   async copyFromEnv(sourceUrl: string, sourceApiKey: string): Promise<{ message: string; version: number; rows: number }> {

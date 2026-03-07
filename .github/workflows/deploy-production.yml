@@ -83,6 +83,7 @@ jobs:
           OAUTH_STATE_SECRET: ${{ secrets.PRODUCTION_OAUTH_STATE_SECRET }}
           GOOGLE_CLIENT_ID: ${{ secrets.PRODUCTION_GOOGLE_CLIENT_ID }}
           GOOGLE_CLIENT_SECRET: ${{ secrets.PRODUCTION_GOOGLE_CLIENT_SECRET }}
+          BACKUP_ENCRYPTION_KEY: ${{ secrets.PRODUCTION_BACKUP_ENCRYPTION_KEY }}
           APP_URL: https://taskai.cc
         run: |
           mkdir -p ~/.ssh
@@ -119,6 +120,9 @@ jobs:
             export OAUTH_STATE_SECRET="$OAUTH_STATE_SECRET"
             export GOOGLE_CLIENT_ID="$GOOGLE_CLIENT_ID"
             export GOOGLE_CLIENT_SECRET="$GOOGLE_CLIENT_SECRET"
+            if [ -n "$BACKUP_ENCRYPTION_KEY" ]; then
+              export BACKUP_ENCRYPTION_KEY="$BACKUP_ENCRYPTION_KEY"
+            fi
 
             # Login to Docker Hub
             echo "$DOCKERHUB_TOKEN" | docker login -u "$DOCKERHUB_USERNAME" --password-stdin

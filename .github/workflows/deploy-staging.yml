@@ -74,6 +74,7 @@ jobs:
           OAUTH_STATE_SECRET: ${{ secrets.STAGING_OAUTH_STATE_SECRET }}
           GOOGLE_CLIENT_ID: ${{ secrets.STAGING_GOOGLE_CLIENT_ID }}
           GOOGLE_CLIENT_SECRET: ${{ secrets.STAGING_GOOGLE_CLIENT_SECRET }}
+          BACKUP_ENCRYPTION_KEY: ${{ secrets.STAGING_BACKUP_ENCRYPTION_KEY }}
           APP_URL: https://staging.taskai.cc
           DB_DRIVER: postgres
           DB_DSN: ${{ secrets.STAGING_DB_DSN }}
@@ -118,6 +119,10 @@ jobs:
             if [ -n "\$GOOGLE_ID" ]; then
               export GOOGLE_CLIENT_ID="\$GOOGLE_ID"
               export GOOGLE_CLIENT_SECRET='$GOOGLE_CLIENT_SECRET'
+            fi
+            BACKUP_ENC_KEY='$BACKUP_ENCRYPTION_KEY'
+            if [ -n "\$BACKUP_ENC_KEY" ]; then
+              export BACKUP_ENCRYPTION_KEY="\$BACKUP_ENC_KEY"
             fi
 
             # Login to Docker Hub to avoid rate limiting

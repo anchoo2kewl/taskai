@@ -75,6 +75,7 @@ jobs:
           OAUTH_STATE_SECRET: ${{ secrets.UAT_OAUTH_STATE_SECRET }}
           GOOGLE_CLIENT_ID: ${{ secrets.UAT_GOOGLE_CLIENT_ID }}
           GOOGLE_CLIENT_SECRET: ${{ secrets.UAT_GOOGLE_CLIENT_SECRET }}
+          BACKUP_ENCRYPTION_KEY: ${{ secrets.UAT_BACKUP_ENCRYPTION_KEY }}
           APP_URL: https://uat.taskai.cc
         run: |
           mkdir -p ~/.ssh
@@ -112,6 +113,10 @@ jobs:
             if [ -n "\$GOOGLE_ID" ]; then
               export GOOGLE_CLIENT_ID="\$GOOGLE_ID"
               export GOOGLE_CLIENT_SECRET='$GOOGLE_CLIENT_SECRET'
+            fi
+            BACKUP_ENC_KEY='$BACKUP_ENCRYPTION_KEY'
+            if [ -n "\$BACKUP_ENC_KEY" ]; then
+              export BACKUP_ENCRYPTION_KEY="\$BACKUP_ENC_KEY"
             fi
             export APP_URL='https://uat.taskai.cc'
             export OAUTH_SUCCESS_URL='https://uat.taskai.cc/oauth/callback'

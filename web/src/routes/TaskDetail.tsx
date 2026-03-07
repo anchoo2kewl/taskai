@@ -9,8 +9,15 @@ import MultiSelectDropdown from '../components/ui/MultiSelectDropdown'
 import ImagePickerModal from '../components/ImagePickerModal'
 import { apiClient, Task, type UpdateTaskRequest, type SwimLane, type Sprint, type ProjectMember, type Attachment, type TaskComment, type GitHubPushTaskResponse, type Tag, type GitHubReaction } from '../lib/api'
 import { preprocessGraphLinks, parseGraphLinkUrl } from '../lib/graphLinks'
+import FigmaEmbed from '../components/FigmaEmbed'
 import { REACTION_EMOJI, REACTION_ORDER } from '../lib/reactionUtils'
 import MentionTextarea from '../components/MentionTextarea'
+
+const FIGMA_URL_RE = /(^|[\s\n])(https:\/\/(?:www\.)?figma\.com\/(?:file|design|proto)\/[^\s\n)]+)/g
+
+function preprocessFigmaUrls(content: string): string {
+  return content.replace(FIGMA_URL_RE, (_, prefix, url) => `${prefix}[${url}](${url})`)
+}
 
 function ReactionBar({
   reactions,
@@ -764,6 +771,9 @@ export default function TaskDetail({ isModal, onClose }: TaskDetailProps) {
                     remarkPlugins={[remarkGfm, remarkEmoji]}
                     components={{
                       a: ({ href, children }) => {
+                        if (href && /figma\.com\/(file|design|proto)\//.test(href)) {
+                          return <FigmaEmbed url={href} size="m" />
+                        }
                         const graphLink = href ? parseGraphLinkUrl(href) : null
                         if (graphLink) {
                           const label = String(children)
@@ -792,7 +802,7 @@ export default function TaskDetail({ isModal, onClose }: TaskDetailProps) {
                       },
                     }}
                   >
-                    {preprocessGraphLinks(task.description)}
+                    {preprocessFigmaUrls(preprocessGraphLinks(task.description))}
                   </ReactMarkdown>
                   <ReactionBar reactions={task.github_reactions} onToggle={(r) => handleToggleReaction(r)} />
                 </div>
@@ -980,8 +990,18 @@ export default function TaskDetail({ isModal, onClose }: TaskDetailProps) {
                             </span>
                           </div>
                           <div className="text-sm text-dark-text-secondary prose prose-sm max-w-none prose-headings:text-dark-text-primary prose-p:text-dark-text-secondary prose-a:text-primary-400 prose-code:text-primary-400 prose-code:bg-primary-500/10 prose-code:px-1 prose-code:py-0.5 prose-code:rounded prose-pre:bg-dark-bg-primary prose-pre:border prose-pre:border-dark-border-subtle prose-strong:text-dark-text-primary prose-li:text-dark-text-secondary prose-img:rounded-lg prose-img:max-h-64 prose-img:border prose-img:border-dark-border-subtle">
-                            <ReactMarkdown remarkPlugins={[remarkGfm, remarkEmoji]}>
-                              {comment.comment}
+                            <ReactMarkdown
+                              remarkPlugins={[remarkGfm, remarkEmoji]}
+                              components={{
+                                a: ({ href, children }) => {
+                                  if (href && /figma\.com\/(file|design|proto)\//.test(href)) {
+                                    return <FigmaEmbed url={href} size="m" />
+                                  }
+                                  return <a href={href}>{children}</a>
+                                },
+                              }}
+                            >
+                              {preprocessFigmaUrls(comment.comment)}
                             </ReactMarkdown>
                             <ReactionBar reactions={comment.github_reactions} onToggle={(r) => handleToggleReaction(r, comment.id)} />
                           </div>

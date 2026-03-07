@@ -480,6 +480,12 @@ func main() {
 			r.Post("/settings/cloudinary/test", server.HandleTestCloudinaryConnection)
 			r.Get("/settings/cloudinary/signature", server.HandleGetUploadSignature)
 
+			// Figma routes
+			r.Get("/user/figma-credentials", server.HandleGetFigmaCredentials)
+			r.Post("/user/figma-credentials", server.HandleSaveFigmaCredentials)
+			r.Delete("/user/figma-credentials", server.HandleDeleteFigmaCredentials)
+			r.Get("/figma/embed", server.HandleFigmaEmbed)
+
 			// Task attachment routes
 			r.Get("/tasks/{taskId}/attachments", server.HandleListTaskAttachments)
 			r.Post("/tasks/{taskId}/attachments", server.HandleCreateTaskAttachment)

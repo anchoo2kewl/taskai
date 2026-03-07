@@ -1,7 +1,9 @@
 import { useEffect, useState, useCallback, useRef } from 'react'
+import { createRoot } from 'react-dom/client'
 import { useNavigate, Link } from 'react-router-dom'
 import { WikiPage, WikiPageVersion, WikiPageVersionWithContent, WikiAnnotation, AnnotationColor, AnnotationComment, apiClient } from '../lib/api'
 import WikiAnnotationSidebar from './WikiAnnotationSidebar'
+import FigmaEmbed from './FigmaEmbed'
 import { useAuth } from '../state/AuthContext'
 import SearchSelect from './ui/SearchSelect'
 import ImagePickerModal from './ImagePickerModal'
@@ -20,6 +22,7 @@ import {
   getSaveStatusText,
   getSaveStatusTextColor,
   buildDrawShortcode,
+  buildFigmaShortcode,
   insertMarkupAtCursor,
   clearSavedStatus,
   insertAtCursorPure,
@@ -277,6 +280,59 @@ function initDrawEmbeds(
     div.appendChild(wrapper)
     div.classList.add('godraw-preview-init')
   })
+}
+
+// ── Figma shortcode embed renderer ──────────────────────────────────────
+
+function initFigmaEmbeds(container: HTMLElement | null): () => void {
+  if (!container) return () => {}
+
+  const roots: ReturnType<typeof createRoot>[] = []
+
+  // Collect text nodes that contain [figma:...] shortcodes
+  const walker = document.createTreeWalker(container, NodeFilter.SHOW_TEXT)
+  const textNodes: Text[] = []
+  let n: Node | null
+  while ((n = walker.nextNode())) {
+    if (/\[figma:[^\]]+\]/.test((n as Text).textContent || '')) {
+      textNodes.push(n as Text)
+    }
+  }
+
+  for (const textNode of textNodes) {
+    const text = textNode.textContent || ''
+    const parent = textNode.parentNode
+    if (!parent) continue
+
+    const re = /\[figma:([^\]:]+?)(?::([sml]))?\]/g
+    const parts: Array<string | { url: string; size: 's' | 'm' | 'l' }> = []
+    let lastIndex = 0
+    let m
+    while ((m = re.exec(text)) !== null) {
+      if (m.index > lastIndex) parts.push(text.substring(lastIndex, m.index))
+      parts.push({ url: m[1], size: (m[2] || 'm') as 's' | 'm' | 'l' })
+      lastIndex = m.index + m[0].length
+    }
+    if (lastIndex < text.length) parts.push(text.substring(lastIndex))
+
+    const fragment = document.createDocumentFragment()
+    for (const part of parts) {
+      if (typeof part === 'string') {
+        fragment.appendChild(document.createTextNode(part))
+      } else {
+        const placeholder = document.createElement('div')
+        placeholder.className = 'figma-embed-placeholder'
+        fragment.appendChild(placeholder)
+        const root = createRoot(placeholder)
+        root.render(<FigmaEmbed url={part.url} size={part.size} />)
+        roots.push(root)
+      }
+    }
+
+    parent.replaceChild(fragment, textNode)
+  }
+
+  return () => { roots.forEach(r => { try { r.unmount() } catch { /* ignore */ } }) }
 }
 
 // ── Image edit overlays — add S/M/L size controls to images in preview ──
@@ -840,6 +896,9 @@ export default function WikiEditor({ page, annotations, selectedAnnotationId, sh
   const [previewHTML, setPreviewHTML] = useState('')
   const [syncState, setSyncState] = useState<SyncState>('connecting')
   const [showImagePicker, setShowImagePicker] = useState(false)
+  const [showFigmaInput, setShowFigmaInput] = useState(false)
+  const [figmaInputUrl, setFigmaInputUrl] = useState('')
+  const [figmaInputError, setFigmaInputError] = useState('')
   const [saveStatus, setSaveStatus] = useState<SaveStatus>('idle')
   const [autoSaveEnabled, setAutoSaveEnabled] = useState(true)
   const isDirtyRef = useRef(false)
@@ -1080,13 +1139,18 @@ export default function WikiEditor({ page, annotations, selectedAnnotationId, sh
     isDirtyRef.current = true
   }, [syncToYjs])
 
+  const figmaCleanupRef = useRef<() => void>(() => {})
+  const fsFigmaCleanupRef = useRef<() => void>(() => {})
+
   useEffect(() => {
     if (isPreview && previewHTML) {
       const t = setTimeout(() => {
         initDrawEmbeds(previewRef.current, contentRef, previewUpdateContent)
         addImageEditOverlays(previewRef.current, contentRef, previewUpdateContent)
+        figmaCleanupRef.current()
+        figmaCleanupRef.current = initFigmaEmbeds(previewRef.current)
       }, 50)
-      return () => clearTimeout(t)
+      return () => { clearTimeout(t); figmaCleanupRef.current() }
     }
   }, [isPreview, previewHTML, previewUpdateContent])
 
@@ -1095,8 +1159,10 @@ export default function WikiEditor({ page, annotations, selectedAnnotationId, sh
       const t = setTimeout(() => {
         initDrawEmbeds(fsPreviewRef.current, contentRef, previewUpdateContent)
         addImageEditOverlays(fsPreviewRef.current, contentRef, previewUpdateContent)
+        fsFigmaCleanupRef.current()
+        fsFigmaCleanupRef.current = initFigmaEmbeds(fsPreviewRef.current)
       }, 50)
-      return () => clearTimeout(t)
+      return () => { clearTimeout(t); fsFigmaCleanupRef.current() }
     }
   }, [isFullscreen, fsPreviewHTML, previewUpdateContent])
 
@@ -1219,6 +1285,31 @@ export default function WikiEditor({ page, annotations, selectedAnnotationId, sh
     setEditDrawSize, setEditDrawZoom, closeDrawBrowser, closeEditDraw,
   } = useDrawBrowser({ content, setContent, syncToYjs, isDirtyRef, isFullscreen, textareaRef, fsTextareaRef, projectId: page.project_id })
 
+  const handleFigmaInsert = useCallback(() => {
+    const url = figmaInputUrl.trim()
+    if (!url) {
+      setFigmaInputError('URL is required')
+      return
+    }
+    if (!/figma\.com\/(file|design|proto)\//.test(url)) {
+      setFigmaInputError('Must be a Figma file, design, or prototype URL')
+      return
+    }
+    const shortcode = buildFigmaShortcode(url)
+    const ta = isFullscreen ? fsTextareaRef.current : textareaRef.current
+    const { newContent, focusPos } = insertMarkupAtCursor(ta, content, shortcode + '\n')
+    setContent(newContent)
+    syncToYjs(newContent)
+    isDirtyRef.current = true
+    if (focusPos !== null && ta) {
+      ta.focus()
+      ta.setSelectionRange(focusPos, focusPos)
+    }
+    setFigmaInputUrl('')
+    setFigmaInputError('')
+    setShowFigmaInput(false)
+  }, [figmaInputUrl, content, setContent, syncToYjs, isDirtyRef, isFullscreen, textareaRef, fsTextareaRef])
+
   // ── Toolbar JSX ──────────────────────────────────────────────
 
   const renderToolbar = (compact?: boolean) => (
@@ -1274,6 +1365,20 @@ export default function WikiEditor({ page, annotations, selectedAnnotationId, sh
           <path d="M18 13l-1.5-7.5L2 2l3.5 14.5L13 18l5-5z" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" />
           <path d="M15.5 6.5l2 2" stroke="currentColor" strokeWidth={2.5} strokeLinecap="round" />
         </svg>
+      </button>
+      <button
+        onClick={() => { setShowFigmaInput(v => !v); setFigmaInputError('') }}
+        className={`px-2 py-1 rounded text-xs font-medium transition-colors flex items-center gap-1 ${showFigmaInput ? 'bg-primary-500/20 text-primary-400' : 'bg-dark-bg-tertiary text-dark-text-secondary hover:bg-dark-bg-tertiary/80 hover:text-dark-text-primary'}`}
+        title="Insert Figma embed"
+      >
+        <svg width="12" height="12" viewBox="0 0 38 57" fill="none" aria-hidden="true">
+          <path d="M19 28.5c0-2.674 1.054-5.239 2.929-7.114C23.804 19.51 26.37 18.457 29.043 18.457s5.239 1.053 7.115 2.929c1.875 1.875 2.929 4.44 2.929 7.114s-1.054 5.239-2.929 7.115C34.282 37.49 31.717 38.543 29.043 38.543s-5.239-1.053-7.114-2.928C20.054 33.739 19 31.174 19 28.5z" fill="#1ABCFE"/>
+          <path d="M-1.087 47.543c0-2.674 1.053-5.239 2.929-7.114C3.717 38.554 6.283 37.5 8.956 37.5H19v10.043c0 2.674-1.053 5.239-2.929 7.115C14.196 56.533 11.63 57.587 8.957 57.587s-5.239-1.054-7.115-2.929C-.033 52.783-1.087 50.217-1.087 47.543z" fill="#0ACF83"/>
+          <path d="M19 .413V18.457h10.043c2.674 0 5.239-1.053 7.115-2.929 1.875-1.875 2.929-4.44 2.929-7.114S38.033 3.174 36.158 1.298C34.282-.577 31.717-1.63 29.043-1.63H19V.413z" fill="#FF7262"/>
+          <path d="M-1.087 8.413c0 2.674 1.053 5.239 2.929 7.115C3.717 17.403 6.283 18.457 8.956 18.457H19V-1.587H8.956c-2.673 0-5.239 1.054-7.114 2.929C-.033 3.217-1.087 5.74-1.087 8.413z" fill="#F24E1E"/>
+          <path d="M-1.087 28.5c0 2.674 1.053 5.239 2.929 7.115C3.717 37.49 6.283 38.543 8.956 38.543H19V18.457H8.956c-2.673 0-5.239 1.053-7.114 2.929C-.033 23.261-1.087 25.826-1.087 28.5z" fill="#A259FF"/>
+        </svg>
+        Figma
       </button>
     </div>
   )
@@ -1391,6 +1496,24 @@ export default function WikiEditor({ page, annotations, selectedAnnotationId, sh
           </button>
         </div>
       </div>
+
+      {/* Figma URL input bar (fullscreen) */}
+      {showFigmaInput && (
+        <div className="flex items-center gap-2 px-4 py-1.5 border-b border-dark-border-subtle bg-dark-bg-tertiary/30 flex-shrink-0">
+          <input
+            type="url"
+            value={figmaInputUrl}
+            onChange={e => { setFigmaInputUrl(e.target.value); setFigmaInputError('') }}
+            onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); handleFigmaInsert() } if (e.key === 'Escape') { setShowFigmaInput(false); setFigmaInputError('') } }}
+            placeholder="https://www.figma.com/file/..."
+            className="flex-1 bg-dark-bg-primary border border-dark-border-subtle rounded px-2 py-1 text-xs text-dark-text-primary placeholder-dark-text-tertiary focus:outline-none focus:border-primary-500"
+            autoFocus
+          />
+          <button onClick={handleFigmaInsert} className="px-2 py-1 rounded text-xs font-medium bg-primary-600 text-white hover:bg-primary-500 transition-colors">Insert</button>
+          <button onClick={() => { setShowFigmaInput(false); setFigmaInputError('') }} className="px-2 py-1 rounded text-xs font-medium bg-dark-bg-tertiary text-dark-text-secondary hover:text-dark-text-primary transition-colors">Cancel</button>
+          {figmaInputError && <span className="text-xs text-red-400">{figmaInputError}</span>}
+        </div>
+      )}
 
       {/* Split panes + optional annotation sidebar */}
       <div className="flex flex-1 overflow-hidden">
@@ -1564,8 +1687,24 @@ export default function WikiEditor({ page, annotations, selectedAnnotationId, sh
 
           {/* Toolbar (edit mode only) */}
           {!isPreview && (
-            <div className="border-b border-dark-border-subtle bg-dark-bg-secondary px-6 py-2">
-              {renderToolbar()}
+            <div className="border-b border-dark-border-subtle bg-dark-bg-secondary">
+              <div className="px-6 py-2">{renderToolbar()}</div>
+              {showFigmaInput && (
+                <div className="flex items-center gap-2 px-6 py-1.5 border-t border-dark-border-subtle bg-dark-bg-tertiary/30">
+                  <input
+                    type="url"
+                    value={figmaInputUrl}
+                    onChange={e => { setFigmaInputUrl(e.target.value); setFigmaInputError('') }}
+                    onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); handleFigmaInsert() } if (e.key === 'Escape') { setShowFigmaInput(false); setFigmaInputError('') } }}
+                    placeholder="https://www.figma.com/file/..."
+                    className="flex-1 bg-dark-bg-primary border border-dark-border-subtle rounded px-2 py-1 text-xs text-dark-text-primary placeholder-dark-text-tertiary focus:outline-none focus:border-primary-500"
+                    autoFocus
+                  />
+                  <button onClick={handleFigmaInsert} className="px-2 py-1 rounded text-xs font-medium bg-primary-600 text-white hover:bg-primary-500 transition-colors">Insert</button>
+                  <button onClick={() => { setShowFigmaInput(false); setFigmaInputError('') }} className="px-2 py-1 rounded text-xs font-medium bg-dark-bg-tertiary text-dark-text-secondary hover:text-dark-text-primary transition-colors">Cancel</button>
+                  {figmaInputError && <span className="text-xs text-red-400">{figmaInputError}</span>}
+                </div>
+              )}
             </div>
           )}
 

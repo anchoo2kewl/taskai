@@ -78,6 +78,31 @@ export function detectImageSize(html: string): string {
   return 'l'
 }
 
+// ── Figma shortcode helpers ──────────────────────────────────────────
+
+export interface FigmaShortcodeInfo { shortcode: string; url: string; size: string; index: number }
+
+export function findFigmaEmbedsInContent(content: string): FigmaShortcodeInfo[] {
+  const embeds: FigmaShortcodeInfo[] = []
+  const re = /\[figma:([^\]:]+?)(?::([sml]))?\]/g
+  let match
+  while ((match = re.exec(content)) !== null) {
+    embeds.push({
+      shortcode: match[0],
+      url: match[1],
+      size: match[2] || 'm',
+      index: match.index,
+    })
+  }
+  embeds.sort((a, b) => a.index - b.index)
+  return embeds
+}
+
+export function buildFigmaShortcode(url: string, size = 'm'): string {
+  const sizeTag = size === 'm' ? '' : ':' + size
+  return `[figma:${url}${sizeTag}]`
+}
+
 // ── Draw shortcode helpers ───────────────────────────────────────────
 
 export function findDrawsInContent(content: string): DrawInfo[] {

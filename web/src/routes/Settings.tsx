@@ -6,6 +6,7 @@ import TextInput from '../components/ui/TextInput'
 import FormError from '../components/ui/FormError'
 import SearchSelect from '../components/ui/SearchSelect'
 import { apiClient, type CloudinaryCredentialResponse, type APIKey, type Team, type TeamMember, type TeamInvitation, type TeamMembership, type SentInvitation, type UserSearchResult, type Invite, type ProjectInvitation } from '../lib/api'
+import type { FigmaCredentialsStatus } from '../lib/api'
 
 export default function Settings() {
   const navigate = useNavigate()
@@ -67,6 +68,14 @@ export default function Settings() {
   const [cloudinaryConsecutiveFailures, setCloudinaryConsecutiveFailures] = useState(0)
   const [isTestingCloudinary, setIsTestingCloudinary] = useState(false)
 
+  // Figma state
+  const [figmaToken, setFigmaToken] = useState('')
+  const [hasFigmaCredentials, setHasFigmaCredentials] = useState(false)
+  const [figmaError, setFigmaError] = useState('')
+  const [figmaSuccess, setFigmaSuccess] = useState('')
+  const [isSavingFigma, setIsSavingFigma] = useState(false)
+  const [isDeletingFigma, setIsDeletingFigma] = useState(false)
+
   // Team Management state
   const [team, setTeam] = useState<Team | null>(null)
   const [teamMembers, setTeamMembers] = useState<TeamMember[]>([])
@@ -109,6 +118,7 @@ export default function Settings() {
     loadAPIKeys()
     loadTeamData()
     loadCloudinaryCredentials()
+    loadFigmaCredentials()
     loadInvites()
     loadProjectInvitations()
   }, []) // eslint-disable-line react-hooks/exhaustive-deps
@@ -296,6 +306,58 @@ export default function Settings() {
       }
     } catch (error) {
       console.error('Failed to load data:', error)
+    }
+  }
+
+  const loadFigmaCredentials = async () => {
+    try {
+      const status: FigmaCredentialsStatus = await apiClient.getFigmaCredentials()
+      setHasFigmaCredentials(status.configured)
+    } catch {
+      // ignore
+    }
+  }
+
+  const handleSaveFigma = async (e: React.FormEvent) => {
+    e.preventDefault()
+    setFigmaError('')
+    setFigmaSuccess('')
+    const token = figmaToken.trim()
+    if (!token) {
+      setFigmaError('Personal access token is required')
+      return
+    }
+    if (!token.startsWith('figd_')) {
+      setFigmaError('Token must start with figd_')
+      return
+    }
+    setIsSavingFigma(true)
+    try {
+      await apiClient.saveFigmaCredentials(token)
+      setHasFigmaCredentials(true)
+      setFigmaToken('')
+      setFigmaSuccess('Figma token saved successfully')
+    } catch (error: unknown) {
+      setFigmaError(error instanceof Error ? error.message : 'Failed to save token')
+    } finally {
+      setIsSavingFigma(false)
+    }
+  }
+
+  const handleDeleteFigma = async () => {
+    if (!confirm('Are you sure you want to remove your Figma token?')) return
+    setIsDeletingFigma(true)
+    setFigmaError('')
+    setFigmaSuccess('')
+    try {
+      await apiClient.deleteFigmaCredentials()
+      setHasFigmaCredentials(false)
+      setFigmaToken('')
+      setFigmaSuccess('Figma token removed')
+    } catch (error: unknown) {
+      setFigmaError(error instanceof Error ? error.message : 'Failed to remove token')
+    } finally {
+      setIsDeletingFigma(false)
     }
   }
 
@@ -1204,6 +1266,75 @@ export default function Settings() {
                     </div>
                   </div>
                 </div>
+              </div>
+            </div>
+          </Card>
+
+          {/* Figma Section */}
+          <Card className="shadow-md">
+            <div className="p-6 sm:p-8 flex items-start gap-4">
+              <div className="flex-shrink-0 w-10 h-10 bg-purple-500/10 rounded-lg flex items-center justify-center">
+                <svg width="20" height="20" viewBox="0 0 38 57" fill="none" aria-hidden="true">
+                  <path d="M19 28.5c0-2.674 1.054-5.24 2.929-7.115C23.804 19.51 26.37 18.457 29.043 18.457s5.239 1.053 7.115 2.928c1.875 1.875 2.929 4.441 2.929 7.115s-1.054 5.24-2.929 7.115C34.282 37.49 31.717 38.543 29.043 38.543s-5.239-1.053-7.114-2.928C20.054 33.74 19 31.174 19 28.5z" fill="#1ABCFE"/>
+                  <path d="M-1.087 47.543c0-2.674 1.053-5.24 2.929-7.115C3.717 38.553 6.283 37.5 8.956 37.5H19v10.043c0 2.674-1.053 5.24-2.929 7.115C14.196 56.533 11.63 57.587 8.957 57.587s-5.239-1.054-7.115-2.929C-.033 52.782-1.087 50.217-1.087 47.543z" fill="#0ACF83"/>
+                  <path d="M19 .413V18.457h10.043c2.674 0 5.239-1.053 7.115-2.929 1.875-1.875 2.929-4.44 2.929-7.114S38.033 3.174 36.158 1.298C34.282-.577 31.717-1.63 29.043-1.63H19V.413z" fill="#FF7262"/>
+                  <path d="M-1.087 8.413c0 2.674 1.053 5.24 2.929 7.115C3.717 17.403 6.283 18.457 8.956 18.457H19V-1.587H8.956c-2.673 0-5.239 1.054-7.114 2.929C-.033 3.217-1.087 5.74-1.087 8.413z" fill="#F24E1E"/>
+                  <path d="M-1.087 28.5c0 2.674 1.053 5.24 2.929 7.115C3.717 37.49 6.283 38.543 8.956 38.543H19V18.457H8.956c-2.673 0-5.239 1.053-7.114 2.928C-.033 23.261-1.087 25.826-1.087 28.5z" fill="#A259FF"/>
+                </svg>
+              </div>
+              <div className="flex-1">
+                <h2 className="text-xl font-semibold text-dark-text-primary mb-1">Figma Integration</h2>
+                <p className="text-sm text-dark-text-secondary mb-6">
+                  Connect your Figma account to embed design previews in wiki pages and task descriptions
+                </p>
+
+                {figmaSuccess && (
+                  <div className="mb-4 p-4 bg-success-500/10 border-l-4 border-success-400 rounded-r-lg">
+                    <div className="flex items-center">
+                      <svg className="w-5 h-5 text-success-400 mr-2" fill="currentColor" viewBox="0 0 20 20">
+                        <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" />
+                      </svg>
+                      <p className="text-sm text-success-400">{figmaSuccess}</p>
+                    </div>
+                  </div>
+                )}
+
+                {figmaError && (
+                  <div className="mb-4 p-4 bg-red-500/10 border-l-4 border-red-400 rounded-r-lg">
+                    <p className="text-sm text-red-400">{figmaError}</p>
+                  </div>
+                )}
+
+                {hasFigmaCredentials && (
+                  <div className="mb-6 p-4 bg-dark-bg-primary border border-dark-border-subtle rounded-lg flex items-center justify-between">
+                    <div className="flex items-center gap-3">
+                      <div className="w-3 h-3 rounded-full bg-success-500" />
+                      <span className="text-sm text-dark-text-primary font-medium">Connected</span>
+                    </div>
+                    <button
+                      onClick={handleDeleteFigma}
+                      disabled={isDeletingFigma}
+                      className="px-3 py-1.5 rounded text-xs font-medium bg-red-500/15 text-red-400 hover:bg-red-500/25 transition-colors disabled:opacity-50"
+                    >
+                      {isDeletingFigma ? 'Removing...' : 'Disconnect'}
+                    </button>
+                  </div>
+                )}
+
+                <form onSubmit={handleSaveFigma} className="space-y-4">
+                  <TextInput
+                    label={hasFigmaCredentials ? 'Personal Access Token (enter to update)' : 'Personal Access Token'}
+                    type="password"
+                    value={figmaToken}
+                    onChange={(e) => setFigmaToken(e.target.value)}
+                    placeholder={hasFigmaCredentials ? '••••••••••••' : 'figd_...'}
+                    helpText="Get your token at figma.com → Account Settings → Personal access tokens. Token must start with figd_."
+                    required={!hasFigmaCredentials}
+                  />
+                  <Button type="submit" disabled={isSavingFigma}>
+                    {isSavingFigma ? 'Saving...' : hasFigmaCredentials ? 'Update Token' : 'Save Token'}
+                  </Button>
+                </form>
               </div>
             </div>
           </Card>

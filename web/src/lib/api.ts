@@ -592,6 +592,17 @@ export interface CloudinaryCredentialResponse {
   updated_at: string
 }
 
+export interface FigmaCredentialsStatus {
+  configured: boolean
+}
+
+export interface FigmaEmbedInfo {
+  embed_url: string
+  name?: string
+  thumbnail_url?: string
+  configured: boolean
+}
+
 export interface Asset {
   id: number
   task_id: number
@@ -1389,6 +1400,28 @@ class ApiClient {
   async getUploadSignature(opts: { taskId?: number; pageId?: number }): Promise<{ signature: string; timestamp: number; cloud_name: string; api_key: string; folder: string; public_id: string }> {
     const params = opts.taskId ? `task_id=${opts.taskId}` : `page_id=${opts.pageId}`
     return this.request(`/api/settings/cloudinary/signature?${params}`)
+  }
+
+  // Figma endpoints
+  async getFigmaCredentials(): Promise<FigmaCredentialsStatus> {
+    return this.request<FigmaCredentialsStatus>('/api/user/figma-credentials')
+  }
+
+  async saveFigmaCredentials(accessToken: string): Promise<FigmaCredentialsStatus> {
+    return this.request<FigmaCredentialsStatus>('/api/user/figma-credentials', {
+      method: 'POST',
+      body: JSON.stringify({ access_token: accessToken }),
+    })
+  }
+
+  async deleteFigmaCredentials(): Promise<FigmaCredentialsStatus> {
+    return this.request<FigmaCredentialsStatus>('/api/user/figma-credentials', {
+      method: 'DELETE',
+    })
+  }
+
+  async getFigmaEmbed(figmaUrl: string): Promise<FigmaEmbedInfo> {
+    return this.request<FigmaEmbedInfo>(`/api/figma/embed?url=${encodeURIComponent(figmaUrl)}`)
   }
 
   // Task attachment endpoints

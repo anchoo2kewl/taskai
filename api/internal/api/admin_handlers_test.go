@@ -29,6 +29,7 @@ func TestAdminHandlers(t *testing.T) {
 	}
 
 	dbCfg := db.Config{
+		Driver:         "sqlite",
 		DBPath:         cfg.DBPath,
 		MigrationsPath: cfg.MigrationsPath,
 	}
@@ -309,6 +310,7 @@ func TestActivityLogging(t *testing.T) {
 	}
 
 	dbCfg := db.Config{
+		Driver:         "sqlite",
 		DBPath:         cfg.DBPath,
 		MigrationsPath: cfg.MigrationsPath,
 	}

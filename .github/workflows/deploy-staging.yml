@@ -52,6 +52,12 @@ jobs:
           echo "📝 Commit: $GIT_COMMIT"
           echo "🕐 Build Time: $BUILD_TIME"
 
+      - name: Login to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
       - name: Deploy to Staging server
         env:
           SSH_PRIVATE_KEY: ${{ secrets.STAGING_SSH_PRIVATE_KEY }}
@@ -69,6 +75,8 @@ jobs:
           GOOGLE_CLIENT_ID: ${{ secrets.STAGING_GOOGLE_CLIENT_ID }}
           GOOGLE_CLIENT_SECRET: ${{ secrets.STAGING_GOOGLE_CLIENT_SECRET }}
           APP_URL: https://staging.taskai.cc
+          DB_DRIVER: postgres
+          DB_DSN: ${{ secrets.STAGING_DB_DSN }}
         run: |
           mkdir -p ~/.ssh
           echo "$SSH_PRIVATE_KEY" > ~/.ssh/deploy_key
@@ -88,7 +96,8 @@ jobs:
             export GIT_COMMIT='$GIT_COMMIT'
             export BUILD_TIME='$BUILD_TIME'
             export APP_URL='$APP_URL'
-            # Only override GitHub OAuth vars if the secret is actually set (not empty/placeholder)
+            export DB_DRIVER='$DB_DRIVER'
+            export DB_DSN='$DB_DSN'
             GH_ID='$GH_OAUTH_CLIENT_ID'
             GH_SECRET='$GH_OAUTH_CLIENT_SECRET'
             if [ -n "\$GH_ID" ] && [ "\$GH_ID" != "-" ]; then
@@ -120,10 +129,10 @@ jobs:
             sudo source/deployment/scripts/ensure-draw-route.sh staging.taskai.cc
 
             docker compose down || true
-            echo "🧹 Cleaning up Docker build cache and unused images to free disk space..."
-            docker builder prune -af || true
-            docker image prune -af || true
-            docker compose build --no-cache --build-arg VERSION="\$VERSION" --build-arg GIT_COMMIT="\$GIT_COMMIT" --build-arg BUILD_TIME="\$BUILD_TIME"
+            echo "🧹 Pruning only dangling images/cache to preserve base image layers..."
+            docker builder prune -f || true
+            docker image prune -f || true
+            docker compose build --build-arg VERSION="\$VERSION" --build-arg GIT_COMMIT="\$GIT_COMMIT" --build-arg BUILD_TIME="\$BUILD_TIME"
             docker compose up -d --force-recreate --remove-orphans
             sleep 15
             docker compose ps
@@ -151,6 +160,6 @@ jobs:
       - name: Deployment summary
         run: |
           echo "## 🚀 Staging Deployed" >> $GITHUB_STEP_SUMMARY
-          echo "- **Server:** 129.213.82.37" >> $GITHUB_STEP_SUMMARY  
+          echo "- **Server:** 129.213.82.37" >> $GITHUB_STEP_SUMMARY
           echo "- **Version:** ${{ steps.version.outputs.VERSION }}" >> $GITHUB_STEP_SUMMARY
           echo "- **URL:** https://staging.taskai.cc" >> $GITHUB_STEP_SUMMARY

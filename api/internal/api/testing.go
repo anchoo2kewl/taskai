@@ -37,8 +37,9 @@ func NewTestServer(t testing.TB) *TestServer {
 	// Create test logger
 	logger := zaptest.NewLogger(t)
 
-	// Create in-memory database
+	// Create in-memory database (tests always use SQLite)
 	cfg := db.Config{
+		Driver:         "sqlite",
 		DBPath:         ":memory:",
 		MigrationsPath: "./../../internal/db/migrations",
 	}

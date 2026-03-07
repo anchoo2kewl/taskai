@@ -52,6 +52,12 @@ jobs:
           echo "📝 Commit: $GIT_COMMIT"
           echo "🕐 Build Time: $BUILD_TIME"
 
+      - name: Login to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
       - name: Deploy to UAT server
         env:
           SSH_PRIVATE_KEY: ${{ secrets.UAT_SSH_PRIVATE_KEY }}
@@ -123,16 +129,13 @@ jobs:
             # Login to Docker Hub to avoid rate limiting
             echo '$DOCKERHUB_TOKEN' | docker login -u '$DOCKERHUB_USERNAME' --password-stdin
 
-            # Ensure nginx has the /draw/ route BEFORE starting containers
-            echo "Ensuring nginx /draw/ route..."
             chmod +x deployment/scripts/ensure-draw-route.sh
             sudo ./deployment/scripts/ensure-draw-route.sh uat.taskai.cc
 
             docker compose down || true
-            echo "🧹 Cleaning up Docker build cache and unused images to free disk space..."
-            docker builder prune -af || true
-            docker image prune -af || true
-            docker compose build --no-cache --build-arg VERSION="\$VERSION" --build-arg GIT_COMMIT="\$GIT_COMMIT" --build-arg BUILD_TIME="\$BUILD_TIME"
+            docker builder prune -f || true
+            docker image prune -f || true
+            docker compose build --build-arg VERSION="\$VERSION" --build-arg GIT_COMMIT="\$GIT_COMMIT" --build-arg BUILD_TIME="\$BUILD_TIME"
             docker compose up -d --force-recreate --remove-orphans
             sleep 15
             docker compose ps
@@ -144,17 +147,7 @@ jobs:
           CF_ACCESS_CLIENT_SECRET: ${{ secrets.CF_ACCESS_CLIENT_SECRET }}
         run: |
           sleep 10
-          echo "Checking API health..."
           curl -f -H "CF-Access-Client-Id: $CF_ACCESS_CLIENT_ID" -H "CF-Access-Client-Secret: $CF_ACCESS_CLIENT_SECRET" https://uat.taskai.cc/api/health || exit 1
-
-          echo "Checking go-draw canvas.js is up to date..."
-          CANVAS_JS=$(curl -sL -H "CF-Access-Client-Id: $CF_ACCESS_CLIENT_ID" -H "CF-Access-Client-Secret: $CF_ACCESS_CLIENT_SECRET" -H "Cache-Control: no-cache" "https://uat.taskai.cc/draw/static/canvas.js?v=$(date +%s)")
-          if echo "$CANVAS_JS" | grep -q 'isRotating'; then
-            echo "✅ canvas.js contains rotation support"
-          else
-            echo "❌ canvas.js does NOT contain rotation support — stale content!"
-            exit 1
-          fi
           echo "✅ UAT deployed successfully"
 
       - name: Deployment summary

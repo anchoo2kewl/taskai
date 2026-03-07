@@ -20,6 +20,20 @@ import (
 	"taskai/ent/tasktag"
 )
 
+// parseDate parses a date string in RFC3339 or YYYY-MM-DD format.
+// Returns nil if the string is empty or unparseable.
+func parseDate(s string) *time.Time {
+	if s == "" {
+		return nil
+	}
+	for _, layout := range []string{time.RFC3339, "2006-01-02"} {
+		if t, err := time.Parse(layout, s); err == nil {
+			return &t
+		}
+	}
+	return nil
+}
+
 type TaskAssigneeInfo struct {
 	UserID   int64  `json:"user_id"`
 	UserName string `json:"user_name"`
@@ -46,6 +60,7 @@ type Task struct {
 	ActualHours         *float64           `json:"actual_hours,omitempty"`
 	Tags                []Tag              `json:"tags,omitempty"`
 	GithubIssueNumber   *int64             `json:"github_issue_number,omitempty"`
+	GithubReactions     []GitHubReaction   `json:"github_reactions,omitempty"`
 	CreatedAt           time.Time          `json:"created_at"`
 	UpdatedAt           time.Time          `json:"updated_at"`
 }
@@ -264,6 +279,10 @@ func (s *Server) HandleListTasks(w http.ResponseWriter, r *http.Request) {
 		if assignees, ok := assigneesMap[et.ID]; ok {
 			t.Assignees = assignees
 		}
+		// Backfill from legacy single assignee_id if no multi-assignees present
+		if len(t.Assignees) == 0 && t.AssigneeID != nil && t.AssigneeName != nil {
+			t.Assignees = []TaskAssigneeInfo{{UserID: *t.AssigneeID, UserName: *t.AssigneeName}}
+		}
 
 		// Add sprint info if present
 		if et.Edges.Sprint != nil {
@@ -293,6 +312,34 @@ func (s *Server) HandleListTasks(w http.ResponseWriter, r *http.Request) {
 		}
 
 		tasks = append(tasks, t)
+	}
+
+	// Bulk-fetch GitHub reactions for all tasks in this project, including user_reacted
+	if len(tasks) > 0 {
+		reactionMap := map[int64][]GitHubReaction{}
+		rRows, rErr := s.db.QueryContext(ctx, `
+			SELECT gr.task_id, gr.reaction, gr.count, (ur.id IS NOT NULL) AS user_reacted
+			FROM github_reactions gr
+			LEFT JOIN user_reactions ur ON
+			    ur.reaction = gr.reaction AND ur.user_id = $1 AND ur.task_id = gr.task_id
+			WHERE gr.task_id IN (SELECT id FROM tasks WHERE project_id = $2)
+			  AND gr.count > 0
+		`, userID, projectID)
+		if rErr == nil {
+			for rRows.Next() {
+				var tid int64
+				var gr GitHubReaction
+				if rRows.Scan(&tid, &gr.Reaction, &gr.Count, &gr.UserReacted) == nil {
+					reactionMap[tid] = append(reactionMap[tid], gr)
+				}
+			}
+			rRows.Close()
+			for i := range tasks {
+				if reactions, ok := reactionMap[tasks[i].ID]; ok {
+					tasks[i].GithubReactions = reactions
+				}
+			}
+		}
 	}
 
 	respondJSON(w, http.StatusOK, tasks)
@@ -402,22 +449,14 @@ func (s *Server) HandleCreateTask(w http.ResponseWriter, r *http.Request) {
 		nextNumber = int(maxNumber.Int64) + 1
 	}
 
-	// Parse start_date if provided
+	// Parse start_date / due_date — accept RFC3339 or plain YYYY-MM-DD.
 	var startDate *time.Time
-	if req.StartDate != nil && *req.StartDate != "" {
-		parsed, err := time.Parse(time.RFC3339, *req.StartDate)
-		if err == nil {
-			startDate = &parsed
-		}
+	if req.StartDate != nil {
+		startDate = parseDate(*req.StartDate)
 	}
-
-	// Parse due_date if provided
 	var dueDate *time.Time
-	if req.DueDate != nil && *req.DueDate != "" {
-		parsed, err := time.Parse(time.RFC3339, *req.DueDate)
-		if err == nil {
-			dueDate = &parsed
-		}
+	if req.DueDate != nil {
+		dueDate = parseDate(*req.DueDate)
 	}
 
 	// Use Ent transaction
@@ -476,6 +515,11 @@ func (s *Server) HandleCreateTask(w http.ResponseWriter, r *http.Request) {
 	if err := entTx.Commit(); err != nil {
 		respondError(w, http.StatusInternalServerError, "failed to commit task creation", "internal_error")
 		return
+	}
+
+	// Set created_by via raw SQL after commit (not in ent schema)
+	if _, err := s.db.ExecContext(ctx, `UPDATE tasks SET created_by = $1 WHERE id = $2`, userID, newTask.ID); err != nil {
+		s.logger.Warn("Failed to set created_by on task", zap.Error(err), zap.Int64("task_id", newTask.ID))
 	}
 
 	// Fetch the created task with all related entities
@@ -540,6 +584,9 @@ func (s *Server) HandleCreateTask(w http.ResponseWriter, r *http.Request) {
 	// Add multi-assignees
 	if assignees, ok := s.loadTaskAssigneesMap(ctx, []int64{createdTask.ID})[createdTask.ID]; ok {
 		t.Assignees = assignees
+	}
+	if len(t.Assignees) == 0 && t.AssigneeID != nil && t.AssigneeName != nil {
+		t.Assignees = []TaskAssigneeInfo{{UserID: *t.AssigneeID, UserName: *t.AssigneeName}}
 	}
 
 	// Add sprint info if present
@@ -689,22 +736,14 @@ func (s *Server) HandleUpdateTask(w http.ResponseWriter, r *http.Request) {
 		finalSwimLaneID = req.SwimLaneID
 	}
 
-	// Parse start_date if provided
+	// Parse start_date / due_date — accept RFC3339 or plain YYYY-MM-DD.
 	var startDate *time.Time
-	if req.StartDate != nil && *req.StartDate != "" {
-		parsed, err := time.Parse(time.RFC3339, *req.StartDate)
-		if err == nil {
-			startDate = &parsed
-		}
+	if req.StartDate != nil {
+		startDate = parseDate(*req.StartDate)
 	}
-
-	// Parse due_date if provided
 	var dueDate *time.Time
-	if req.DueDate != nil && *req.DueDate != "" {
-		parsed, err := time.Parse(time.RFC3339, *req.DueDate)
-		if err == nil {
-			dueDate = &parsed
-		}
+	if req.DueDate != nil {
+		dueDate = parseDate(*req.DueDate)
 	}
 
 	// Build update using Ent
@@ -784,11 +823,17 @@ func (s *Server) HandleUpdateTask(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Handle assignee_ids updates if provided
+	assigneesChanged := req.AssigneeIDs != nil || req.AssigneeID != nil
 	if req.AssigneeIDs != nil {
 		if err := s.replaceTaskAssignees(ctx, taskID, *req.AssigneeIDs); err != nil {
 			respondError(w, http.StatusInternalServerError, "failed to update assignees", "internal_error")
 			return
 		}
+	}
+
+	// Best-effort push assignee changes to GitHub
+	if assigneesChanged {
+		go s.tryPushAssigneesToGitHub(context.Background(), taskID)
 	}
 
 	// Fetch the updated task with all related entities
@@ -876,6 +921,9 @@ func (s *Server) HandleUpdateTask(w http.ResponseWriter, r *http.Request) {
 	// Add multi-assignees
 	if assignees, ok := s.loadTaskAssigneesMap(ctx, []int64{taskID})[taskID]; ok {
 		t.Assignees = assignees
+	}
+	if len(t.Assignees) == 0 && t.AssigneeID != nil && t.AssigneeName != nil {
+		t.Assignees = []TaskAssigneeInfo{{UserID: *t.AssigneeID, UserName: *t.AssigneeName}}
 	}
 
 	// Add sprint info
@@ -1086,6 +1134,10 @@ func (s *Server) HandleGetTaskByNumber(w http.ResponseWriter, r *http.Request) {
 	if assignees, ok := s.loadTaskAssigneesMap(ctx, []int64{taskEntity.ID})[taskEntity.ID]; ok {
 		t.Assignees = assignees
 	}
+	// Backfill from legacy single assignee_id if no multi-assignees present
+	if len(t.Assignees) == 0 && t.AssigneeID != nil && t.AssigneeName != nil {
+		t.Assignees = []TaskAssigneeInfo{{UserID: *t.AssigneeID, UserName: *t.AssigneeName}}
+	}
 
 	// Add sprint info
 	if taskEntity.Edges.Sprint != nil {
@@ -1120,6 +1172,24 @@ func (s *Server) HandleGetTaskByNumber(w http.ResponseWriter, r *http.Request) {
 		if ghIssueNum.Valid {
 			t.GithubIssueNumber = &ghIssueNum.Int64
 		}
+	}
+
+	// Load GitHub reactions for this task, including user_reacted
+	reactionRows, err := s.db.QueryContext(ctx, `
+		SELECT gr.reaction, gr.count, (ur.id IS NOT NULL) AS user_reacted
+		FROM github_reactions gr
+		LEFT JOIN user_reactions ur ON
+		    ur.reaction = gr.reaction AND ur.user_id = $2 AND ur.task_id = gr.task_id
+		WHERE gr.task_id = $1 AND gr.count > 0
+	`, taskEntity.ID, userID)
+	if err == nil {
+		for reactionRows.Next() {
+			var gr GitHubReaction
+			if reactionRows.Scan(&gr.Reaction, &gr.Count, &gr.UserReacted) == nil {
+				t.GithubReactions = append(t.GithubReactions, gr)
+			}
+		}
+		reactionRows.Close()
 	}
 
 	respondJSON(w, http.StatusOK, t)

@@ -1,8 +1,9 @@
 import { useEffect, useState, useRef, useMemo, lazy, Suspense } from 'react'
-import { useParams, useNavigate, useLocation, useSearchParams } from 'react-router-dom'
+import { useParams, useNavigate, useLocation, useSearchParams, Link } from 'react-router-dom'
 import { DndContext, DragEndEvent, DragOverlay, DragStartEvent, PointerSensor, useSensor, useSensors } from '@dnd-kit/core'
 import { api, Project, Task, type SwimLane, type Sprint, type Tag } from '../lib/api'
 import { useLocalTasks } from '../hooks/useLocalTasks'
+import { REACTION_EMOJI, REACTION_ORDER } from '../lib/reactionUtils'
 
 const WikiContent = lazy(() => import('../components/WikiContent'))
 const ProjectSettings = lazy(() => import('./ProjectSettings'))
@@ -412,7 +413,11 @@ export default function ProjectDetail() {
   const uniqueAssignees = useMemo(() => {
     const map = new Map<number, string>()
     tasks.forEach(t => {
-      if (t.assignee_id && !map.has(t.assignee_id)) {
+      if (t.assignees?.length) {
+        t.assignees.forEach(a => {
+          if (a.user_id != null && !map.has(a.user_id)) map.set(a.user_id, a.user_name ?? `User ${a.user_id}`)
+        })
+      } else if (t.assignee_id && !map.has(t.assignee_id)) {
         map.set(t.assignee_id, t.assignee_name || `User ${t.assignee_id}`)
       }
     })
@@ -422,7 +427,11 @@ export default function ProjectDetail() {
   // Apply board filters (must be before early returns)
   const filteredTasks = useMemo(() => tasks.filter(t => {
     if (filterSprint   !== null && t.sprint_id !== filterSprint) return false
-    if (filterAssignee !== null && t.assignee_id !== filterAssignee) return false
+    if (filterAssignee !== null) {
+      const inMulti = t.assignees?.some(a => a.user_id === filterAssignee)
+      const inLegacy = t.assignee_id === filterAssignee
+      if (!inMulti && !inLegacy) return false
+    }
     if (filterPriority && t.priority !== filterPriority) return false
     if (filterTag      !== null && !t.tags?.some(tag => tag.id === filterTag)) return false
     return true
@@ -849,14 +858,50 @@ function TaskCard({ task, isDragging }: {
         {task.task_number && <span className="text-xs font-mono text-dark-text-tertiary">#{task.task_number}</span>}
         <h4 className="text-sm font-medium text-dark-text-primary hover:text-primary-400 transition-colors">{task.title}</h4>
       </div>
-      {task.assignee_id && (
-        <div className="flex items-center gap-1.5 text-xs text-dark-text-tertiary mt-2">
-          <div className="w-4 h-4 rounded-full bg-primary-500/10 flex items-center justify-center">
-            <svg className="w-2.5 h-2.5 text-primary-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
-            </svg>
+      {(() => {
+        const assignees: { id: number; name: string }[] = task.assignees?.length
+          ? task.assignees.filter(a => a.user_id != null).map(a => ({ id: a.user_id as number, name: a.user_name ?? `User ${a.user_id}` }))
+          : task.assignee_id
+            ? [{ id: task.assignee_id, name: task.assignee_name ?? `User ${task.assignee_id}` }]
+            : []
+        if (!assignees.length) return null
+        return (
+          <div className="flex items-center gap-1.5 text-xs text-dark-text-tertiary mt-2">
+            <div className="w-4 h-4 rounded-full bg-primary-500/10 flex items-center justify-center flex-shrink-0">
+              <svg className="w-2.5 h-2.5 text-primary-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
+              </svg>
+            </div>
+            <span>
+              {assignees.map((a, i) => (
+                <span key={a.id}>
+                  {i > 0 && ', '}
+                  <Link
+                    to={`/app/users/${a.id}`}
+                    className="hover:text-primary-400 transition-colors"
+                    onClick={(e) => e.stopPropagation()}
+                  >
+                    {a.name}
+                  </Link>
+                </span>
+              ))}
+            </span>
           </div>
-          <span>{task.assignee_name || `User ${task.assignee_id}`}</span>
+        )
+      })()}
+      {task.github_reactions && task.github_reactions.length > 0 && (
+        <div className="flex flex-wrap gap-1 mt-1.5">
+          {REACTION_ORDER
+            .filter(r => (task.github_reactions ?? []).find(gr => gr.reaction === r && gr.count > 0))
+            .map(r => {
+              const gr = task.github_reactions!.find(g => g.reaction === r)!
+              return (
+                <span key={r}
+                  className="inline-flex items-center gap-0.5 text-xs bg-dark-bg-secondary border border-dark-border-subtle rounded-full px-1.5 py-0.5 text-dark-text-tertiary">
+                  {REACTION_EMOJI[r]} {gr.count}
+                </span>
+              )
+            })}
         </div>
       )}
     </div>

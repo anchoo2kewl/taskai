@@ -259,6 +259,66 @@ function createServer(client: TaskAIClient, cachedUser?: User): McpServer {
     }
   );
 
+  // --- list_project_drawings ---
+  server.tool(
+    "list_project_drawings",
+    "List all drawings registered to a project",
+    {
+      project_id: z.string().describe("Project ID"),
+      verbose: z.boolean().optional().describe("Pretty print JSON (default: false)"),
+    },
+    async ({ project_id, verbose }) => {
+      const drawings = await client.listProjectDrawings(project_id);
+      return { content: [{ type: "text", text: formatResponse(drawings, verbose) }] };
+    }
+  );
+
+  // --- create_drawing ---
+  server.tool(
+    "create_drawing",
+    "Create a new drawing canvas and register it with a project. Optionally pre-populate with a scene. Returns the draw_id and the shortcode to embed it in wiki pages: [draw:ID:edit:m]",
+    {
+      project_id: z.string().describe("Project ID to register the drawing with"),
+      title: z.string().optional().describe("Drawing title (default: 'Untitled')"),
+      scene: z.record(z.unknown()).optional().describe("Scene JSON: {version:1, elements:[...]}. Elements: rect/ellipse (x,y,w,h,text), arrow/line (x,y,x2,y2), text (x,y,w,h,text,fontSize), pencil (pts:[{x,y}]). Fields: strokeColor, fillColor, opacity(0-100), strokeWidth(1-4), angle(radians)."),
+      verbose: z.boolean().optional().describe("Pretty print JSON (default: false)"),
+    },
+    async ({ project_id, title, scene, verbose }) => {
+      const result = await client.createDrawing(project_id, (title || scene) ? { title, scene } : undefined);
+      return { content: [{ type: "text", text: formatResponse(result, verbose) }] };
+    }
+  );
+
+  // --- save_drawing ---
+  server.tool(
+    "save_drawing",
+    "Save/update an existing drawing's scene data. Use this to programmatically set diagram content.",
+    {
+      draw_id: z.string().describe("Drawing ID (from create_drawing)"),
+      title: z.string().describe("Drawing title"),
+      scene: z.record(z.unknown()).describe("Scene JSON: {version:1, elements:[...]}. Elements: rect/ellipse (x,y,w,h,text), arrow/line (x,y,x2,y2), text (x,y,w,h,text,fontSize). Fields: strokeColor, fillColor, opacity(0-100), strokeWidth(1-4)."),
+      verbose: z.boolean().optional().describe("Pretty print JSON (default: false)"),
+    },
+    async ({ draw_id, title, scene, verbose }) => {
+      const result = await client.saveDrawing(draw_id, title, scene);
+      return { content: [{ type: "text", text: formatResponse(result, verbose) }] };
+    }
+  );
+
+  // --- get_drawing ---
+  server.tool(
+    "get_drawing",
+    "Get a drawing's current scene data (id, title, scene JSON)",
+    {
+      draw_id: z.string().describe("Drawing ID"),
+      verbose: z.boolean().optional().describe("Pretty print JSON (default: false)"),
+    },
+    async ({ draw_id, verbose }) => {
+      const result = await client.getDrawing(draw_id);
+      return { content: [{ type: "text", text: formatResponse(result, verbose) }] };
+    }
+  );
+
   // --- search_wiki ---
   server.tool(
     "search_wiki",
@@ -303,6 +363,54 @@ function createServer(client: TaskAIClient, cachedUser?: User): McpServer {
     async ({ page_id, verbose }) => {
       const page = await client.getWikiPage(page_id);
       return { content: [{ type: "text", text: formatResponse(page, verbose) }] };
+    }
+  );
+
+  // --- get_wiki_page_content ---
+  server.tool(
+    "get_wiki_page_content",
+    "Get the markdown content of a wiki page",
+    {
+      page_id: z.string().describe("Wiki page ID"),
+      verbose: z.boolean().optional().describe("Pretty print JSON (default: false)"),
+    },
+    async ({ page_id, verbose }) => {
+      const result = await client.getWikiPageContent(page_id);
+      return { content: [{ type: "text", text: formatResponse(result, verbose) }] };
+    }
+  );
+
+  // --- create_wiki_page ---
+  server.tool(
+    "create_wiki_page",
+    "Create a new wiki page in a project",
+    {
+      project_id: z.string().describe("Project ID"),
+      title: z.string().describe("Page title"),
+      content: z.string().optional().describe("Initial page content (markdown)"),
+      verbose: z.boolean().optional().describe("Pretty print JSON (default: false)"),
+    },
+    async ({ project_id, title, content, verbose }) => {
+      const page = await client.createWikiPage(project_id, title);
+      if (content) {
+        await client.updateWikiPageContent(String(page.id), content);
+      }
+      return { content: [{ type: "text", text: formatResponse(verbose ? page : minimizeWikiPage(page), verbose) }] };
+    }
+  );
+
+  // --- update_wiki_page_content ---
+  server.tool(
+    "update_wiki_page_content",
+    "Update the content of an existing wiki page",
+    {
+      page_id: z.string().describe("Wiki page ID"),
+      content: z.string().describe("New page content (markdown)"),
+      verbose: z.boolean().optional().describe("Pretty print JSON (default: false)"),
+    },
+    async ({ page_id, content, verbose }) => {
+      const page = await client.updateWikiPageContent(page_id, content);
+      return { content: [{ type: "text", text: formatResponse(verbose ? page : minimizeWikiPage(page), verbose) }] };
     }
   );
 

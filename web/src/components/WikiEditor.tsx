@@ -1,6 +1,9 @@
 import { useEffect, useState, useCallback, useRef } from 'react'
-import { useNavigate } from 'react-router-dom'
-import { WikiPage, WikiPageVersion, WikiPageVersionWithContent, apiClient } from '../lib/api'
+import { createRoot } from 'react-dom/client'
+import { useNavigate, Link } from 'react-router-dom'
+import { WikiPage, WikiPageVersion, WikiPageVersionWithContent, WikiAnnotation, AnnotationColor, AnnotationComment, apiClient } from '../lib/api'
+import WikiAnnotationSidebar from './WikiAnnotationSidebar'
+import FigmaEmbed from './FigmaEmbed'
 import { useAuth } from '../state/AuthContext'
 import SearchSelect from './ui/SearchSelect'
 import ImagePickerModal from './ImagePickerModal'
@@ -19,6 +22,7 @@ import {
   getSaveStatusText,
   getSaveStatusTextColor,
   buildDrawShortcode,
+  buildFigmaShortcode,
   insertMarkupAtCursor,
   clearSavedStatus,
   insertAtCursorPure,
@@ -40,7 +44,23 @@ const PREVIEW_DEBOUNCE_MS = 350
 
 interface WikiEditorProps {
   page: WikiPage
+  annotations?: WikiAnnotation[]
+  selectedAnnotationId?: number | null
+  showAnnotationHighlights?: boolean
+  onAnnotationCreate?: (info: { startOffset: number; endOffset: number; selectedText: string; color: AnnotationColor }) => void
+  onAnnotationClick?: (annotationId: number) => void
+  // Sidebar callbacks threaded through for fullscreen support
+  onAnnotationUpdate?: (annotation: WikiAnnotation) => void
+  onAnnotationDelete?: (annotationId: number) => void
+  onCommentCreate?: (annotationId: number, comment: AnnotationComment) => void
+  onCommentUpdate?: (comment: AnnotationComment) => void
+  onCommentDelete?: (annotationId: number, commentId: number) => void
+  showResolved?: boolean
+  onToggleShowResolved?: () => void
 }
+
+// Annotation highlight helpers are provided by window.GoWikiAnnotations (go-wiki package).
+// See web/src/lib/goWikiAnnotations.d.ts for types.
 
 // ── Toolbar helpers ──────────────────────────────────────────────
 
@@ -260,6 +280,28 @@ function initDrawEmbeds(
     div.appendChild(wrapper)
     div.classList.add('godraw-preview-init')
   })
+}
+
+// ── Figma shortcode embed renderer ──────────────────────────────────────
+
+function initFigmaEmbeds(container: HTMLElement | null): () => void {
+  if (!container) return () => {}
+
+  const roots: ReturnType<typeof createRoot>[] = []
+
+  // The backend preprocesses [figma:url:size] into <div class="figma-embed" data-url="..." data-size="...">
+  // before markdown rendering, so we just need to find those divs and mount React components into them.
+  const placeholders = container.querySelectorAll<HTMLElement>('div.figma-embed')
+  placeholders.forEach(el => {
+    const url = el.dataset.url
+    const size = (el.dataset.size || 'm') as 's' | 'm' | 'l'
+    if (!url) return
+    const root = createRoot(el)
+    root.render(<FigmaEmbed url={url} size={size} />)
+    roots.push(root)
+  })
+
+  return () => { roots.forEach(r => { try { r.unmount() } catch { /* ignore */ } }) }
 }
 
 // ── Image edit overlays — add S/M/L size controls to images in preview ──
@@ -815,7 +857,7 @@ function PreviewContent({ previewHTML, content, previewRef }: Readonly<{
 
 // ── Component ────────────────────────────────────────────────────
 
-export default function WikiEditor({ page }: Readonly<WikiEditorProps>) {
+export default function WikiEditor({ page, annotations, selectedAnnotationId, showAnnotationHighlights = true, onAnnotationCreate, onAnnotationClick, onAnnotationUpdate, onAnnotationDelete, onCommentCreate, onCommentUpdate, onCommentDelete, showResolved = false, onToggleShowResolved }: Readonly<WikiEditorProps>) {
   const navigate = useNavigate()
   const { user } = useAuth()
   const [content, setContent] = useState('')
@@ -823,6 +865,9 @@ export default function WikiEditor({ page }: Readonly<WikiEditorProps>) {
   const [previewHTML, setPreviewHTML] = useState('')
   const [syncState, setSyncState] = useState<SyncState>('connecting')
   const [showImagePicker, setShowImagePicker] = useState(false)
+  const [showFigmaInput, setShowFigmaInput] = useState(false)
+  const [figmaInputUrl, setFigmaInputUrl] = useState('')
+  const [figmaInputError, setFigmaInputError] = useState('')
   const [saveStatus, setSaveStatus] = useState<SaveStatus>('idle')
   const [autoSaveEnabled, setAutoSaveEnabled] = useState(true)
   const isDirtyRef = useRef(false)
@@ -831,6 +876,7 @@ export default function WikiEditor({ page }: Readonly<WikiEditorProps>) {
   const isSavingRef = useRef(false)
   const [isFullscreen, setIsFullscreen] = useState(false)
   const [fsPreviewHTML, setFsPreviewHTML] = useState('')
+  const [fsAnnotationsVisible, setFsAnnotationsVisible] = useState(false)
 
   const ydocRef = useRef<Y.Doc | null>(null)
   const providerRef = useRef<WebsocketProvider | null>(null)
@@ -855,6 +901,48 @@ export default function WikiEditor({ page }: Readonly<WikiEditorProps>) {
   const [versions, setVersions] = useState<WikiPageVersion[]>([])
   const [versionsLoading, setVersionsLoading] = useState(false)
   const [viewingVersion, setViewingVersion] = useState<WikiPageVersionWithContent | null>(null)
+
+  // ── Annotation: delegate to window.GoWikiAnnotations (go-wiki package) ──
+  // Attach/detach the color picker and click handler whenever preview is active.
+  useEffect(() => {
+    const el = previewRef.current
+    if (!el || !isPreview || !window.GoWikiAnnotations) return
+    const detach = window.GoWikiAnnotations.attach(el, {
+      onAnnotationCreate: onAnnotationCreate
+        ? (data) => onAnnotationCreate({ startOffset: data.startOffset, endOffset: data.endOffset, selectedText: data.selectedText, color: data.color as AnnotationColor })
+        : undefined,
+      onAnnotationClick,
+    })
+    return detach
+  }, [isPreview, onAnnotationCreate, onAnnotationClick, previewHTML])
+
+  // Apply highlights after previewHTML renders or annotations change
+  useEffect(() => {
+    const el = previewRef.current
+    if (!el || !window.GoWikiAnnotations) return
+    window.GoWikiAnnotations.apply(el, showAnnotationHighlights ? (annotations ?? []) : [], selectedAnnotationId)
+  }, [previewHTML, annotations, selectedAnnotationId, showAnnotationHighlights])
+
+  // ── Fullscreen annotation support ────────────────────────────
+  // Attach color picker to the fullscreen preview pane
+  useEffect(() => {
+    const el = fsPreviewRef.current
+    if (!el || !isFullscreen || !window.GoWikiAnnotations) return
+    const detach = window.GoWikiAnnotations.attach(el, {
+      onAnnotationCreate: onAnnotationCreate
+        ? (data) => onAnnotationCreate({ startOffset: data.startOffset, endOffset: data.endOffset, selectedText: data.selectedText, color: data.color as AnnotationColor })
+        : undefined,
+      onAnnotationClick,
+    })
+    return detach
+  }, [isFullscreen, onAnnotationCreate, onAnnotationClick, fsPreviewHTML])
+
+  // Apply highlights in fullscreen preview
+  useEffect(() => {
+    const el = fsPreviewRef.current
+    if (!el || !window.GoWikiAnnotations) return
+    window.GoWikiAnnotations.apply(el, fsAnnotationsVisible ? (annotations ?? []) : [], selectedAnnotationId)
+  }, [fsPreviewHTML, annotations, selectedAnnotationId, fsAnnotationsVisible])
 
   // ── Keep contentRef in sync ──────────────────────────────────
   useEffect(() => { contentRef.current = content }, [content])
@@ -1020,13 +1108,18 @@ export default function WikiEditor({ page }: Readonly<WikiEditorProps>) {
     isDirtyRef.current = true
   }, [syncToYjs])
 
+  const figmaCleanupRef = useRef<() => void>(() => {})
+  const fsFigmaCleanupRef = useRef<() => void>(() => {})
+
   useEffect(() => {
     if (isPreview && previewHTML) {
       const t = setTimeout(() => {
         initDrawEmbeds(previewRef.current, contentRef, previewUpdateContent)
         addImageEditOverlays(previewRef.current, contentRef, previewUpdateContent)
+        figmaCleanupRef.current()
+        figmaCleanupRef.current = initFigmaEmbeds(previewRef.current)
       }, 50)
-      return () => clearTimeout(t)
+      return () => { clearTimeout(t); figmaCleanupRef.current() }
     }
   }, [isPreview, previewHTML, previewUpdateContent])
 
@@ -1035,10 +1128,21 @@ export default function WikiEditor({ page }: Readonly<WikiEditorProps>) {
       const t = setTimeout(() => {
         initDrawEmbeds(fsPreviewRef.current, contentRef, previewUpdateContent)
         addImageEditOverlays(fsPreviewRef.current, contentRef, previewUpdateContent)
+        fsFigmaCleanupRef.current()
+        fsFigmaCleanupRef.current = initFigmaEmbeds(fsPreviewRef.current)
       }, 50)
-      return () => clearTimeout(t)
+      return () => { clearTimeout(t); fsFigmaCleanupRef.current() }
     }
   }, [isFullscreen, fsPreviewHTML, previewUpdateContent])
+
+  // ── Mermaid diagram rendering ─────────────────────────────────
+  useEffect(() => {
+    if (previewRef.current) window.GoWikiMermaid?.run(previewRef.current)
+  }, [previewHTML])
+
+  useEffect(() => {
+    if (fsPreviewRef.current) window.GoWikiMermaid?.run(fsPreviewRef.current)
+  }, [fsPreviewHTML])
 
   // Handle clicks on graph link chips rendered in preview HTML.
   useEffect(() => {
@@ -1150,6 +1254,31 @@ export default function WikiEditor({ page }: Readonly<WikiEditorProps>) {
     setEditDrawSize, setEditDrawZoom, closeDrawBrowser, closeEditDraw,
   } = useDrawBrowser({ content, setContent, syncToYjs, isDirtyRef, isFullscreen, textareaRef, fsTextareaRef, projectId: page.project_id })
 
+  const handleFigmaInsert = useCallback(() => {
+    const url = figmaInputUrl.trim()
+    if (!url) {
+      setFigmaInputError('URL is required')
+      return
+    }
+    if (!/figma\.com\/(file|design|proto)\//.test(url)) {
+      setFigmaInputError('Must be a Figma file, design, or prototype URL')
+      return
+    }
+    const shortcode = buildFigmaShortcode(url)
+    const ta = isFullscreen ? fsTextareaRef.current : textareaRef.current
+    const { newContent, focusPos } = insertMarkupAtCursor(ta, content, shortcode + '\n')
+    setContent(newContent)
+    syncToYjs(newContent)
+    isDirtyRef.current = true
+    if (focusPos !== null && ta) {
+      ta.focus()
+      ta.setSelectionRange(focusPos, focusPos)
+    }
+    setFigmaInputUrl('')
+    setFigmaInputError('')
+    setShowFigmaInput(false)
+  }, [figmaInputUrl, content, setContent, syncToYjs, isDirtyRef, isFullscreen, textareaRef, fsTextareaRef])
+
   // ── Toolbar JSX ──────────────────────────────────────────────
 
   const renderToolbar = (compact?: boolean) => (
@@ -1205,6 +1334,20 @@ export default function WikiEditor({ page }: Readonly<WikiEditorProps>) {
           <path d="M18 13l-1.5-7.5L2 2l3.5 14.5L13 18l5-5z" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" />
           <path d="M15.5 6.5l2 2" stroke="currentColor" strokeWidth={2.5} strokeLinecap="round" />
         </svg>
+      </button>
+      <button
+        onClick={() => { setShowFigmaInput(v => !v); setFigmaInputError('') }}
+        className={`px-2 py-1 rounded text-xs font-medium transition-colors flex items-center gap-1 ${showFigmaInput ? 'bg-primary-500/20 text-primary-400' : 'bg-dark-bg-tertiary text-dark-text-secondary hover:bg-dark-bg-tertiary/80 hover:text-dark-text-primary'}`}
+        title="Insert Figma embed"
+      >
+        <svg width="12" height="12" viewBox="0 0 38 57" fill="none" aria-hidden="true">
+          <path d="M19 28.5c0-2.674 1.054-5.239 2.929-7.114C23.804 19.51 26.37 18.457 29.043 18.457s5.239 1.053 7.115 2.929c1.875 1.875 2.929 4.44 2.929 7.114s-1.054 5.239-2.929 7.115C34.282 37.49 31.717 38.543 29.043 38.543s-5.239-1.053-7.114-2.928C20.054 33.739 19 31.174 19 28.5z" fill="#1ABCFE"/>
+          <path d="M-1.087 47.543c0-2.674 1.053-5.239 2.929-7.114C3.717 38.554 6.283 37.5 8.956 37.5H19v10.043c0 2.674-1.053 5.239-2.929 7.115C14.196 56.533 11.63 57.587 8.957 57.587s-5.239-1.054-7.115-2.929C-.033 52.783-1.087 50.217-1.087 47.543z" fill="#0ACF83"/>
+          <path d="M19 .413V18.457h10.043c2.674 0 5.239-1.053 7.115-2.929 1.875-1.875 2.929-4.44 2.929-7.114S38.033 3.174 36.158 1.298C34.282-.577 31.717-1.63 29.043-1.63H19V.413z" fill="#FF7262"/>
+          <path d="M-1.087 8.413c0 2.674 1.053 5.239 2.929 7.115C3.717 17.403 6.283 18.457 8.956 18.457H19V-1.587H8.956c-2.673 0-5.239 1.054-7.114 2.929C-.033 3.217-1.087 5.74-1.087 8.413z" fill="#F24E1E"/>
+          <path d="M-1.087 28.5c0 2.674 1.053 5.239 2.929 7.115C3.717 37.49 6.283 38.543 8.956 38.543H19V18.457H8.956c-2.673 0-5.239 1.053-7.114 2.929C-.033 23.261-1.087 25.826-1.087 28.5z" fill="#A259FF"/>
+        </svg>
+        Figma
       </button>
     </div>
   )
@@ -1292,6 +1435,27 @@ export default function WikiEditor({ page }: Readonly<WikiEditorProps>) {
           >
             Save
           </button>
+          {onAnnotationUpdate && (
+            <button
+              onClick={() => setFsAnnotationsVisible(v => !v)}
+              className={`px-2.5 py-1 rounded text-xs font-medium transition-colors ${
+                fsAnnotationsVisible
+                  ? 'bg-primary-500/20 text-primary-400 hover:bg-primary-500/30'
+                  : 'bg-dark-bg-tertiary text-dark-text-secondary hover:bg-dark-bg-tertiary/80'
+              }`}
+              title="Toggle annotations"
+            >
+              <svg className="w-3.5 h-3.5 inline mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" />
+              </svg>
+              Annotations
+              {(annotations ?? []).filter(a => !a.resolved).length > 0 && (
+                <span className="ml-1 px-1 py-0.5 bg-primary-500/30 text-primary-300 rounded-full text-xs">
+                  {(annotations ?? []).filter(a => !a.resolved).length}
+                </span>
+              )}
+            </button>
+          )}
           <button
             onClick={() => setIsFullscreen(false)}
             className="px-3 py-1.5 rounded text-xs font-medium transition-colors bg-dark-bg-tertiary text-dark-text-secondary hover:bg-red-500/20 hover:text-red-400"
@@ -1302,7 +1466,26 @@ export default function WikiEditor({ page }: Readonly<WikiEditorProps>) {
         </div>
       </div>
 
-      {/* Split panes */}
+      {/* Figma URL input bar (fullscreen) */}
+      {showFigmaInput && (
+        <div className="flex items-center gap-2 px-4 py-1.5 border-b border-dark-border-subtle bg-dark-bg-tertiary/30 flex-shrink-0">
+          <input
+            type="url"
+            value={figmaInputUrl}
+            onChange={e => { setFigmaInputUrl(e.target.value); setFigmaInputError('') }}
+            onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); handleFigmaInsert() } if (e.key === 'Escape') { setShowFigmaInput(false); setFigmaInputError('') } }}
+            placeholder="https://www.figma.com/file/..."
+            className="flex-1 bg-dark-bg-primary border border-dark-border-subtle rounded px-2 py-1 text-xs text-dark-text-primary placeholder-dark-text-tertiary focus:outline-none focus:border-primary-500"
+            autoFocus
+          />
+          <button onClick={handleFigmaInsert} className="px-2 py-1 rounded text-xs font-medium bg-primary-600 text-white hover:bg-primary-500 transition-colors">Insert</button>
+          <button onClick={() => { setShowFigmaInput(false); setFigmaInputError('') }} className="px-2 py-1 rounded text-xs font-medium bg-dark-bg-tertiary text-dark-text-secondary hover:text-dark-text-primary transition-colors">Cancel</button>
+          {figmaInputError && <span className="text-xs text-red-400">{figmaInputError}</span>}
+        </div>
+      )}
+
+      {/* Split panes + optional annotation sidebar */}
+      <div className="flex flex-1 overflow-hidden">
       <div ref={fsContainerRef} className="flex flex-1 overflow-hidden">
         {/* Left: editor */}
         <section
@@ -1341,6 +1524,25 @@ export default function WikiEditor({ page }: Readonly<WikiEditorProps>) {
           <PreviewContent previewHTML={fsPreviewHTML} content={content} previewRef={fsPreviewRef} />
         </div>
       </div>
+      {/* Fullscreen annotation sidebar */}
+      {fsAnnotationsVisible && onAnnotationUpdate && onAnnotationDelete && onCommentCreate && onCommentUpdate && onCommentDelete && (
+        <div className="w-80 flex-shrink-0 border-l border-dark-border-subtle flex flex-col overflow-hidden">
+          <WikiAnnotationSidebar
+            annotations={annotations ?? []}
+            selectedAnnotationId={selectedAnnotationId ?? null}
+            showResolved={showResolved}
+            projectId={page.project_id}
+            onAnnotationSelect={(id) => onAnnotationClick?.(id ?? 0)}
+            onAnnotationUpdate={onAnnotationUpdate}
+            onAnnotationDelete={onAnnotationDelete}
+            onCommentCreate={onCommentCreate}
+            onCommentUpdate={onCommentUpdate}
+            onCommentDelete={onCommentDelete}
+            onToggleShowResolved={onToggleShowResolved ?? (() => {})}
+          />
+        </div>
+      )}
+      </div>
     </div>
   )
 
@@ -1359,13 +1561,22 @@ export default function WikiEditor({ page }: Readonly<WikiEditorProps>) {
                 <h1 className="text-2xl font-semibold text-dark-text-primary">{page.title}</h1>
                 <div className="flex items-center gap-2 mt-1 text-xs text-dark-text-tertiary">
                   {page.creator_name && (
-                    <span>Created by <span className="text-dark-text-secondary">{page.creator_name}</span> · {new Date(page.created_at).toLocaleDateString()}</span>
+                    <span>Created by{' '}
+                      <Link to={`/app/users/${page.created_by}`} className="text-dark-text-secondary hover:text-primary-400 transition-colors">
+                        {page.creator_name}
+                      </Link>
+                      {' '}· {new Date(page.created_at).toLocaleDateString()}
+                    </span>
                   )}
                   {(lastEditedBy || lastEditedAt) && (
                     <>
                       <span className="text-dark-border-subtle">·</span>
                       <span>
-                        Last edited{lastEditedBy ? <> by <span className="text-dark-text-secondary">{lastEditedBy}</span></> : ''}{' '}
+                        Last edited{lastEditedBy ? <> by{' '}
+                          <Link to={`/app/users/${page.updated_by ?? page.created_by}`} className="text-dark-text-secondary hover:text-primary-400 transition-colors">
+                            {lastEditedBy}
+                          </Link>
+                        </> : ''}{' '}
                         · {new Date(lastEditedAt).toLocaleString()}
                       </span>
                     </>
@@ -1445,8 +1656,24 @@ export default function WikiEditor({ page }: Readonly<WikiEditorProps>) {
 
           {/* Toolbar (edit mode only) */}
           {!isPreview && (
-            <div className="border-b border-dark-border-subtle bg-dark-bg-secondary px-6 py-2">
-              {renderToolbar()}
+            <div className="border-b border-dark-border-subtle bg-dark-bg-secondary">
+              <div className="px-6 py-2">{renderToolbar()}</div>
+              {showFigmaInput && (
+                <div className="flex items-center gap-2 px-6 py-1.5 border-t border-dark-border-subtle bg-dark-bg-tertiary/30">
+                  <input
+                    type="url"
+                    value={figmaInputUrl}
+                    onChange={e => { setFigmaInputUrl(e.target.value); setFigmaInputError('') }}
+                    onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); handleFigmaInsert() } if (e.key === 'Escape') { setShowFigmaInput(false); setFigmaInputError('') } }}
+                    placeholder="https://www.figma.com/file/..."
+                    className="flex-1 bg-dark-bg-primary border border-dark-border-subtle rounded px-2 py-1 text-xs text-dark-text-primary placeholder-dark-text-tertiary focus:outline-none focus:border-primary-500"
+                    autoFocus
+                  />
+                  <button onClick={handleFigmaInsert} className="px-2 py-1 rounded text-xs font-medium bg-primary-600 text-white hover:bg-primary-500 transition-colors">Insert</button>
+                  <button onClick={() => { setShowFigmaInput(false); setFigmaInputError('') }} className="px-2 py-1 rounded text-xs font-medium bg-dark-bg-tertiary text-dark-text-secondary hover:text-dark-text-primary transition-colors">Cancel</button>
+                  {figmaInputError && <span className="text-xs text-red-400">{figmaInputError}</span>}
+                </div>
+              )}
             </div>
           )}
 

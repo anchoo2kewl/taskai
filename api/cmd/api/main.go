@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/hex"
 	"fmt"
 	"net/http"
 	"net/http/pprof"
@@ -13,6 +14,9 @@ import (
 
 	godraw "github.com/anchoo2kewl/go-draw"
 	godrawstore "github.com/anchoo2kewl/go-draw/store"
+	backup "github.com/anchoo2kewl/go-backup"
+	backupgdrive "github.com/anchoo2kewl/go-backup/gdrive"
+	backuppgstore "github.com/anchoo2kewl/go-backup/pgstore"
 	gologin "github.com/anchoo2kewl/go-login"
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
@@ -137,11 +141,13 @@ func main() {
 				next.ServeHTTP(w, r)
 				return
 			}
-			// SSE endpoints use streaming — no fixed timeout
+			// SSE endpoints and long-running operations — no fixed timeout
 			if strings.HasSuffix(r.URL.Path, "/github/preview") ||
 				strings.HasSuffix(r.URL.Path, "/github/pull") ||
 				strings.HasSuffix(r.URL.Path, "/github/sync") ||
-				strings.HasSuffix(r.URL.Path, "/github/push-all") {
+				strings.HasSuffix(r.URL.Path, "/github/push-all") ||
+				strings.HasSuffix(r.URL.Path, "/admin/backup/trigger") ||
+				strings.HasSuffix(r.URL.Path, "/download") {
 				next.ServeHTTP(w, r)
 				return
 			}
@@ -222,6 +228,50 @@ func main() {
 	}
 	r.Handle("/draw/*", drawHandler.Handler())
 
+	// Backup manager (Google Drive scheduled backups)
+	// Reuses the existing GOOGLE_CLIENT_ID / GOOGLE_CLIENT_SECRET OAuth app.
+	// The backup OAuth flow requests Drive scope via a separate redirect URI.
+	var backupMgr *backup.Manager
+	if cfg.GoogleClientID != "" && database.Driver == "postgres" {
+		var encKey []byte
+		if cfg.BackupEncryptionKey != "" {
+			var decErr error
+			encKey, decErr = hex.DecodeString(cfg.BackupEncryptionKey)
+			if decErr != nil || len(encKey) != 32 {
+				logger.Fatal("BACKUP_ENCRYPTION_KEY must be a 64-char hex string (32 bytes)",
+					zap.Int("decoded_len", len(encKey)))
+			}
+		}
+		dumper, dumperErr := backup.NewPostgresDumper(cfg.DBDSN)
+		if dumperErr != nil {
+			logger.Fatal("failed to create backup dumper", zap.Error(dumperErr))
+		}
+		gdriveAuth := backupgdrive.NewAuth(
+			cfg.GoogleClientID,
+			cfg.GoogleClientSecret,
+			cfg.AppURL+"/api/admin/backup/oauth/callback",
+		)
+		gdriveProvider := backupgdrive.NewProvider(gdriveAuth)
+		backupStore := backuppgstore.New(database.DB)
+		var mgErr error
+		backupMgr, mgErr = backup.New(
+			backup.WithStore(backupStore),
+			backup.WithDumper(dumper),
+			backup.WithProvider(gdriveProvider),
+			backup.WithBasePath("/admin/backup"),
+			backup.WithOAuthSuccessRedirect(cfg.AppURL+"/app/settings"),
+			backup.WithEncryptionKey(encKey),
+		)
+		if mgErr != nil {
+			logger.Fatal("failed to create backup manager", zap.Error(mgErr))
+		}
+		if startErr := backupMgr.Start(); startErr != nil {
+			logger.Fatal("failed to start backup manager", zap.Error(startErr))
+		}
+		defer backupMgr.Stop()
+		logger.Info("Backup manager initialized (Google Drive)")
+	}
+
 	// API routes
 	r.Route("/api", func(r chi.Router) {
 		// Legacy health endpoint
@@ -282,12 +332,19 @@ func main() {
 			logger.Warn("OAUTH_STATE_SECRET not set — OAuth login routes not registered")
 		}
 
+		// Public backup OAuth routes (Google redirects back here — no auth header)
+		if backupMgr != nil {
+			r.Handle("/admin/backup/oauth/*", backupMgr.PublicHandler())
+		}
+
 		// Auth routes (public) with rate limiting
 		r.Route("/auth", func(r chi.Router) {
 			// Apply stricter rate limiting to auth endpoints (20 req/min)
 			r.Use(api.RateLimitMiddleware(20))
 			r.Post("/signup", server.HandleSignup)
 			r.Post("/login", server.HandleLogin)
+			r.Post("/forgot-password", server.HandleForgotPassword)
+			r.Post("/reset-password", server.HandleResetPassword)
 
 			// GitHub callback — shared between repo-sync and login flows.
 			// The state JWT secret differs between the two; we dispatch accordingly.
@@ -370,6 +427,15 @@ func main() {
 			r.Post("/wiki/search", server.HandleSearchWiki)
 			r.Get("/wiki/autocomplete", server.HandleAutocompletePages)
 
+			// Wiki annotation routes
+			r.Get("/wiki/pages/{pageId}/annotations", server.HandleListWikiAnnotations)
+			r.Post("/wiki/pages/{pageId}/annotations", server.HandleCreateWikiAnnotation)
+			r.Patch("/wiki/annotations/{annotationId}", server.HandleUpdateWikiAnnotation)
+			r.Delete("/wiki/annotations/{annotationId}", server.HandleDeleteWikiAnnotation)
+			r.Post("/wiki/annotations/{annotationId}/comments", server.HandleCreateAnnotationComment)
+			r.Patch("/wiki/annotation-comments/{commentId}", server.HandleUpdateAnnotationComment)
+			r.Delete("/wiki/annotation-comments/{commentId}", server.HandleDeleteAnnotationComment)
+
 			// Knowledge graph routes
 			r.Get("/projects/{id}/graph", server.HandleGetProjectGraph)
 
@@ -379,6 +445,9 @@ func main() {
 			// Task comment routes
 			r.Get("/tasks/{taskId}/comments", server.HandleListTaskComments)
 			r.Post("/tasks/{taskId}/comments", server.HandleCreateTaskComment)
+
+			// Task reactions (bidirectional)
+			r.Post("/tasks/{taskId}/reactions", server.HandleToggleReaction)
 
 			// Task GitHub push
 			r.Post("/tasks/{taskId}/github/push", server.HandleGitHubPushTask)
@@ -445,6 +514,7 @@ func main() {
 			// Team routes
 			r.Get("/team", server.HandleGetMyTeam)
 			r.Patch("/team", server.HandleUpdateTeam)
+			r.Get("/team/memberships", server.HandleGetMyTeamMemberships)
 			r.Get("/team/members", server.HandleGetTeamMembers)
 			r.Post("/team/members", server.HandleAddTeamMember)
 			r.Post("/team/invite", server.HandleInviteTeamMember)
@@ -464,6 +534,12 @@ func main() {
 			r.Delete("/settings/cloudinary", server.HandleDeleteCloudinaryCredential)
 			r.Post("/settings/cloudinary/test", server.HandleTestCloudinaryConnection)
 			r.Get("/settings/cloudinary/signature", server.HandleGetUploadSignature)
+
+			// Figma routes
+			r.Get("/user/figma-credentials", server.HandleGetFigmaCredentials)
+			r.Post("/user/figma-credentials", server.HandleSaveFigmaCredentials)
+			r.Delete("/user/figma-credentials", server.HandleDeleteFigmaCredentials)
+			r.Get("/figma/embed", server.HandleFigmaEmbed)
 
 			// Task attachment routes
 			r.Get("/tasks/{taskId}/attachments", server.HandleListTaskAttachments)
@@ -498,6 +574,8 @@ func main() {
 			r.Get("/admin/users/{id}/activity", server.HandleGetUserActivity)
 			r.Patch("/admin/users/{id}/admin", server.HandleUpdateUserAdmin)
 			r.Patch("/admin/users/{id}/invites", server.HandleAdminBoostInvites)
+			r.Patch("/admin/users/{id}/profile", server.HandleUpdateUserProfile)
+			r.Post("/admin/users/{id}/reset-password", server.HandleAdminResetPassword)
 			r.Delete("/admin/users/{id}", server.HandleDeleteUser)
 
 			// Admin email provider routes
@@ -506,9 +584,29 @@ func main() {
 			r.Delete("/admin/settings/email", server.HandleDeleteEmailProvider)
 			r.Post("/admin/settings/email/test", server.HandleTestEmailProvider)
 
-			// Admin backup/restore routes
+			// Admin invitation routes
+			r.Get("/admin/invitations", server.HandleAdminGetInvitations)
+			r.Post("/admin/team-invitations/{id}/resolve", server.HandleAdminResolveTeamInvitation)
+			r.Post("/admin/project-invitations/{id}/resolve", server.HandleAdminResolveProjectInvitation)
+
+			// Admin backup/restore routes (legacy export/import)
 			r.Get("/admin/backup/export", server.HandleExportData)
 			r.Post("/admin/backup/import", server.HandleImportData)
+
+			// go-backup scheduled backup routes
+			if backupMgr != nil {
+				r.Handle("/admin/backup/*", backupMgr.Handler())
+			}
+
+			// Notification routes
+			r.Get("/notifications", server.HandleListNotifications)
+			r.Get("/notifications/count", server.HandleGetNotificationCount)
+			r.Post("/notifications/mark-read", server.HandleMarkNotificationsRead)
+			r.Post("/notifications/mark-all-read", server.HandleMarkAllNotificationsRead)
+
+			// User profile routes
+			r.Get("/users/{userId}/profile", server.HandleGetUserProfile)
+			r.Get("/users/{userId}/activity", server.HandleGetUserActivity2)
 		})
 	})
 

@@ -1,7 +1,8 @@
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
-import { api, WikiPage } from '../lib/api'
+import { api, WikiPage, WikiAnnotation, AnnotationColor, AnnotationComment } from '../lib/api'
 import WikiEditor from './WikiEditor'
+import WikiAnnotationSidebar from './WikiAnnotationSidebar'
 
 interface WikiContentProps {
   projectId: string
@@ -10,6 +11,7 @@ interface WikiContentProps {
 export default function WikiContent({ projectId }: WikiContentProps) {
   const [searchParams, setSearchParams] = useSearchParams()
   const selectedPageId = searchParams.get('page')
+  const annotationParam = searchParams.get('annotation')
 
   const [pages, setPages] = useState<WikiPage[]>([])
   const [loading, setLoading] = useState(true)
@@ -19,9 +21,35 @@ export default function WikiContent({ projectId }: WikiContentProps) {
   const [showNewPageInput, setShowNewPageInput] = useState(false)
   const [searchQuery, setSearchQuery] = useState('')
 
+  const [annotations, setAnnotations] = useState<WikiAnnotation[]>([])
+  const [selectedAnnotationId, setSelectedAnnotationId] = useState<number | null>(null)
+  const [showAnnotationSidebar, setShowAnnotationSidebar] = useState(false)
+  const [pinnedAnnotations, setPinnedAnnotations] = useState(false)
+  const [showResolved, setShowResolved] = useState(false)
+
   useEffect(() => {
     if (projectId) loadPages()
   }, [projectId]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => {
+    if (selectedPageId) {
+      api.listWikiAnnotations(Number(selectedPageId))
+        .then(data => setAnnotations(data))
+        .catch(() => setAnnotations([]))
+      setSelectedAnnotationId(null)
+    } else {
+      setAnnotations([])
+    }
+  }, [selectedPageId])
+
+  // Deep-link to annotation from ?annotation=X (e.g. notification clicks)
+  useEffect(() => {
+    if (!annotationParam || !annotations.length) return
+    const id = Number(annotationParam)
+    if (!id) return
+    setSelectedAnnotationId(id)
+    setShowAnnotationSidebar(true)
+  }, [annotationParam, annotations])
 
   const loadPages = async () => {
     try {
@@ -72,6 +100,59 @@ export default function WikiContent({ projectId }: WikiContentProps) {
       alert(err instanceof Error ? err.message : 'Failed to delete page')
     }
   }
+
+  const handleAnnotationCreate = useCallback(async (info: {
+    startOffset: number; endOffset: number; selectedText: string; color: AnnotationColor
+  }) => {
+    if (!selectedPageId) return
+    try {
+      const annotation = await api.createWikiAnnotation(Number(selectedPageId), {
+        start_offset: info.startOffset,
+        end_offset: info.endOffset,
+        selected_text: info.selectedText,
+        color: info.color,
+      })
+      setAnnotations(prev => [...prev, annotation])
+      setSelectedAnnotationId(annotation.id)
+      setShowAnnotationSidebar(true)
+    } catch { /* ignore */ }
+  }, [selectedPageId])
+
+  const handleAnnotationClick = useCallback((annotationId: number) => {
+    setSelectedAnnotationId(prev => prev === annotationId ? null : annotationId)
+    setShowAnnotationSidebar(true)
+  }, [])
+
+  const handleAnnotationUpdate = useCallback((updated: WikiAnnotation) => {
+    setAnnotations(prev => prev.map(a => a.id === updated.id ? updated : a))
+  }, [])
+
+  const handleAnnotationDelete = useCallback((annotationId: number) => {
+    setAnnotations(prev => prev.filter(a => a.id !== annotationId))
+    if (selectedAnnotationId === annotationId) setSelectedAnnotationId(null)
+  }, [selectedAnnotationId])
+
+  const handleCommentCreate = useCallback((annotationId: number, comment: AnnotationComment) => {
+    setAnnotations(prev => prev.map(a =>
+      a.id === annotationId ? { ...a, comments: [...a.comments, comment] } : a
+    ))
+  }, [])
+
+  const handleCommentUpdate = useCallback((updated: AnnotationComment) => {
+    setAnnotations(prev => prev.map(a =>
+      a.id === updated.annotation_id
+        ? { ...a, comments: a.comments.map(c => c.id === updated.id ? updated : c) }
+        : a
+    ))
+  }, [])
+
+  const handleCommentDelete = useCallback((annotationId: number, commentId: number) => {
+    setAnnotations(prev => prev.map(a =>
+      a.id === annotationId
+        ? { ...a, comments: a.comments.filter(c => c.id !== commentId) }
+        : a
+    ))
+  }, [])
 
   const selectedPage = pages.find(p => p.id === Number(selectedPageId))
   const filteredPages = searchQuery
@@ -182,9 +263,25 @@ export default function WikiContent({ projectId }: WikiContentProps) {
       </div>
 
       {/* Main content */}
-      <div className="flex-1 flex flex-col">
+      <div className="flex-1 flex overflow-hidden relative">
+        <div className="flex-1 flex flex-col overflow-hidden">
         {selectedPage ? (
-          <WikiEditor key={selectedPage.id} page={selectedPage} />
+          <WikiEditor
+            key={selectedPage.id}
+            page={selectedPage}
+            annotations={annotations}
+            selectedAnnotationId={selectedAnnotationId}
+            showAnnotationHighlights={pinnedAnnotations || showAnnotationSidebar}
+            onAnnotationCreate={handleAnnotationCreate}
+            onAnnotationClick={handleAnnotationClick}
+            onAnnotationUpdate={handleAnnotationUpdate}
+            onAnnotationDelete={handleAnnotationDelete}
+            onCommentCreate={handleCommentCreate}
+            onCommentUpdate={handleCommentUpdate}
+            onCommentDelete={handleCommentDelete}
+            showResolved={showResolved}
+            onToggleShowResolved={() => setShowResolved(v => !v)}
+          />
         ) : (
           <div className="flex-1 flex items-center justify-center text-dark-text-tertiary">
             <div className="text-center">
@@ -192,6 +289,66 @@ export default function WikiContent({ projectId }: WikiContentProps) {
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
               </svg>
               <p className="text-lg">Select a page or create a new one</p>
+            </div>
+          </div>
+        )}
+        </div>
+
+        {/* Pen icon: reveal sidebar when not visible */}
+        {selectedPage && !pinnedAnnotations && !showAnnotationSidebar && (
+          <button
+            onClick={() => setShowAnnotationSidebar(true)}
+            className="absolute right-0 top-1/2 -translate-y-1/2 z-10 p-1.5 bg-dark-bg-secondary border border-r-0 border-dark-border-subtle rounded-l-lg text-dark-text-tertiary hover:text-primary-400 hover:bg-primary-500/10 transition-colors"
+            title="Show annotations"
+          >
+            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" />
+            </svg>
+          </button>
+        )}
+
+        {/* Annotation sidebar with pin/close controls */}
+        {selectedPage && (pinnedAnnotations || showAnnotationSidebar) && (
+          <div className="flex flex-col border-l border-dark-border-subtle w-80 flex-shrink-0">
+            <div className="flex items-center justify-between px-3 py-2 border-b border-dark-border-subtle bg-dark-bg-secondary">
+              <span className="text-xs font-semibold text-dark-text-secondary uppercase tracking-wide">Annotations</span>
+              <div className="flex items-center gap-1">
+                <button
+                  onClick={() => setPinnedAnnotations(v => !v)}
+                  className={`p-1 rounded transition-colors ${pinnedAnnotations ? 'text-primary-400 bg-primary-500/10' : 'text-dark-text-tertiary hover:text-dark-text-primary hover:bg-dark-bg-tertiary'}`}
+                  title={pinnedAnnotations ? 'Unpin sidebar' : 'Pin sidebar'}
+                >
+                  <svg className="w-3.5 h-3.5" fill={pinnedAnnotations ? 'currentColor' : 'none'} stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 5a2 2 0 012-2h10a2 2 0 012 2v16l-7-3.5L5 21V5z" />
+                  </svg>
+                </button>
+                {!pinnedAnnotations && (
+                  <button
+                    onClick={() => setShowAnnotationSidebar(false)}
+                    className="p-1 rounded text-dark-text-tertiary hover:text-dark-text-primary hover:bg-dark-bg-tertiary transition-colors"
+                    title="Hide annotations"
+                  >
+                    <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                    </svg>
+                  </button>
+                )}
+              </div>
+            </div>
+            <div className="flex-1 overflow-hidden">
+              <WikiAnnotationSidebar
+                annotations={annotations}
+                selectedAnnotationId={selectedAnnotationId}
+                showResolved={showResolved}
+                projectId={Number(projectId)}
+                onAnnotationSelect={setSelectedAnnotationId}
+                onAnnotationUpdate={handleAnnotationUpdate}
+                onAnnotationDelete={handleAnnotationDelete}
+                onCommentCreate={handleCommentCreate}
+                onCommentUpdate={handleCommentUpdate}
+                onCommentDelete={handleCommentDelete}
+                onToggleShowResolved={() => setShowResolved(v => !v)}
+              />
             </div>
           </div>
         )}

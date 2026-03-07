@@ -11,38 +11,36 @@ vi.mock('react-router-dom', () => ({
 describe('Landing', () => {
   it('renders the hero heading', () => {
     render(<Landing />)
-    expect(screen.getByText('AI-native')).toBeInTheDocument()
-    expect(screen.getByText('project management')).toBeInTheDocument()
+    expect(screen.getByText('Project management')).toBeInTheDocument()
+    expect(screen.getByText('built for AI agents')).toBeInTheDocument()
   })
 
-  it('renders "Sign in" and "Get started" navigation links', () => {
+  it('renders "Sign in" and "Get started free" navigation links', () => {
     render(<Landing />)
     const signInLinks = screen.getAllByText('Sign in')
     expect(signInLinks.length).toBeGreaterThanOrEqual(1)
 
-    const getStartedLinks = screen.getAllByText('Get started')
+    const getStartedLinks = screen.getAllByText('Get started free')
     expect(getStartedLinks.length).toBeGreaterThanOrEqual(1)
   })
 
   it('renders feature sections', () => {
     render(<Landing />)
-    expect(screen.getByText('Built for AI, designed for humans')).toBeInTheDocument()
-    expect(screen.getByText('MCP Server')).toBeInTheDocument()
-    expect(screen.getByText('API-First Architecture')).toBeInTheDocument()
-    expect(screen.getByText('Visual Project Management')).toBeInTheDocument()
+    expect(screen.getByText('Kanban boards')).toBeInTheDocument()
+    expect(screen.getByText('Collaborative wiki')).toBeInTheDocument()
+    expect(screen.getByText('Sprint planning')).toBeInTheDocument()
+    expect(screen.getByText('Knowledge graph')).toBeInTheDocument()
   })
 
-  it('renders the "How AI agents use TaskAI" section', () => {
+  it('renders the AI agents section', () => {
     render(<Landing />)
-    expect(screen.getByText('How AI agents use TaskAI')).toBeInTheDocument()
-    expect(screen.getByText('Connect via MCP')).toBeInTheDocument()
-    expect(screen.getByText('AI discovers available tools')).toBeInTheDocument()
-    expect(screen.getByText('LLM works independently')).toBeInTheDocument()
+    expect(screen.getByText(/Let your AI agent/)).toBeInTheDocument()
+    expect(screen.getByText('Model Context Protocol')).toBeInTheDocument()
   })
 
   it('renders the footer', () => {
     render(<Landing />)
-    expect(screen.getByText('AI-native project management. Ship with confidence.')).toBeInTheDocument()
+    expect(screen.getByText('Project management for AI-native teams.')).toBeInTheDocument()
   })
 
   it('has links to /signup', () => {

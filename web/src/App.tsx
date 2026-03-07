@@ -7,6 +7,8 @@ import ProtectedRoute from './components/ProtectedRoute'
 import Landing from './routes/Landing'
 import Login from './routes/Login'
 import Signup from './routes/Signup'
+import ForgotPassword from './routes/ForgotPassword'
+import ResetPassword from './routes/ResetPassword'
 import Dashboard from './routes/Dashboard'
 import OAuthCallback from './routes/OAuthCallback'
 
@@ -21,6 +23,7 @@ const Settings = lazy(() => import('./routes/Settings'))
 const Assets = lazy(() => import('./routes/Assets'))
 const AcceptTeamInvite = lazy(() => import('./routes/AcceptTeamInvite'))
 const KnowledgeGraphPage = lazy(() => import('./routes/KnowledgeGraphPage'))
+const UserProfile = lazy(() => import('./routes/UserProfile'))
 
 function HomeRoute() {
   const { user } = useAuth()
@@ -40,9 +43,10 @@ function WikiRedirect() {
   const { projectId } = useParams()
   const [searchParams] = useSearchParams()
   const page = searchParams.get('page')
-  const target = page
-    ? `/app/projects/${projectId}?tab=wiki&page=${page}`
-    : `/app/projects/${projectId}?tab=wiki`
+  const annotation = searchParams.get('annotation')
+  let target = `/app/projects/${projectId}?tab=wiki`
+  if (page) target += `&page=${page}`
+  if (annotation) target += `&annotation=${annotation}`
   return <Navigate to={target} replace />
 }
 
@@ -67,6 +71,8 @@ function AppRoutes() {
         <Route path="/" element={<HomeRoute />} />
         <Route path="/login" element={<Login />} />
         <Route path="/signup" element={<Signup />} />
+        <Route path="/forgot-password" element={<ForgotPassword />} />
+        <Route path="/reset-password" element={<ResetPassword />} />
         <Route path="/oauth/callback" element={<OAuthCallback />} />
         <Route path="/accept-invite" element={<AcceptTeamInvite />} />
 
@@ -88,6 +94,7 @@ function AppRoutes() {
           <Route path="projects/:projectId/tags" element={<Tags />} />
           <Route path="projects/:projectId/assets" element={<Assets />} />
           <Route path="projects/:projectId/graph" element={<KnowledgeGraphPage />} />
+          <Route path="users/:userId" element={<UserProfile />} />
           <Route path="admin" element={<Admin />} />
           <Route path="settings" element={<Settings />} />
         </Route>

@@ -1,13 +1,94 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
-import { useParams, useNavigate } from 'react-router-dom'
+import { useParams, useNavigate, Link } from 'react-router-dom'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
+import remarkEmoji from 'remark-emoji'
 import Button from '../components/ui/Button'
 import SearchSelect from '../components/ui/SearchSelect'
 import MultiSelectDropdown from '../components/ui/MultiSelectDropdown'
 import ImagePickerModal from '../components/ImagePickerModal'
-import { apiClient, Task, type UpdateTaskRequest, type SwimLane, type Sprint, type ProjectMember, type Attachment, type TaskComment, type GitHubPushTaskResponse, type Tag } from '../lib/api'
+import { apiClient, Task, type UpdateTaskRequest, type SwimLane, type Sprint, type ProjectMember, type Attachment, type TaskComment, type GitHubPushTaskResponse, type Tag, type GitHubReaction } from '../lib/api'
 import { preprocessGraphLinks, parseGraphLinkUrl } from '../lib/graphLinks'
+import FigmaEmbed from '../components/FigmaEmbed'
+import { REACTION_EMOJI, REACTION_ORDER } from '../lib/reactionUtils'
+import MentionTextarea from '../components/MentionTextarea'
+
+const FIGMA_URL_RE = /(^|[\s\n])(https:\/\/(?:www\.)?figma\.com\/(?:file|design|proto)\/[^\s\n)]+)/g
+
+function preprocessFigmaUrls(content: string): string {
+  return content.replace(FIGMA_URL_RE, (_, prefix, url) => `${prefix}[${url}](${url})`)
+}
+
+function ReactionBar({
+  reactions,
+  onToggle,
+}: {
+  reactions?: GitHubReaction[]
+  onToggle?: (reaction: string) => void
+}) {
+  const [showPicker, setShowPicker] = useState(false)
+  const pickerRef = useRef<HTMLDivElement>(null)
+  const byType = Object.fromEntries((reactions ?? []).map(r => [r.reaction, r]))
+  const nonZero = REACTION_ORDER.filter(r => byType[r]?.count > 0)
+
+  useEffect(() => {
+    if (!showPicker) return
+    const handler = (e: MouseEvent) => {
+      if (pickerRef.current && !pickerRef.current.contains(e.target as Node)) {
+        setShowPicker(false)
+      }
+    }
+    document.addEventListener('mousedown', handler)
+    return () => document.removeEventListener('mousedown', handler)
+  }, [showPicker])
+
+  if (!nonZero.length && !onToggle) return null
+  return (
+    <div className="flex flex-wrap items-center gap-1.5 mt-2">
+      {nonZero.map(r => (
+        <button
+          key={r}
+          type="button"
+          onClick={() => onToggle?.(r)}
+          className={`inline-flex items-center gap-1 text-xs border rounded-full px-2 py-0.5 transition-colors
+            ${byType[r].user_reacted
+              ? 'bg-primary-500/20 border-primary-500/50 text-primary-300'
+              : 'bg-dark-bg-secondary border-dark-border-subtle text-dark-text-secondary hover:border-dark-border-medium'}
+            ${onToggle ? 'cursor-pointer' : 'cursor-default'}`}
+        >
+          {REACTION_EMOJI[r]} {byType[r].count}
+        </button>
+      ))}
+      {onToggle && (
+        <div className="relative" ref={pickerRef}>
+          <button
+            type="button"
+            onClick={() => setShowPicker(p => !p)}
+            className="inline-flex items-center justify-center h-5 px-1.5 text-xs border border-dashed border-dark-border-subtle rounded-full text-dark-text-tertiary hover:text-dark-text-secondary hover:border-dark-border-medium transition-colors"
+            title="Add reaction"
+          >
+            😊 +
+          </button>
+          {showPicker && (
+            <div className="absolute bottom-full left-0 mb-1 bg-dark-bg-secondary border border-dark-border-subtle rounded-lg shadow-xl p-1.5 flex gap-0.5 z-50">
+              {REACTION_ORDER.map(r => (
+                <button
+                  key={r}
+                  type="button"
+                  onClick={() => { onToggle(r); setShowPicker(false) }}
+                  title={r}
+                  className={`text-base p-1 rounded hover:bg-dark-bg-tertiary transition-colors ${byType[r]?.user_reacted ? 'bg-primary-500/20' : ''}`}
+                >
+                  {REACTION_EMOJI[r]}
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  )
+}
 
 interface TaskDetailProps {
   isModal?: boolean
@@ -58,6 +139,88 @@ export default function TaskDetail({ isModal, onClose }: TaskDetailProps) {
   const [pushingToGitHub, setPushingToGitHub] = useState(false)
   const [githubPushResult, setGithubPushResult] = useState<GitHubPushTaskResponse | null>(null)
   const [githubRepo, setGithubRepo] = useState<{ github_owner: string; github_repo_name: string } | null>(null)
+
+  // Reaction toggle with optimistic updates
+  const handleToggleReaction = useCallback(async (reaction: string, commentId?: number) => {
+    if (!task) return
+    const taskIdNum = Number(task.id)
+
+    // Optimistic update
+    const applyOptimistic = (reactions: GitHubReaction[] | undefined, toggling: boolean): GitHubReaction[] => {
+      const list = reactions ? [...reactions] : []
+      const idx = list.findIndex(r => r.reaction === reaction)
+      if (toggling) {
+        // Adding
+        if (idx >= 0) {
+          list[idx] = { ...list[idx], count: list[idx].count + 1, user_reacted: true }
+        } else {
+          list.push({ reaction, count: 1, user_reacted: true })
+        }
+      } else {
+        // Removing
+        if (idx >= 0) {
+          const newCount = Math.max(0, list[idx].count - 1)
+          list[idx] = { ...list[idx], count: newCount, user_reacted: false }
+        }
+      }
+      return list
+    }
+
+    const wasReacted = commentId
+      ? comments.find(c => c.id === commentId)?.github_reactions?.find(r => r.reaction === reaction)?.user_reacted ?? false
+      : task.github_reactions?.find(r => r.reaction === reaction)?.user_reacted ?? false
+
+    if (commentId) {
+      setComments(prev => prev.map(c =>
+        c.id === commentId
+          ? { ...c, github_reactions: applyOptimistic(c.github_reactions, !wasReacted) }
+          : c
+      ))
+    } else {
+      setTask(prev => prev ? { ...prev, github_reactions: applyOptimistic(prev.github_reactions, !wasReacted) } : prev)
+    }
+
+    try {
+      const result = await apiClient.toggleReaction(taskIdNum, reaction, commentId)
+      // Apply authoritative result
+      if (commentId) {
+        setComments(prev => prev.map(c => {
+          if (c.id !== commentId) return c
+          const list = c.github_reactions ? [...c.github_reactions] : []
+          const idx = list.findIndex(r => r.reaction === reaction)
+          if (idx >= 0) {
+            list[idx] = { reaction, count: result.count, user_reacted: result.user_reacted }
+          } else {
+            list.push({ reaction, count: result.count, user_reacted: result.user_reacted })
+          }
+          return { ...c, github_reactions: list }
+        }))
+      } else {
+        setTask(prev => {
+          if (!prev) return prev
+          const list = prev.github_reactions ? [...prev.github_reactions] : []
+          const idx = list.findIndex(r => r.reaction === reaction)
+          if (idx >= 0) {
+            list[idx] = { reaction, count: result.count, user_reacted: result.user_reacted }
+          } else {
+            list.push({ reaction, count: result.count, user_reacted: result.user_reacted })
+          }
+          return { ...prev, github_reactions: list }
+        })
+      }
+    } catch {
+      // Revert optimistic update
+      if (commentId) {
+        setComments(prev => prev.map(c =>
+          c.id === commentId
+            ? { ...c, github_reactions: applyOptimistic(c.github_reactions, wasReacted) }
+            : c
+        ))
+      } else {
+        setTask(prev => prev ? { ...prev, github_reactions: applyOptimistic(prev.github_reactions, wasReacted) } : prev)
+      }
+    }
+  }, [task, comments])
 
   useEffect(() => {
     loadTask()
@@ -605,9 +768,12 @@ export default function TaskDetail({ isModal, onClose }: TaskDetailProps) {
               ) : task.description ? (
                 <div className="prose prose-sm max-w-none prose-headings:text-dark-text-primary prose-p:text-dark-text-secondary prose-a:text-primary-400 prose-code:text-primary-400 prose-code:bg-primary-500/10 prose-code:px-1 prose-code:py-0.5 prose-code:rounded prose-pre:bg-dark-bg-primary prose-pre:border prose-pre:border-dark-border-subtle prose-strong:text-dark-text-primary prose-li:text-dark-text-secondary prose-img:rounded-lg prose-img:border prose-img:border-dark-border-subtle">
                   <ReactMarkdown
-                    remarkPlugins={[remarkGfm]}
+                    remarkPlugins={[remarkGfm, remarkEmoji]}
                     components={{
                       a: ({ href, children }) => {
+                        if (href && /figma\.com\/(file|design|proto)\//.test(href)) {
+                          return <FigmaEmbed url={href} size="m" />
+                        }
                         const graphLink = href ? parseGraphLinkUrl(href) : null
                         if (graphLink) {
                           const label = String(children)
@@ -636,8 +802,9 @@ export default function TaskDetail({ isModal, onClose }: TaskDetailProps) {
                       },
                     }}
                   >
-                    {preprocessGraphLinks(task.description)}
+                    {preprocessFigmaUrls(preprocessGraphLinks(task.description))}
                   </ReactMarkdown>
+                  <ReactionBar reactions={task.github_reactions} onToggle={(r) => handleToggleReaction(r)} />
                 </div>
               ) : (
                 <p
@@ -769,13 +936,14 @@ export default function TaskDetail({ isModal, onClose }: TaskDetailProps) {
                     Insert image
                   </button>
                 </div>
-                <textarea
+                <MentionTextarea
                   ref={commentRef}
                   value={newComment}
-                  onChange={(e) => setNewComment(e.target.value)}
+                  onChange={setNewComment}
+                  projectId={Number(projectId)}
                   rows={3}
                   className="w-full px-3 py-2 border border-dark-border-subtle bg-dark-bg-primary text-dark-text-primary rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-primary-500 outline-none text-sm placeholder-dark-text-tertiary"
-                  placeholder="Add a comment..."
+                  placeholder="Add a comment... (type @ to mention someone)"
                   onKeyDown={(e) => {
                     if (e.key === 'Enter' && (e.metaKey || e.ctrlKey) && newComment.trim()) {
                       e.preventDefault()
@@ -811,17 +979,31 @@ export default function TaskDetail({ isModal, onClose }: TaskDetailProps) {
                         </div>
                         <div className="flex-1 min-w-0">
                           <div className="flex items-center gap-2 mb-1">
-                            <span className="text-sm font-medium text-dark-text-primary">
+                            <Link
+                              to={`/app/users/${comment.user_id}`}
+                              className="text-sm font-medium text-dark-text-primary hover:text-primary-400 transition-colors"
+                            >
                               {comment.user_name || `User ${comment.user_id}`}
-                            </span>
+                            </Link>
                             <span className="text-xs text-dark-text-tertiary">
                               {new Date(comment.created_at).toLocaleString()}
                             </span>
                           </div>
                           <div className="text-sm text-dark-text-secondary prose prose-sm max-w-none prose-headings:text-dark-text-primary prose-p:text-dark-text-secondary prose-a:text-primary-400 prose-code:text-primary-400 prose-code:bg-primary-500/10 prose-code:px-1 prose-code:py-0.5 prose-code:rounded prose-pre:bg-dark-bg-primary prose-pre:border prose-pre:border-dark-border-subtle prose-strong:text-dark-text-primary prose-li:text-dark-text-secondary prose-img:rounded-lg prose-img:max-h-64 prose-img:border prose-img:border-dark-border-subtle">
-                            <ReactMarkdown remarkPlugins={[remarkGfm]}>
-                              {comment.comment}
+                            <ReactMarkdown
+                              remarkPlugins={[remarkGfm, remarkEmoji]}
+                              components={{
+                                a: ({ href, children }) => {
+                                  if (href && /figma\.com\/(file|design|proto)\//.test(href)) {
+                                    return <FigmaEmbed url={href} size="m" />
+                                  }
+                                  return <a href={href}>{children}</a>
+                                },
+                              }}
+                            >
+                              {preprocessFigmaUrls(comment.comment)}
                             </ReactMarkdown>
+                            <ReactionBar reactions={comment.github_reactions} onToggle={(r) => handleToggleReaction(r, comment.id)} />
                           </div>
                         </div>
                       </div>
@@ -880,7 +1062,7 @@ export default function TaskDetail({ isModal, onClose }: TaskDetailProps) {
                   onChange={(vals) => saveAssigneeIds(vals.map(Number))}
                   options={members.map((m) => ({
                     value: String(m.user_id || m.id),
-                    label: m.user_name || m.email || `User ${m.user_id || m.id}`,
+                    label: m.user_name || m.name || m.email || `User ${m.user_id || m.id}`,
                     description: m.email || undefined,
                   }))}
                   title="Select assignees"

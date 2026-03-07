@@ -14,6 +14,7 @@ func newTestDB(t *testing.T) *DB {
 	logger := zaptest.NewLogger(t)
 
 	cfg := Config{
+		Driver:         "sqlite",
 		DBPath:         ":memory:",
 		MigrationsPath: "./migrations",
 	}

@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import { useAuth } from '../state/AuthContext'
-import { api, type EmailProviderResponse } from '../lib/api'
+import { api, type EmailProviderResponse, type AdminInvitation } from '../lib/api'
 import { version as frontendVersion } from '../lib/version'
 
 // API URL with fallback for production (empty string = relative URL)
@@ -11,6 +11,9 @@ const API_URL = import.meta.env.VITE_API_URL || ''
 interface UserWithStats {
   id: number
   email: string
+  name?: string
+  first_name?: string
+  last_name?: string
   is_admin: boolean
   created_at: string
   login_count: number
@@ -29,7 +32,7 @@ interface UserActivity {
   created_at: string
 }
 
-type AdminTab = 'users' | 'email' | 'backup' | 'system'
+type AdminTab = 'users' | 'invitations' | 'email' | 'backup' | 'system'
 
 interface VersionInfo {
   version: string
@@ -64,6 +67,26 @@ export default function Admin() {
   const [deletingUserId, setDeletingUserId] = useState<number | null>(null)
   const [deleteConfirm, setDeleteConfirm] = useState<{ id: number; email: string } | null>(null)
   const [deleteError, setDeleteError] = useState<string | null>(null)
+
+  // Name editing state (per user)
+  const [editingName, setEditingName] = useState<Record<number, { firstName: string; lastName: string }>>({})
+  const [savingName, setSavingName] = useState<number | null>(null)
+  const [nameSuccess, setNameSuccess] = useState<Record<number, string>>({})
+
+  // Password reset state (per user)
+  const [resetPasswordModal, setResetPasswordModal] = useState<{ id: number; email: string } | null>(null)
+  const [resetPasswordValue, setResetPasswordValue] = useState('')
+  const [resetPasswordLoading, setResetPasswordLoading] = useState(false)
+  const [resetPasswordError, setResetPasswordError] = useState('')
+  const [resetPasswordSuccess, setResetPasswordSuccess] = useState('')
+
+  // Invitations state
+  const [invitations, setInvitations] = useState<AdminInvitation[]>([])
+  const [invitationsLoading, setInvitationsLoading] = useState(false)
+  const [invitationsError, setInvitationsError] = useState('')
+  const [invStatusFilter, setInvStatusFilter] = useState('pending')
+  const [invTypeFilter, setInvTypeFilter] = useState('')
+  const [resolvingId, setResolvingId] = useState<string | null>(null) // "team-123" or "project-456"
 
   // Email provider state
   const [emailProvider, setEmailProvider] = useState<EmailProviderResponse | null>(null)
@@ -109,6 +132,13 @@ export default function Admin() {
     loadEmailProvider()
     loadVersionInfo()
   }, [user, navigate])
+
+  // Load invitations when the tab becomes active or filters change
+  useEffect(() => {
+    if (activeTab === 'invitations') {
+      loadInvitations(invStatusFilter, invTypeFilter)
+    }
+  }, [activeTab, invStatusFilter, invTypeFilter])
 
   // === User Management ===
   const loadUsers = async () => {
@@ -194,6 +224,87 @@ export default function Admin() {
       setDeleteError(err instanceof Error ? err.message : 'Failed to delete user')
     } finally {
       setDeletingUserId(null)
+    }
+  }
+
+  // === Name editing ===
+  const startEditName = (e: React.MouseEvent, u: UserWithStats) => {
+    e.stopPropagation()
+    setEditingName(prev => ({ ...prev, [u.id]: { firstName: u.first_name ?? '', lastName: u.last_name ?? '' } }))
+  }
+
+  const handleSaveName = async (e: React.MouseEvent, userId: number) => {
+    e.stopPropagation()
+    const data = editingName[userId]
+    if (!data) return
+    setSavingName(userId)
+    try {
+      const updated = await api.adminUpdateUserProfile(userId, { first_name: data.firstName, last_name: data.lastName })
+      setUsers(prev => prev.map(u => u.id === userId ? { ...u, first_name: updated.first_name, last_name: updated.last_name, name: updated.name } : u))
+      setEditingName(prev => { const next = { ...prev }; delete next[userId]; return next })
+      setNameSuccess(prev => ({ ...prev, [userId]: 'Name updated' }))
+      setTimeout(() => setNameSuccess(prev => { const n = { ...prev }; delete n[userId]; return n }), 3000)
+    } catch (err) {
+      setDeleteError(err instanceof Error ? err.message : 'Failed to update name')
+    } finally {
+      setSavingName(null)
+    }
+  }
+
+  // === Password reset ===
+  const handleAdminResetPassword = async (sendEmail: boolean) => {
+    if (!resetPasswordModal) return
+    if (!sendEmail && !resetPasswordValue) {
+      setResetPasswordError('Enter a password or choose to send email')
+      return
+    }
+    setResetPasswordLoading(true)
+    setResetPasswordError('')
+    try {
+      const result = await api.adminResetPassword(resetPasswordModal.id, {
+        send_email: sendEmail,
+        password: sendEmail ? undefined : resetPasswordValue,
+      })
+      setResetPasswordSuccess(result.message)
+      setResetPasswordValue('')
+    } catch (err) {
+      setResetPasswordError(err instanceof Error ? err.message : 'Failed to reset password')
+    } finally {
+      setResetPasswordLoading(false)
+    }
+  }
+
+  // === Invitations ===
+  const loadInvitations = async (status: string, type: string) => {
+    setInvitationsLoading(true)
+    setInvitationsError('')
+    try {
+      const data = await api.adminGetInvitations({
+        status: status || undefined,
+        type: type || undefined,
+      })
+      setInvitations(data)
+    } catch (err) {
+      setInvitationsError(err instanceof Error ? err.message : 'Failed to load invitations')
+    } finally {
+      setInvitationsLoading(false)
+    }
+  }
+
+  const handleResolveInvitation = async (inv: AdminInvitation, action: 'accept' | 'reject') => {
+    const key = `${inv.type}-${inv.id}`
+    setResolvingId(key)
+    try {
+      if (inv.type === 'team') {
+        await api.adminResolveTeamInvitation(inv.id, action)
+      } else {
+        await api.adminResolveProjectInvitation(inv.id, action)
+      }
+      await loadInvitations(invStatusFilter, invTypeFilter)
+    } catch (err) {
+      setInvitationsError(err instanceof Error ? err.message : 'Failed to resolve invitation')
+    } finally {
+      setResolvingId(null)
     }
   }
 
@@ -375,6 +486,16 @@ export default function Admin() {
               Users ({users.length})
             </button>
             <button
+              onClick={() => handleTabChange('invitations')}
+              className={`px-4 py-2 text-sm font-medium rounded-lg transition-colors ${
+                activeTab === 'invitations'
+                  ? 'bg-primary-500/10 text-primary-400 border border-primary-500/30'
+                  : 'text-dark-text-secondary hover:text-dark-text-primary hover:bg-dark-bg-tertiary/30'
+              }`}
+            >
+              Invitations
+            </button>
+            <button
               onClick={() => handleTabChange('email')}
               className={`px-4 py-2 text-sm font-medium rounded-lg transition-colors flex items-center gap-2 ${
                 activeTab === 'email'
@@ -447,7 +568,10 @@ export default function Admin() {
                     </svg>
 
                     <div className="flex-1 min-w-0">
-                      <span className="text-sm font-medium text-dark-text-primary truncate block">{u.email}</span>
+                      {u.name && u.name !== u.email && (
+                        <span className="text-sm font-medium text-dark-text-primary truncate block">{u.name}</span>
+                      )}
+                      <span className={`truncate block ${u.name && u.name !== u.email ? 'text-xs text-dark-text-tertiary' : 'text-sm font-medium text-dark-text-primary'}`}>{u.email}</span>
                       <span className="text-xs text-dark-text-tertiary">Joined {formatShortDate(u.created_at)}</span>
                     </div>
 
@@ -538,6 +662,74 @@ export default function Admin() {
                             )}
                           </>
                         )}
+                      </div>
+
+                      {/* Name editing */}
+                      <div className="bg-dark-bg-secondary rounded-lg p-3 border border-dark-border-subtle space-y-2">
+                        <div className="flex items-center justify-between">
+                          <label className="text-sm text-dark-text-secondary">Display name</label>
+                          {!editingName[u.id] && (
+                            <button
+                              onClick={(e) => startEditName(e, u)}
+                              className="text-xs text-primary-400 hover:text-primary-300 transition-colors"
+                            >
+                              {u.name && u.name !== u.email ? 'Edit' : 'Set name'}
+                            </button>
+                          )}
+                        </div>
+                        {editingName[u.id] ? (
+                          <div className="flex items-center gap-2" onClick={(e) => e.stopPropagation()}>
+                            <input
+                              type="text"
+                              placeholder="First"
+                              value={editingName[u.id].firstName}
+                              onChange={(e) => setEditingName(prev => ({ ...prev, [u.id]: { ...prev[u.id], firstName: e.target.value } }))}
+                              className="flex-1 px-2 py-1 text-sm bg-dark-bg-primary border border-dark-border-subtle rounded text-dark-text-primary focus:outline-none focus:border-primary-500"
+                            />
+                            <input
+                              type="text"
+                              placeholder="Last"
+                              value={editingName[u.id].lastName}
+                              onChange={(e) => setEditingName(prev => ({ ...prev, [u.id]: { ...prev[u.id], lastName: e.target.value } }))}
+                              className="flex-1 px-2 py-1 text-sm bg-dark-bg-primary border border-dark-border-subtle rounded text-dark-text-primary focus:outline-none focus:border-primary-500"
+                            />
+                            <button
+                              onClick={(e) => handleSaveName(e, u.id)}
+                              disabled={savingName === u.id}
+                              className="px-3 py-1 text-xs font-medium bg-primary-500 text-white rounded hover:bg-primary-600 transition-colors disabled:opacity-50"
+                            >
+                              {savingName === u.id ? 'Saving…' : 'Save'}
+                            </button>
+                            <button
+                              onClick={(e) => { e.stopPropagation(); setEditingName(prev => { const n = { ...prev }; delete n[u.id]; return n }) }}
+                              className="px-2 py-1 text-xs text-dark-text-tertiary hover:text-dark-text-primary rounded border border-dark-border-subtle transition-colors"
+                            >
+                              Cancel
+                            </button>
+                          </div>
+                        ) : (
+                          <p className="text-sm text-dark-text-primary">
+                            {nameSuccess[u.id] ? (
+                              <span className="text-green-400 text-xs">{nameSuccess[u.id]}</span>
+                            ) : u.name && u.name !== u.email ? u.name : (
+                              <span className="text-dark-text-tertiary italic">Not set (showing email)</span>
+                            )}
+                          </p>
+                        )}
+                      </div>
+
+                      {/* Password reset */}
+                      <div className="bg-dark-bg-secondary rounded-lg p-3 border border-dark-border-subtle space-y-2">
+                        <div className="flex items-center justify-between">
+                          <label className="text-sm text-dark-text-secondary">Password reset</label>
+                          <button
+                            onClick={(e) => { e.stopPropagation(); setResetPasswordModal({ id: u.id, email: u.email }); setResetPasswordValue(''); setResetPasswordError(''); setResetPasswordSuccess('') }}
+                            className="text-xs text-amber-400 hover:text-amber-300 transition-colors"
+                          >
+                            Reset password
+                          </button>
+                        </div>
+                        <p className="text-xs text-dark-text-tertiary">Send a reset link to the user or set a password directly.</p>
                       </div>
 
                       <div>
@@ -682,6 +874,138 @@ export default function Admin() {
                   {isSavingEmail ? 'Saving...' : emailProvider ? 'Update Provider' : 'Save Provider'}
                 </button>
               </form>
+            </div>
+          )}
+
+          {/* Invitations Tab */}
+          {activeTab === 'invitations' && (
+            <div className="space-y-4">
+              {/* Filters */}
+              <div className="flex flex-wrap gap-3 items-center">
+                <div className="flex items-center gap-2">
+                  <label className="text-xs text-dark-text-tertiary">Status</label>
+                  <select
+                    value={invStatusFilter}
+                    onChange={(e) => setInvStatusFilter(e.target.value)}
+                    className="text-sm bg-dark-bg-secondary border border-dark-border-subtle rounded-lg px-3 py-1.5 text-dark-text-primary focus:outline-none focus:border-primary-500"
+                  >
+                    <option value="">All</option>
+                    <option value="pending">Pending</option>
+                    <option value="accepted">Accepted</option>
+                    <option value="rejected">Rejected</option>
+                    <option value="cancelled">Cancelled</option>
+                    <option value="withdrawn">Withdrawn</option>
+                  </select>
+                </div>
+                <div className="flex items-center gap-2">
+                  <label className="text-xs text-dark-text-tertiary">Type</label>
+                  <select
+                    value={invTypeFilter}
+                    onChange={(e) => setInvTypeFilter(e.target.value)}
+                    className="text-sm bg-dark-bg-secondary border border-dark-border-subtle rounded-lg px-3 py-1.5 text-dark-text-primary focus:outline-none focus:border-primary-500"
+                  >
+                    <option value="">All</option>
+                    <option value="team">Team</option>
+                    <option value="project">Project</option>
+                  </select>
+                </div>
+                <button
+                  onClick={() => loadInvitations(invStatusFilter, invTypeFilter)}
+                  disabled={invitationsLoading}
+                  className="text-xs px-3 py-1.5 bg-dark-bg-secondary border border-dark-border-subtle rounded-lg text-dark-text-secondary hover:text-dark-text-primary transition-colors disabled:opacity-50"
+                >
+                  {invitationsLoading ? 'Loading…' : 'Refresh'}
+                </button>
+              </div>
+
+              {invitationsError && (
+                <div className="p-3 bg-red-500/10 border border-red-500/30 rounded-lg text-sm text-red-400">
+                  {invitationsError}
+                </div>
+              )}
+
+              {invitationsLoading ? (
+                <div className="space-y-2">
+                  {[1,2,3].map(i => (
+                    <div key={i} className="h-16 bg-dark-bg-secondary rounded-lg animate-pulse" />
+                  ))}
+                </div>
+              ) : invitations.length === 0 ? (
+                <div className="text-center py-16 text-dark-text-tertiary text-sm">
+                  No invitations found
+                </div>
+              ) : (
+                <div className="space-y-2">
+                  {invitations.map((inv) => {
+                    const key = `${inv.type}-${inv.id}`
+                    const isResolving = resolvingId === key
+                    const isPending = inv.status === 'pending'
+                    return (
+                      <div key={key} className="bg-dark-bg-secondary border border-dark-border-subtle rounded-lg px-5 py-4">
+                        <div className="flex items-start gap-4">
+                          <div className="flex-1 min-w-0 space-y-1">
+                            <div className="flex items-center gap-2 flex-wrap">
+                              <span className={`inline-flex px-2 py-0.5 rounded text-xs font-medium border ${
+                                inv.type === 'team'
+                                  ? 'bg-blue-500/10 text-blue-400 border-blue-500/30'
+                                  : 'bg-violet-500/10 text-violet-400 border-violet-500/30'
+                              }`}>
+                                {inv.type}
+                              </span>
+                              <span className={`inline-flex px-2 py-0.5 rounded text-xs font-medium border ${
+                                inv.status === 'pending' ? 'bg-yellow-500/10 text-yellow-400 border-yellow-500/30' :
+                                inv.status === 'accepted' ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/30' :
+                                inv.status === 'rejected' ? 'bg-red-500/10 text-red-400 border-red-500/30' :
+                                'bg-gray-500/10 text-gray-400 border-gray-500/30'
+                              }`}>
+                                {inv.status}
+                              </span>
+                              {inv.role && (
+                                <span className="text-xs text-dark-text-tertiary">role: {inv.role}</span>
+                              )}
+                            </div>
+                            <div className="text-sm text-dark-text-primary font-medium truncate">
+                              {inv.context}
+                            </div>
+                            <div className="text-xs text-dark-text-secondary">
+                              <span className="text-dark-text-tertiary">From: </span>
+                              <span>{inv.inviter_name}</span>
+                              <span className="text-dark-text-tertiary mx-1">→</span>
+                              <span>{inv.invitee_name}</span>
+                              {inv.invitee_email !== inv.invitee_name && (
+                                <span className="text-dark-text-tertiary ml-1">({inv.invitee_email})</span>
+                              )}
+                            </div>
+                            <div className="text-xs text-dark-text-tertiary">
+                              {new Date(inv.created_at).toLocaleString()}
+                            </div>
+                          </div>
+
+                          {isPending && (
+                            <div className="flex items-center gap-2 flex-shrink-0">
+                              <button
+                                onClick={() => handleResolveInvitation(inv, 'accept')}
+                                disabled={isResolving || (inv.type === 'team' && inv.invitee_id === null)}
+                                title={inv.type === 'team' && inv.invitee_id === null ? 'Cannot accept: user has not registered yet' : 'Force accept'}
+                                className="px-3 py-1.5 text-xs font-medium bg-emerald-500/10 text-emerald-400 border border-emerald-500/30 rounded-lg hover:bg-emerald-500/20 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+                              >
+                                {isResolving ? '…' : 'Accept'}
+                              </button>
+                              <button
+                                onClick={() => handleResolveInvitation(inv, 'reject')}
+                                disabled={isResolving}
+                                className="px-3 py-1.5 text-xs font-medium bg-red-500/10 text-red-400 border border-red-500/30 rounded-lg hover:bg-red-500/20 transition-colors disabled:opacity-40"
+                              >
+                                {isResolving ? '…' : 'Reject'}
+                              </button>
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    )
+                  })}
+                </div>
+              )}
             </div>
           )}
 
@@ -988,6 +1312,63 @@ export default function Admin() {
           )}
         </div>
       </div>
+
+      {/* Password Reset Modal */}
+      {resetPasswordModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
+          <div className="bg-dark-bg-secondary border border-dark-border-subtle rounded-xl shadow-2xl p-6 max-w-md w-full mx-4 space-y-4">
+            <h3 className="text-base font-semibold text-dark-text-primary">Reset password for {resetPasswordModal.email}</h3>
+            {resetPasswordSuccess ? (
+              <div className="p-3 bg-green-500/10 border border-green-500/30 rounded-lg text-sm text-green-300">{resetPasswordSuccess}</div>
+            ) : (
+              <>
+                {resetPasswordError && (
+                  <div className="p-3 bg-red-500/10 border border-red-500/30 rounded-lg text-sm text-red-300">{resetPasswordError}</div>
+                )}
+                <div className="space-y-3">
+                  <div>
+                    <label className="text-xs text-dark-text-secondary block mb-1.5">Set password directly</label>
+                    <input
+                      type="password"
+                      placeholder="New password (min 8 chars)"
+                      value={resetPasswordValue}
+                      onChange={(e) => setResetPasswordValue(e.target.value)}
+                      className="w-full px-3 py-2 text-sm bg-dark-bg-primary border border-dark-border-subtle rounded text-dark-text-primary focus:outline-none focus:border-primary-500"
+                    />
+                  </div>
+                  <button
+                    onClick={() => handleAdminResetPassword(false)}
+                    disabled={resetPasswordLoading || !resetPasswordValue}
+                    className="w-full px-4 py-2 text-sm font-medium bg-primary-500 text-white rounded-lg hover:bg-primary-600 transition-colors disabled:opacity-50"
+                  >
+                    {resetPasswordLoading ? 'Setting…' : 'Set password'}
+                  </button>
+                  <div className="relative flex items-center">
+                    <div className="flex-1 border-t border-dark-border-subtle" />
+                    <span className="px-3 text-xs text-dark-text-tertiary">or</span>
+                    <div className="flex-1 border-t border-dark-border-subtle" />
+                  </div>
+                  <button
+                    onClick={() => handleAdminResetPassword(true)}
+                    disabled={resetPasswordLoading}
+                    className="w-full px-4 py-2 text-sm font-medium bg-dark-bg-tertiary text-dark-text-secondary border border-dark-border-subtle rounded-lg hover:text-dark-text-primary hover:bg-dark-bg-tertiary/80 transition-colors disabled:opacity-50"
+                  >
+                    {resetPasswordLoading ? 'Sending…' : 'Send reset email to user'}
+                  </button>
+                </div>
+              </>
+            )}
+            <div className="flex justify-end">
+              <button
+                onClick={() => { setResetPasswordModal(null); setResetPasswordSuccess(''); setResetPasswordError(''); setResetPasswordValue('') }}
+                className="px-4 py-2 text-sm font-medium text-dark-text-secondary bg-dark-bg-tertiary/50 border border-dark-border-subtle rounded-lg hover:text-dark-text-primary transition-colors"
+              >
+                {resetPasswordSuccess ? 'Close' : 'Cancel'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Delete User Confirmation Modal */}
       {deleteConfirm && (

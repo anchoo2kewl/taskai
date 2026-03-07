@@ -7,8 +7,15 @@ export type AuthResponse = components['schemas']['AuthResponse']
 export type SignupRequest = components['schemas']['SignupRequest']
 export type LoginRequest = components['schemas']['LoginRequest']
 export type Project = components['schemas']['Project']
-export type Task = components['schemas']['Task'] & { task_number?: number; github_issue_number?: number | null; start_date?: string | null }
+export type Task = components['schemas']['Task'] & { task_number?: number; github_issue_number?: number | null; start_date?: string | null; github_reactions?: GitHubReaction[] }
 export type ApiError = components['schemas']['Error']
+
+export interface GitHubReaction {
+  reaction: string
+  count: number
+  user_reacted?: boolean
+}
+
 // Types with required fields for commonly used API responses
 export interface TaskComment {
   id: number
@@ -18,6 +25,7 @@ export interface TaskComment {
   comment: string
   created_at: string
   updated_at: string
+  github_reactions?: GitHubReaction[]
 }
 
 export interface Sprint {
@@ -129,6 +137,77 @@ export interface WikiPage {
   updater_name?: string
   created_at: string
   updated_at: string
+}
+
+export interface AppNotification {
+  id: number
+  sender_id?: number | null
+  sender_name?: string | null
+  type: string
+  entity_type: string
+  entity_id: number
+  project_id: number
+  project_name?: string | null
+  message: string
+  link: string
+  read_at?: string | null
+  created_at: string
+}
+
+export interface UserProfileActivity {
+  type: string
+  entity_id: number
+  entity_title: string
+  project_id: number
+  project_name: string
+  link: string
+  created_at: string
+}
+
+export interface UserProfile {
+  user: {
+    id: number
+    name?: string | null
+    first_name?: string | null
+    last_name?: string | null
+    email: string
+    joined_at?: string | null
+  }
+  recent_activity: UserProfileActivity[]
+  has_more: boolean
+}
+
+export interface UserActivityPage {
+  items: UserProfileActivity[]
+  has_more: boolean
+}
+
+export type AnnotationColor = 'yellow' | 'blue' | 'green' | 'red'
+
+export interface AnnotationComment {
+  id: number
+  annotation_id: number
+  author_id: number
+  author_name?: string | null
+  parent_comment_id?: number | null
+  content: string
+  resolved: boolean
+  created_at: string
+  updated_at: string
+}
+
+export interface WikiAnnotation {
+  id: number
+  wiki_page_id: number
+  author_id: number
+  author_name?: string | null
+  start_offset: number
+  end_offset: number
+  selected_text: string
+  color: AnnotationColor
+  resolved: boolean
+  created_at: string
+  comments: AnnotationComment[]
 }
 
 export interface WikiPageVersion {
@@ -308,6 +387,9 @@ export interface GitHubProgressEvent {
 export interface UserWithStats {
   id: number
   email: string
+  name?: string
+  first_name?: string
+  last_name?: string
   is_admin: boolean
   created_at: string
   login_count: number
@@ -323,6 +405,20 @@ export interface UserActivity {
   activity_type: string
   ip_address?: string | null
   user_agent?: string | null
+  created_at: string
+}
+
+export interface AdminInvitation {
+  id: number
+  type: 'team' | 'project'
+  status: string
+  inviter_name: string
+  inviter_email: string
+  invitee_name: string
+  invitee_email: string
+  invitee_id: number | null
+  context: string
+  role?: string
   created_at: string
 }
 
@@ -370,6 +466,14 @@ export interface UserSearchResult {
   id: number
   email: string
   name?: string
+}
+
+export interface TeamMembership {
+  team_id: number
+  team_name: string
+  owner_id: number
+  role: string
+  joined_at: string
 }
 
 export interface TokenInvitationInfo {
@@ -486,6 +590,61 @@ export interface CloudinaryCredentialResponse {
   consecutive_failures: number
   created_at: string
   updated_at: string
+}
+
+export interface FigmaCredentialsStatus {
+  configured: boolean
+}
+
+export interface FigmaEmbedInfo {
+  embed_url: string
+  name?: string
+  thumbnail_url?: string
+  configured: boolean
+}
+
+export interface BackupStatus {
+  running: boolean
+  enabled: boolean
+  provider_connected: boolean
+  provider_name?: string
+  connected_email?: string
+  next_run?: string
+  last_backup?: {
+    id: string
+    status: string
+    filename: string
+    size_bytes: number
+    started_at: string
+    finished_at?: string
+  }
+}
+
+export interface BackupSettings {
+  enabled: boolean
+  cron_expression: string
+  folder_id: string
+  provider_name: string
+  retention: {
+    full_days: number
+    alternate_days: number
+    weekly_days: number
+  }
+  updated_at: string
+}
+
+export interface BackupRecord {
+  id: string
+  status: 'running' | 'success' | 'failed'
+  triggered_by: string
+  filename: string
+  size_bytes: number
+  provider_name: string
+  file_id: string
+  file_url: string
+  error_message: string
+  started_at: string
+  finished_at?: string
 }
 
 export interface Asset {
@@ -737,6 +896,13 @@ class ApiClient {
     })
   }
 
+  async toggleReaction(taskId: number, reaction: string, commentId?: number): Promise<GitHubReaction> {
+    return this.request<GitHubReaction>(`/api/tasks/${taskId}/reactions`, {
+      method: 'POST',
+      body: JSON.stringify({ reaction, comment_id: commentId ?? 0 }),
+    })
+  }
+
   // Project settings - Members
   async getProjectMembers(projectId: number): Promise<ProjectMember[]> {
     return this.request<ProjectMember[]>(`/api/projects/${projectId}/members`)
@@ -983,6 +1149,56 @@ class ApiClient {
     })
   }
 
+  async adminUpdateUserProfile(userId: number, data: { first_name: string; last_name: string }): Promise<{ id: number; first_name: string; last_name: string; name: string }> {
+    return this.request(`/api/admin/users/${userId}/profile`, {
+      method: 'PATCH',
+      body: JSON.stringify(data),
+    })
+  }
+
+  async adminResetPassword(userId: number, data: { send_email: boolean; password?: string }): Promise<{ message: string }> {
+    return this.request<{ message: string }>(`/api/admin/users/${userId}/reset-password`, {
+      method: 'POST',
+      body: JSON.stringify(data),
+    })
+  }
+
+  async adminGetInvitations(params?: { status?: string; type?: string }): Promise<AdminInvitation[]> {
+    const q = new URLSearchParams()
+    if (params?.status) q.set('status', params.status)
+    if (params?.type) q.set('type', params.type)
+    const qs = q.toString()
+    return this.request<AdminInvitation[]>(`/api/admin/invitations${qs ? `?${qs}` : ''}`)
+  }
+
+  async adminResolveTeamInvitation(id: number, action: 'accept' | 'reject'): Promise<{ message: string }> {
+    return this.request<{ message: string }>(`/api/admin/team-invitations/${id}/resolve`, {
+      method: 'POST',
+      body: JSON.stringify({ action }),
+    })
+  }
+
+  async adminResolveProjectInvitation(id: number, action: 'accept' | 'reject'): Promise<{ message: string }> {
+    return this.request<{ message: string }>(`/api/admin/project-invitations/${id}/resolve`, {
+      method: 'POST',
+      body: JSON.stringify({ action }),
+    })
+  }
+
+  async forgotPassword(email: string): Promise<{ message: string }> {
+    return this.request<{ message: string }>('/api/auth/forgot-password', {
+      method: 'POST',
+      body: JSON.stringify({ email }),
+    })
+  }
+
+  async resetPassword(token: string, password: string): Promise<{ message: string }> {
+    return this.request<{ message: string }>('/api/auth/reset-password', {
+      method: 'POST',
+      body: JSON.stringify({ token, password }),
+    })
+  }
+
   // Security/Settings endpoints
   async changePassword(data: { current_password: string; new_password: string }): Promise<{ message: string }> {
     return this.request<{ message: string }>('/api/settings/password', {
@@ -1149,6 +1365,10 @@ class ApiClient {
     return this.request<TeamInvitation[]>('/api/team/invitations')
   }
 
+  async getMyTeamMemberships(): Promise<TeamMembership[]> {
+    return this.request<TeamMembership[]>('/api/team/memberships')
+  }
+
   async acceptInvitation(invitationId: number): Promise<void> {
     return this.request<void>(`/api/team/invitations/${invitationId}/accept`, {
       method: 'POST',
@@ -1224,6 +1444,60 @@ class ApiClient {
   async getUploadSignature(opts: { taskId?: number; pageId?: number }): Promise<{ signature: string; timestamp: number; cloud_name: string; api_key: string; folder: string; public_id: string }> {
     const params = opts.taskId ? `task_id=${opts.taskId}` : `page_id=${opts.pageId}`
     return this.request(`/api/settings/cloudinary/signature?${params}`)
+  }
+
+  // Figma endpoints
+  async getFigmaCredentials(): Promise<FigmaCredentialsStatus> {
+    return this.request<FigmaCredentialsStatus>('/api/user/figma-credentials')
+  }
+
+  async saveFigmaCredentials(accessToken: string): Promise<FigmaCredentialsStatus> {
+    return this.request<FigmaCredentialsStatus>('/api/user/figma-credentials', {
+      method: 'POST',
+      body: JSON.stringify({ access_token: accessToken }),
+    })
+  }
+
+  async deleteFigmaCredentials(): Promise<FigmaCredentialsStatus> {
+    return this.request<FigmaCredentialsStatus>('/api/user/figma-credentials', {
+      method: 'DELETE',
+    })
+  }
+
+  async getFigmaEmbed(figmaUrl: string): Promise<FigmaEmbedInfo> {
+    return this.request<FigmaEmbedInfo>(`/api/figma/embed?url=${encodeURIComponent(figmaUrl)}`)
+  }
+
+  // Backup endpoints (go-backup / Google Drive)
+  async getBackupStatus(): Promise<BackupStatus> {
+    return this.request<BackupStatus>('/api/admin/backup/status')
+  }
+
+  async getBackupSettings(): Promise<BackupSettings> {
+    return this.request<BackupSettings>('/api/admin/backup/settings')
+  }
+
+  async updateBackupSettings(settings: { enabled?: boolean; cron_expression?: string; folder_id?: string }): Promise<BackupSettings> {
+    return this.request<BackupSettings>('/api/admin/backup/settings', {
+      method: 'PUT',
+      body: JSON.stringify(settings),
+    })
+  }
+
+  async triggerBackup(): Promise<BackupRecord> {
+    return this.request<BackupRecord>('/api/admin/backup/trigger', { method: 'POST' })
+  }
+
+  async listBackupHistory(limit = 20): Promise<BackupRecord[]> {
+    return this.request<BackupRecord[]>(`/api/admin/backup/history?limit=${limit}`)
+  }
+
+  async deleteBackupRecord(id: string): Promise<void> {
+    return this.request<void>(`/api/admin/backup/history/${id}`, { method: 'DELETE' })
+  }
+
+  async disconnectBackup(): Promise<void> {
+    return this.request<void>('/api/admin/backup/oauth/disconnect', { method: 'DELETE' })
   }
 
   // Task attachment endpoints
@@ -1470,6 +1744,89 @@ class ApiClient {
   // Knowledge Graph endpoints
   async getProjectGraph(projectId: number): Promise<GraphData> {
     return this.request<GraphData>(`/api/projects/${projectId}/graph`)
+  }
+
+  // Wiki annotation endpoints
+  async listWikiAnnotations(pageId: number): Promise<WikiAnnotation[]> {
+    return this.request<WikiAnnotation[]>(`/api/wiki/pages/${pageId}/annotations`)
+  }
+
+  async createWikiAnnotation(
+    pageId: number,
+    data: { start_offset: number; end_offset: number; selected_text: string; color: AnnotationColor; comment?: string }
+  ): Promise<WikiAnnotation> {
+    return this.request<WikiAnnotation>(`/api/wiki/pages/${pageId}/annotations`, {
+      method: 'POST',
+      body: JSON.stringify(data),
+    })
+  }
+
+  async updateWikiAnnotation(
+    annotationId: number,
+    data: { color?: AnnotationColor; resolved?: boolean }
+  ): Promise<WikiAnnotation> {
+    return this.request<WikiAnnotation>(`/api/wiki/annotations/${annotationId}`, {
+      method: 'PATCH',
+      body: JSON.stringify(data),
+    })
+  }
+
+  async deleteWikiAnnotation(annotationId: number): Promise<void> {
+    return this.request<void>(`/api/wiki/annotations/${annotationId}`, { method: 'DELETE' })
+  }
+
+  async createAnnotationComment(
+    annotationId: number,
+    data: { content: string; parent_comment_id?: number }
+  ): Promise<AnnotationComment> {
+    return this.request<AnnotationComment>(`/api/wiki/annotations/${annotationId}/comments`, {
+      method: 'POST',
+      body: JSON.stringify(data),
+    })
+  }
+
+  async updateAnnotationComment(
+    commentId: number,
+    data: { content?: string; resolved?: boolean }
+  ): Promise<AnnotationComment> {
+    return this.request<AnnotationComment>(`/api/wiki/annotation-comments/${commentId}`, {
+      method: 'PATCH',
+      body: JSON.stringify(data),
+    })
+  }
+
+  async deleteAnnotationComment(commentId: number): Promise<void> {
+    return this.request<void>(`/api/wiki/annotation-comments/${commentId}`, { method: 'DELETE' })
+  }
+
+  // Notification endpoints
+  async getNotifications(): Promise<AppNotification[]> {
+    return this.request<AppNotification[]>('/api/notifications')
+  }
+
+  async getNotificationCount(): Promise<{ count: number }> {
+    return this.request<{ count: number }>('/api/notifications/count')
+  }
+
+  async markNotificationsRead(ids: number[]): Promise<void> {
+    return this.request<void>('/api/notifications/mark-read', {
+      method: 'POST',
+      body: JSON.stringify({ ids }),
+    })
+  }
+
+  async markAllNotificationsRead(): Promise<void> {
+    return this.request<void>('/api/notifications/mark-all-read', { method: 'POST' })
+  }
+
+  // User profile
+  async getUserProfile(userId: number): Promise<UserProfile> {
+    return this.request<UserProfile>(`/api/users/${userId}/profile`)
+  }
+
+  async getUserActivityFeed(userId: number, before?: string): Promise<UserActivityPage> {
+    const qs = before ? `?before=${encodeURIComponent(before)}` : ''
+    return this.request<UserActivityPage>(`/api/users/${userId}/activity${qs}`)
   }
 
   // Version endpoint

@@ -8,7 +8,7 @@ on:
       ref:
         description: 'Git ref to deploy (branch, tag, or commit SHA)'
         required: true
-        default: 'main'
+        default: 'production'
 
 env:
   GO_VERSION: "1.26"
@@ -58,6 +58,12 @@ jobs:
           echo "📝 Commit: $GIT_COMMIT"
           echo "🕐 Build Time: $BUILD_TIME"
 
+      - name: Login to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
       - name: Deploy to Production server
         env:
           SSH_PRIVATE_KEY: ${{ secrets.SSH_PRIVATE_KEY }}
@@ -88,74 +94,44 @@ jobs:
 
           ssh -i ~/.ssh/deploy_key ubuntu@31.97.102.48 bash -s << ENDSSH
             set -ex
-            echo "📂 Changing to source directory..."
             cd /home/ubuntu/taskai/source
-
-            echo "📥 Fetching from origin..."
             git fetch origin
-
-            echo "🔄 Resetting to commit: $COMMIT_SHA"
             git reset --hard "$COMMIT_SHA"
-
-            echo "📂 Moving to parent directory..."
             cd ..
 
-            echo "📌 Setting version info..."
             export VERSION="$VERSION"
             export GIT_COMMIT="$GIT_COMMIT"
             export BUILD_TIME="$BUILD_TIME"
             export DB_DRIVER="$DB_DRIVER"
             export DB_DSN="$DB_DSN"
             export JWT_SECRET="$JWT_SECRET"
+            export APP_URL="$APP_URL"
+            export OAUTH_SUCCESS_URL="https://taskai.cc/oauth/callback"
+            export OAUTH_ERROR_URL="https://taskai.cc/login"
+            export ENV=production
+
             if [ -n "$GH_OAUTH_CLIENT_ID" ] && [ "$GH_OAUTH_CLIENT_ID" != "-" ]; then
-              if grep -q '^GITHUB_CLIENT_ID=' /home/ubuntu/taskai/.env 2>/dev/null; then
-                sed -i 's|^GITHUB_CLIENT_ID=.*|GITHUB_CLIENT_ID=$GH_OAUTH_CLIENT_ID|' /home/ubuntu/taskai/.env
-              else
-                echo 'GITHUB_CLIENT_ID=$GH_OAUTH_CLIENT_ID' >> /home/ubuntu/taskai/.env
-              fi
-              if grep -q '^GITHUB_CLIENT_SECRET=' /home/ubuntu/taskai/.env 2>/dev/null; then
-                sed -i 's|^GITHUB_CLIENT_SECRET=.*|GITHUB_CLIENT_SECRET=$GH_OAUTH_CLIENT_SECRET|' /home/ubuntu/taskai/.env
-              else
-                echo 'GITHUB_CLIENT_SECRET=$GH_OAUTH_CLIENT_SECRET' >> /home/ubuntu/taskai/.env
-              fi
+              export GITHUB_CLIENT_ID="$GH_OAUTH_CLIENT_ID"
+              export GITHUB_CLIENT_SECRET="$GH_OAUTH_CLIENT_SECRET"
             fi
             export LOGIN_GITHUB_CLIENT_ID="$LOGIN_GH_CLIENT_ID"
             export LOGIN_GITHUB_CLIENT_SECRET="$LOGIN_GH_CLIENT_SECRET"
             export OAUTH_STATE_SECRET="$OAUTH_STATE_SECRET"
             export GOOGLE_CLIENT_ID="$GOOGLE_CLIENT_ID"
             export GOOGLE_CLIENT_SECRET="$GOOGLE_CLIENT_SECRET"
-            export APP_URL="$APP_URL"
-            export OAUTH_SUCCESS_URL="https://taskai.cc/oauth/callback"
-            export OAUTH_ERROR_URL="https://taskai.cc/login"
-            export ENV=production
-            echo "Version: \$VERSION, Commit: \$GIT_COMMIT, Build Time: \$BUILD_TIME"
-            echo "DB Driver: \$DB_DRIVER"
 
-            echo "🔐 Login to Docker Hub..."
-            echo '$DOCKERHUB_TOKEN' | docker login -u '$DOCKERHUB_USERNAME' --password-stdin
+            # Login to Docker Hub
+            echo "$DOCKERHUB_TOKEN" | docker login -u "$DOCKERHUB_USERNAME" --password-stdin
 
-            # Ensure nginx has the /draw/ route BEFORE starting containers
-            echo "🔧 Ensuring nginx /draw/ route..."
             chmod +x source/deployment/scripts/ensure-draw-route.sh
             sudo source/deployment/scripts/ensure-draw-route.sh taskai.cc
 
-            echo "🛑 Stopping containers..."
             docker compose down || true
-
-            echo "🧹 Cleaning up Docker build cache and unused images..."
-            docker builder prune -af || true
-            docker image prune -af || true
-
-            echo "🔨 Building containers (no cache)..."
-            docker compose build --no-cache --build-arg VERSION="\$VERSION" --build-arg GIT_COMMIT="\$GIT_COMMIT" --build-arg BUILD_TIME="\$BUILD_TIME"
-
-            echo "🚀 Starting containers..."
+            docker builder prune -f || true
+            docker image prune -f || true
+            docker compose build --build-arg VERSION="\$VERSION" --build-arg GIT_COMMIT="\$GIT_COMMIT" --build-arg BUILD_TIME="\$BUILD_TIME"
             docker compose up -d --force-recreate --remove-orphans
-
-            echo "⏳ Waiting for containers to be healthy..."
             sleep 15
-
-            echo "📊 Container status:"
             docker compose ps
           ENDSSH
 
@@ -166,14 +142,8 @@ jobs:
         run: |
           ssh -i ~/.ssh/deploy_key ubuntu@31.97.102.48 bash -s << 'ENDSSH'
             cd /home/ubuntu/taskai
-            echo "=== Container status ==="
             docker compose ps -a
-            echo ""
-            echo "=== API container logs ==="
             docker compose logs --tail=100 api
-            echo ""
-            echo "=== All container logs ==="
-            docker compose logs --tail=50
           ENDSSH
 
       - name: Verify deployment
@@ -182,10 +152,8 @@ jobs:
           CF_ACCESS_CLIENT_SECRET: ${{ secrets.CF_ACCESS_CLIENT_SECRET }}
         run: |
           sleep 10
-          echo "Checking API health..."
           curl -f -H "CF-Access-Client-Id: $CF_ACCESS_CLIENT_ID" -H "CF-Access-Client-Secret: $CF_ACCESS_CLIENT_SECRET" https://taskai.cc/api/health || exit 1
 
-          echo "Checking go-draw canvas.js is up to date..."
           CANVAS_JS=$(curl -sL -H "CF-Access-Client-Id: $CF_ACCESS_CLIENT_ID" -H "CF-Access-Client-Secret: $CF_ACCESS_CLIENT_SECRET" -H "Cache-Control: no-cache" "https://taskai.cc/draw/static/canvas.js?v=$(date +%s)")
           if echo "$CANVAS_JS" | grep -q 'isRotating'; then
             echo "✅ canvas.js contains rotation support"

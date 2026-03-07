@@ -14,6 +14,7 @@ func setupBenchDB(b *testing.B) *DB {
 	logger := zaptest.NewLogger(b)
 
 	cfg := Config{
+		Driver:         "sqlite",
 		DBPath:         ":memory:",
 		MigrationsPath: "./migrations",
 	}

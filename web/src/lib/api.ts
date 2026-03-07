@@ -1508,7 +1508,8 @@ class ApiClient {
 
   async listBackupFolders(parentId = ''): Promise<BackupFolder[]> {
     const q = parentId ? `?parentId=${encodeURIComponent(parentId)}` : ''
-    return this.request<BackupFolder[]>(`/api/admin/backup/folders${q}`)
+    const resp = await this.request<{ folders: BackupFolder[] }>(`/api/admin/backup/folders${q}`)
+    return resp.folders ?? []
   }
 
   async createBackupFolder(name: string, parentId = ''): Promise<BackupFolder> {

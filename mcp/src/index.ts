@@ -355,7 +355,7 @@ function createServer(client: TaskAIClient, cachedUser?: User): McpServer {
   // --- get_wiki_page ---
   server.tool(
     "get_wiki_page",
-    "Get a specific wiki page by ID",
+    "Get a specific wiki page by ID including its full markdown content",
     {
       page_id: z.string().describe("Wiki page ID"),
       verbose: z.boolean().optional().describe("Pretty print JSON (default: false)"),

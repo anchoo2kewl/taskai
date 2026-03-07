@@ -155,9 +155,12 @@ export default function Admin() {
   const [backupStatus, setBackupStatus] = useState('')
   const [backupError, setBackupError] = useState('')
 
-  // Backup subtab
+  // Backup subtab (also reads ?subtab= from URL so OAuth callback can land here directly)
   type BackupSubTab = 'manual' | 'automated'
-  const [backupSubTab, setBackupSubTab] = useState<BackupSubTab>('manual')
+  const subtabFromUrl = searchParams.get('subtab') as BackupSubTab | null
+  const [backupSubTab, setBackupSubTab] = useState<BackupSubTab>(
+    subtabFromUrl === 'automated' ? 'automated' : 'manual'
+  )
 
   // Copy-from-env state
   const [copySourceUrl, setCopySourceUrl] = useState('')

@@ -260,7 +260,7 @@ func main() {
 			backup.WithDumper(dumper),
 			backup.WithProvider(gdriveProvider),
 			backup.WithBasePath("/api/admin/backup"),
-			backup.WithOAuthSuccessRedirect(cfg.AppURL+"/app/settings"),
+			backup.WithOAuthSuccessRedirect(cfg.AppURL+"/app/admin?tab=backup&subtab=automated"),
 			backup.WithEncryptionKey(encKey),
 		)
 		if mgErr != nil {

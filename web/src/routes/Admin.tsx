@@ -286,7 +286,7 @@ export default function Admin() {
     if (activeTab === 'backup' && backupSubTab === 'automated') {
       loadAutomatedBackup()
     }
-  }, [activeTab, backupSubTab]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [activeTab, backupSubTab])
 
   // === User Management ===
   const loadUsers = async () => {

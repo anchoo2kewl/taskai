@@ -2419,6 +2419,11 @@ components:
           type: boolean
           description: True if the user has a real password set (false for OAuth-only users who have not yet set a password)
           example: true
+        linked_providers:
+          type: array
+          items:
+            type: string
+          description: List of connected auth providers (e.g. ["password", "google", "github"])
         created_at:
           type: string
           format: date-time

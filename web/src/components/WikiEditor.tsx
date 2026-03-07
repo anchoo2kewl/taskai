@@ -304,7 +304,7 @@ function initFigmaEmbeds(container: HTMLElement | null): () => void {
     const parent = textNode.parentNode
     if (!parent) continue
 
-    const re = /\[figma:([^\]:]+?)(?::([sml]))?\]/g
+    const re = /\[figma:([^\]]+?)(?::([sml]))?\]/g
     const parts: Array<string | { url: string; size: 's' | 'm' | 'l' }> = []
     let lastIndex = 0
     let m

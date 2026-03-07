@@ -84,7 +84,7 @@ export interface FigmaShortcodeInfo { shortcode: string; url: string; size: stri
 
 export function findFigmaEmbedsInContent(content: string): FigmaShortcodeInfo[] {
   const embeds: FigmaShortcodeInfo[] = []
-  const re = /\[figma:([^\]:]+?)(?::([sml]))?\]/g
+  const re = /\[figma:([^\]]+?)(?::([sml]))?\]/g
   let match
   while ((match = re.exec(content)) !== null) {
     embeds.push({

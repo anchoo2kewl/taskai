@@ -108,6 +108,7 @@ interface UserWithStats {
   last_login_ip?: string | null
   failed_attempts: number
   invite_count: number
+  linked_providers: string[]
 }
 
 interface UserActivity {
@@ -976,6 +977,25 @@ export default function Admin() {
                         <div className="bg-dark-bg-secondary rounded-lg p-3 border border-dark-border-subtle">
                           <p className="text-xs text-dark-text-tertiary">Last Login</p>
                           <p className="text-sm text-dark-text-primary">{u.last_login_at ? formatShortDate(u.last_login_at) : 'Never'}</p>
+                        </div>
+                      </div>
+
+                      {/* Auth providers */}
+                      <div className="bg-dark-bg-secondary rounded-lg p-3 border border-dark-border-subtle">
+                        <p className="text-xs text-dark-text-tertiary mb-2">Auth Methods</p>
+                        <div className="flex flex-wrap gap-2">
+                          {(u.linked_providers ?? []).length === 0 ? (
+                            <span className="text-xs text-dark-text-tertiary">None recorded</span>
+                          ) : (u.linked_providers ?? []).map(p => (
+                            <span key={p} className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium ${
+                              p === 'password' ? 'bg-blue-500/20 text-blue-300 border border-blue-500/30' :
+                              p === 'google'   ? 'bg-red-500/20 text-red-300 border border-red-500/30' :
+                              p === 'github'   ? 'bg-gray-500/20 text-gray-300 border border-gray-500/30' :
+                                                 'bg-purple-500/20 text-purple-300 border border-purple-500/30'
+                            }`}>
+                              {p === 'password' ? '🔑' : p === 'google' ? '🔴' : p === 'github' ? '🐙' : '🔗'} {p}
+                            </span>
+                          ))}
                         </div>
                       </div>
 

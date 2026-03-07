@@ -18,6 +18,9 @@ export default function Settings() {
   const [profileSuccess, setProfileSuccess] = useState('')
   const [isSavingProfile, setIsSavingProfile] = useState(false)
 
+  // Auth providers state
+  const [linkedProviders, setLinkedProviders] = useState<string[]>([])
+
   // Password change state
   const [hasPassword, setHasPassword] = useState(true) // false = OAuth-only user
   const [currentPassword, setCurrentPassword] = useState('')
@@ -129,6 +132,7 @@ export default function Settings() {
       setProfileFirstName(me.first_name || '')
       setProfileLastName(me.last_name || '')
       setHasPassword(me.has_password !== false) // default true; false only when explicitly set
+      setLinkedProviders(me.linked_providers ?? [])
     } catch {
       // non-critical load failure
     }
@@ -834,6 +838,36 @@ export default function Settings() {
                     {isSavingProfile ? 'Saving...' : 'Save Profile'}
                   </Button>
                 </form>
+              </div>
+            </div>
+          </Card>
+
+          {/* Connected Auth Methods */}
+          <Card className="shadow-md">
+            <div className="p-6 sm:p-8 flex items-start gap-4">
+              <div className="flex-shrink-0 w-10 h-10 bg-purple-500/10 rounded-lg flex items-center justify-center">
+                <svg className="w-6 h-6 text-purple-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1" />
+                </svg>
+              </div>
+              <div className="flex-1">
+                <h2 className="text-xl font-semibold text-dark-text-primary mb-1">Connected Auth Methods</h2>
+                <p className="text-sm text-dark-text-secondary mb-4">Sign-in methods currently linked to your account.</p>
+                <div className="flex flex-wrap gap-2">
+                  {linkedProviders.length === 0 ? (
+                    <span className="text-sm text-dark-text-tertiary">Loading…</span>
+                  ) : linkedProviders.map(p => (
+                    <span key={p} className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-sm font-medium border ${
+                      p === 'password' ? 'bg-blue-500/15 text-blue-300 border-blue-500/30' :
+                      p === 'google'   ? 'bg-red-500/15 text-red-300 border-red-500/30' :
+                      p === 'github'   ? 'bg-gray-500/15 text-gray-300 border-gray-500/30' :
+                                         'bg-purple-500/15 text-purple-300 border-purple-500/30'
+                    }`}>
+                      {p === 'password' ? '🔑' : p === 'google' ? '🔴' : p === 'github' ? '🐙' : '🔗'}
+                      <span className="capitalize">{p}</span>
+                    </span>
+                  ))}
+                </div>
               </div>
             </div>
           </Card>

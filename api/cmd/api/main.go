@@ -327,6 +327,9 @@ func main() {
 				JWTSecret:   cfg.JWTSecret,
 				JWTExpiry:   cfg.JWTExpiry(),
 				Logger:      logger,
+				OnLoginSuccess: func(r *http.Request, userID int64) {
+					server.LogUserActivity(r.Context(), userID, "login", api.GetClientIP(r), r.UserAgent())
+				},
 			}
 			if cfg.GoogleClientID != "" {
 				oauthCfg.Google = &gologin.OAuthProviderConfig{

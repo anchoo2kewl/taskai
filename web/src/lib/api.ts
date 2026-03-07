@@ -397,6 +397,7 @@ export interface UserWithStats {
   last_login_ip?: string | null
   failed_attempts: number
   invite_count: number
+  linked_providers: string[]
 }
 
 export interface UserActivity {

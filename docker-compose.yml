@@ -102,6 +102,14 @@ services:
       - OTEL_SERVICE_VERSION=${VERSION:-dev}
       - OTEL_ENVIRONMENT=${ENV:-production}
       - OTEL_EXPORTER_OTLP_ENDPOINT=otel-collector:4317
+      # Datadog Unified Service Tags — required on the container for Version Tagging
+      # and Deployment Tracking in Datadog. Must match dd-agent DD_SERVICE/DD_VERSION.
+      - DD_SERVICE=taskai
+      - DD_VERSION=${VERSION:-dev}
+      - DD_ENV=${ENV:-production}
+      # Continuous profiling — ships CPU/heap/goroutine/mutex profiles to dd-agent
+      - DD_PROFILING_ENABLED=${DD_PROFILING_ENABLED:-false}
+      - DD_AGENT_HOST=dd-agent
     labels:
       # Unified Service Tagging — links APM traces, logs, and infra metrics
       com.datadoghq.tags.service: "taskai"

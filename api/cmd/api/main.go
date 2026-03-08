@@ -97,7 +97,22 @@ func main() {
 			zap.String("endpoint", apmCfg.Endpoint),
 			zap.String("env", apmCfg.Environment),
 		)
+		// Enrich every log entry with DD service tags for log-trace correlation.
+		// dd.trace_id and dd.span_id are injected per-request by ZapLogger middleware.
+		logger = logger.With(
+			zap.String("dd.service", apmCfg.ServiceName),
+			zap.String("dd.env", apmCfg.Environment),
+			zap.String("dd.version", apmCfg.Version),
+		)
 	}
+
+	// Start Datadog continuous profiling (CPU, heap, goroutine, mutex profiles).
+	// Activated when DD_PROFILING_ENABLED=true; zero-cost noop otherwise.
+	profilerStop, err := apm.StartProfiling(apmCfg)
+	if err != nil {
+		logger.Warn("failed to start Datadog profiler", zap.Error(err))
+	}
+	defer profilerStop()
 
 	// Initialize database with auto-migrations
 	dbCfg := db.Config{

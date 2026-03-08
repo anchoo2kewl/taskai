@@ -131,6 +131,7 @@ jobs:
               export DD_API_KEY="\$DD_KEY"
               export DD_SITE='${DD_SITE:-datadoghq.com}'
               export APM_ENABLED=true
+              export DD_PROFILING_ENABLED=true
             fi
 
             # Login to Docker Hub to avoid rate limiting

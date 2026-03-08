@@ -12,6 +12,7 @@ import (
 
 	"go.uber.org/zap"
 
+	"taskai/apm"
 	"taskai/internal/auth"
 )
 
@@ -101,12 +102,15 @@ func ZapLogger(logger *zap.Logger) func(http.Handler) http.Handler {
 
 			next.ServeHTTP(wrapped, r)
 
-			logger.Info("HTTP request",
+			fields := []zap.Field{
 				zap.String("method", r.Method),
 				zap.String("path", r.URL.Path),
 				zap.Int("status", wrapped.statusCode),
 				zap.Duration("duration", time.Since(start)),
-			)
+			}
+			// Inject dd.trace_id and dd.span_id for Datadog log-trace correlation.
+			fields = append(fields, apm.FieldsFromContext(r.Context())...)
+			logger.Info("HTTP request", fields...)
 		})
 	}
 }

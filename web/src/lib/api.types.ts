@@ -1149,9 +1149,7 @@ export interface components {
              * @example true
              */
             has_password?: boolean;
-            /**
-             * @description List of connected auth providers (e.g. ["password", "google", "github"])
-             */
+            /** @description List of connected auth providers (e.g. ["password", "google", "github"]) */
             linked_providers?: string[];
             /** Format: date-time */
             created_at?: string;

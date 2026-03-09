@@ -244,6 +244,7 @@ export interface SearchTaskResult {
   snippet: string
   status: string
   priority: string
+  github_issue_number?: number
 }
 
 export interface GlobalSearchWikiResult {

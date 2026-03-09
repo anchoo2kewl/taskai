@@ -199,10 +199,11 @@ export default function CommandPalette() {
       if (task.status === 'done') statusIcon = '✅'
       else if (task.status === 'in_progress') statusIcon = '🔄'
       const prioritySuffix = task.priority === 'medium' ? '' : ' · ' + task.priority
+      const ghSuffix = task.github_issue_number ? ` · GH#${task.github_issue_number}` : ''
       commands.push({
         id: `task-${task.id}`,
         name: `#${task.task_number} ${task.title}`,
-        description: task.project_name + ' · ' + task.status.replace('_', ' ') + prioritySuffix,
+        description: task.project_name + ' · ' + task.status.replace('_', ' ') + prioritySuffix + ghSuffix,
         icon: statusIcon,
         category: 'tasks',
         action: () => {

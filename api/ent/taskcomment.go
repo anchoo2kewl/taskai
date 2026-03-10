@@ -25,6 +25,8 @@ type TaskComment struct {
 	UserID int64 `json:"user_id,omitempty"`
 	// Comment holds the value of the "comment" field.
 	Comment string `json:"comment,omitempty"`
+	// AgentName holds the value of the "agent_name" field.
+	AgentName *string `json:"agent_name,omitempty"`
 	// CreatedAt holds the value of the "created_at" field.
 	CreatedAt time.Time `json:"created_at,omitempty"`
 	// UpdatedAt holds the value of the "updated_at" field.
@@ -75,7 +77,7 @@ func (*TaskComment) scanValues(columns []string) ([]any, error) {
 		switch columns[i] {
 		case taskcomment.FieldID, taskcomment.FieldTaskID, taskcomment.FieldUserID:
 			values[i] = new(sql.NullInt64)
-		case taskcomment.FieldComment:
+		case taskcomment.FieldComment, taskcomment.FieldAgentName:
 			values[i] = new(sql.NullString)
 		case taskcomment.FieldCreatedAt, taskcomment.FieldUpdatedAt:
 			values[i] = new(sql.NullTime)
@@ -117,6 +119,13 @@ func (_m *TaskComment) assignValues(columns []string, values []any) error {
 				return fmt.Errorf("unexpected type %T for field comment", values[i])
 			} else if value.Valid {
 				_m.Comment = value.String
+			}
+		case taskcomment.FieldAgentName:
+			if value, ok := values[i].(*sql.NullString); !ok {
+				return fmt.Errorf("unexpected type %T for field agent_name", values[i])
+			} else if value.Valid {
+				_m.AgentName = new(string)
+				*_m.AgentName = value.String
 			}
 		case taskcomment.FieldCreatedAt:
 			if value, ok := values[i].(*sql.NullTime); !ok {
@@ -184,6 +193,11 @@ func (_m *TaskComment) String() string {
 	builder.WriteString(", ")
 	builder.WriteString("comment=")
 	builder.WriteString(_m.Comment)
+	builder.WriteString(", ")
+	if v := _m.AgentName; v != nil {
+		builder.WriteString("agent_name=")
+		builder.WriteString(*v)
+	}
 	builder.WriteString(", ")
 	builder.WriteString("created_at=")
 	builder.WriteString(_m.CreatedAt.Format(time.ANSIC))

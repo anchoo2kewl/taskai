@@ -24,6 +24,8 @@ const (
 	UserIDKey contextKey = "user_id"
 	// UserEmailKey is the context key for user email
 	UserEmailKey contextKey = "user_email"
+	// AgentNameKey is the context key for AI agent name (from X-Agent-Name header)
+	AgentNameKey contextKey = "agent_name"
 )
 
 // JWTAuth middleware validates JWT tokens or API keys from Authorization header
@@ -85,6 +87,14 @@ func (s *Server) JWTAuth(next http.Handler) http.Handler {
 		// Add user info to request context
 		ctx := context.WithValue(r.Context(), UserIDKey, userID)
 		ctx = context.WithValue(ctx, UserEmailKey, email)
+
+		// Extract optional X-Agent-Name header for AI agent attribution
+		if agentName := strings.TrimSpace(r.Header.Get("X-Agent-Name")); agentName != "" {
+			if len(agentName) > 100 {
+				agentName = agentName[:100]
+			}
+			ctx = context.WithValue(ctx, AgentNameKey, agentName)
+		}
 
 		// Continue to next handler
 		next.ServeHTTP(w, r.WithContext(ctx))
@@ -157,6 +167,16 @@ func GetUserID(r *http.Request) (int64, bool) {
 func GetUserEmail(r *http.Request) (string, bool) {
 	email, ok := r.Context().Value(UserEmailKey).(string)
 	return email, ok
+}
+
+// GetAgentName extracts the AI agent name from request context (set via X-Agent-Name header).
+// Returns nil if no agent name was provided (i.e. request is from a human).
+func GetAgentName(r *http.Request) *string {
+	name, ok := r.Context().Value(AgentNameKey).(string)
+	if !ok || name == "" {
+		return nil
+	}
+	return &name
 }
 
 // tokenBucket implements a simple token bucket rate limiter

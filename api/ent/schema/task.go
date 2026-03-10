@@ -31,6 +31,7 @@ func (Task) Fields() []ent.Field {
 		field.Float("actual_hours").Optional().Nillable(),
 		field.Time("start_date").Optional().Nillable(),
 		field.Time("due_date").Optional().Nillable(),
+		field.String("agent_name").Optional().Nillable().MaxLen(100),
 		field.Time("created_at").Default(time.Now).Immutable(),
 		field.Time("updated_at").Default(time.Now).UpdateDefault(time.Now),
 	}

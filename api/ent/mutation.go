@@ -8980,6 +8980,7 @@ type TaskMutation struct {
 	addactual_hours       *float64
 	start_date            *time.Time
 	due_date              *time.Time
+	agent_name            *string
 	created_at            *time.Time
 	updated_at            *time.Time
 	clearedFields         map[string]struct{}
@@ -9760,6 +9761,55 @@ func (m *TaskMutation) ResetDueDate() {
 	delete(m.clearedFields, task.FieldDueDate)
 }
 
+// SetAgentName sets the "agent_name" field.
+func (m *TaskMutation) SetAgentName(s string) {
+	m.agent_name = &s
+}
+
+// AgentName returns the value of the "agent_name" field in the mutation.
+func (m *TaskMutation) AgentName() (r string, exists bool) {
+	v := m.agent_name
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldAgentName returns the old "agent_name" field's value of the Task entity.
+// If the Task object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *TaskMutation) OldAgentName(ctx context.Context) (v *string, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldAgentName is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldAgentName requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldAgentName: %w", err)
+	}
+	return oldValue.AgentName, nil
+}
+
+// ClearAgentName clears the value of the "agent_name" field.
+func (m *TaskMutation) ClearAgentName() {
+	m.agent_name = nil
+	m.clearedFields[task.FieldAgentName] = struct{}{}
+}
+
+// AgentNameCleared returns if the "agent_name" field was cleared in this mutation.
+func (m *TaskMutation) AgentNameCleared() bool {
+	_, ok := m.clearedFields[task.FieldAgentName]
+	return ok
+}
+
+// ResetAgentName resets all changes to the "agent_name" field.
+func (m *TaskMutation) ResetAgentName() {
+	m.agent_name = nil
+	delete(m.clearedFields, task.FieldAgentName)
+}
+
 // SetCreatedAt sets the "created_at" field.
 func (m *TaskMutation) SetCreatedAt(t time.Time) {
 	m.created_at = &t
@@ -10190,7 +10240,7 @@ func (m *TaskMutation) Type() string {
 // order to get all numeric fields that were incremented/decremented, call
 // AddedFields().
 func (m *TaskMutation) Fields() []string {
-	fields := make([]string, 0, 15)
+	fields := make([]string, 0, 16)
 	if m.project != nil {
 		fields = append(fields, task.FieldProjectID)
 	}
@@ -10229,6 +10279,9 @@ func (m *TaskMutation) Fields() []string {
 	}
 	if m.due_date != nil {
 		fields = append(fields, task.FieldDueDate)
+	}
+	if m.agent_name != nil {
+		fields = append(fields, task.FieldAgentName)
 	}
 	if m.created_at != nil {
 		fields = append(fields, task.FieldCreatedAt)
@@ -10270,6 +10323,8 @@ func (m *TaskMutation) Field(name string) (ent.Value, bool) {
 		return m.StartDate()
 	case task.FieldDueDate:
 		return m.DueDate()
+	case task.FieldAgentName:
+		return m.AgentName()
 	case task.FieldCreatedAt:
 		return m.CreatedAt()
 	case task.FieldUpdatedAt:
@@ -10309,6 +10364,8 @@ func (m *TaskMutation) OldField(ctx context.Context, name string) (ent.Value, er
 		return m.OldStartDate(ctx)
 	case task.FieldDueDate:
 		return m.OldDueDate(ctx)
+	case task.FieldAgentName:
+		return m.OldAgentName(ctx)
 	case task.FieldCreatedAt:
 		return m.OldCreatedAt(ctx)
 	case task.FieldUpdatedAt:
@@ -10412,6 +10469,13 @@ func (m *TaskMutation) SetField(name string, value ent.Value) error {
 			return fmt.Errorf("unexpected type %T for field %s", value, name)
 		}
 		m.SetDueDate(v)
+		return nil
+	case task.FieldAgentName:
+		v, ok := value.(string)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetAgentName(v)
 		return nil
 	case task.FieldCreatedAt:
 		v, ok := value.(time.Time)
@@ -10523,6 +10587,9 @@ func (m *TaskMutation) ClearedFields() []string {
 	if m.FieldCleared(task.FieldDueDate) {
 		fields = append(fields, task.FieldDueDate)
 	}
+	if m.FieldCleared(task.FieldAgentName) {
+		fields = append(fields, task.FieldAgentName)
+	}
 	return fields
 }
 
@@ -10563,6 +10630,9 @@ func (m *TaskMutation) ClearField(name string) error {
 		return nil
 	case task.FieldDueDate:
 		m.ClearDueDate()
+		return nil
+	case task.FieldAgentName:
+		m.ClearAgentName()
 		return nil
 	}
 	return fmt.Errorf("unknown Task nullable field %s", name)
@@ -10610,6 +10680,9 @@ func (m *TaskMutation) ResetField(name string) error {
 		return nil
 	case task.FieldDueDate:
 		m.ResetDueDate()
+		return nil
+	case task.FieldAgentName:
+		m.ResetAgentName()
 		return nil
 	case task.FieldCreatedAt:
 		m.ResetCreatedAt()
@@ -12453,6 +12526,7 @@ type TaskCommentMutation struct {
 	typ           string
 	id            *int64
 	comment       *string
+	agent_name    *string
 	created_at    *time.Time
 	updated_at    *time.Time
 	clearedFields map[string]struct{}
@@ -12677,6 +12751,55 @@ func (m *TaskCommentMutation) ResetComment() {
 	m.comment = nil
 }
 
+// SetAgentName sets the "agent_name" field.
+func (m *TaskCommentMutation) SetAgentName(s string) {
+	m.agent_name = &s
+}
+
+// AgentName returns the value of the "agent_name" field in the mutation.
+func (m *TaskCommentMutation) AgentName() (r string, exists bool) {
+	v := m.agent_name
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldAgentName returns the old "agent_name" field's value of the TaskComment entity.
+// If the TaskComment object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *TaskCommentMutation) OldAgentName(ctx context.Context) (v *string, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldAgentName is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldAgentName requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldAgentName: %w", err)
+	}
+	return oldValue.AgentName, nil
+}
+
+// ClearAgentName clears the value of the "agent_name" field.
+func (m *TaskCommentMutation) ClearAgentName() {
+	m.agent_name = nil
+	m.clearedFields[taskcomment.FieldAgentName] = struct{}{}
+}
+
+// AgentNameCleared returns if the "agent_name" field was cleared in this mutation.
+func (m *TaskCommentMutation) AgentNameCleared() bool {
+	_, ok := m.clearedFields[taskcomment.FieldAgentName]
+	return ok
+}
+
+// ResetAgentName resets all changes to the "agent_name" field.
+func (m *TaskCommentMutation) ResetAgentName() {
+	m.agent_name = nil
+	delete(m.clearedFields, taskcomment.FieldAgentName)
+}
+
 // SetCreatedAt sets the "created_at" field.
 func (m *TaskCommentMutation) SetCreatedAt(t time.Time) {
 	m.created_at = &t
@@ -12837,7 +12960,7 @@ func (m *TaskCommentMutation) Type() string {
 // order to get all numeric fields that were incremented/decremented, call
 // AddedFields().
 func (m *TaskCommentMutation) Fields() []string {
-	fields := make([]string, 0, 5)
+	fields := make([]string, 0, 6)
 	if m.task != nil {
 		fields = append(fields, taskcomment.FieldTaskID)
 	}
@@ -12846,6 +12969,9 @@ func (m *TaskCommentMutation) Fields() []string {
 	}
 	if m.comment != nil {
 		fields = append(fields, taskcomment.FieldComment)
+	}
+	if m.agent_name != nil {
+		fields = append(fields, taskcomment.FieldAgentName)
 	}
 	if m.created_at != nil {
 		fields = append(fields, taskcomment.FieldCreatedAt)
@@ -12867,6 +12993,8 @@ func (m *TaskCommentMutation) Field(name string) (ent.Value, bool) {
 		return m.UserID()
 	case taskcomment.FieldComment:
 		return m.Comment()
+	case taskcomment.FieldAgentName:
+		return m.AgentName()
 	case taskcomment.FieldCreatedAt:
 		return m.CreatedAt()
 	case taskcomment.FieldUpdatedAt:
@@ -12886,6 +13014,8 @@ func (m *TaskCommentMutation) OldField(ctx context.Context, name string) (ent.Va
 		return m.OldUserID(ctx)
 	case taskcomment.FieldComment:
 		return m.OldComment(ctx)
+	case taskcomment.FieldAgentName:
+		return m.OldAgentName(ctx)
 	case taskcomment.FieldCreatedAt:
 		return m.OldCreatedAt(ctx)
 	case taskcomment.FieldUpdatedAt:
@@ -12919,6 +13049,13 @@ func (m *TaskCommentMutation) SetField(name string, value ent.Value) error {
 			return fmt.Errorf("unexpected type %T for field %s", value, name)
 		}
 		m.SetComment(v)
+		return nil
+	case taskcomment.FieldAgentName:
+		v, ok := value.(string)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetAgentName(v)
 		return nil
 	case taskcomment.FieldCreatedAt:
 		v, ok := value.(time.Time)
@@ -12966,7 +13103,11 @@ func (m *TaskCommentMutation) AddField(name string, value ent.Value) error {
 // ClearedFields returns all nullable fields that were cleared during this
 // mutation.
 func (m *TaskCommentMutation) ClearedFields() []string {
-	return nil
+	var fields []string
+	if m.FieldCleared(taskcomment.FieldAgentName) {
+		fields = append(fields, taskcomment.FieldAgentName)
+	}
+	return fields
 }
 
 // FieldCleared returns a boolean indicating if a field with the given name was
@@ -12979,6 +13120,11 @@ func (m *TaskCommentMutation) FieldCleared(name string) bool {
 // ClearField clears the value of the field with the given name. It returns an
 // error if the field is not defined in the schema.
 func (m *TaskCommentMutation) ClearField(name string) error {
+	switch name {
+	case taskcomment.FieldAgentName:
+		m.ClearAgentName()
+		return nil
+	}
 	return fmt.Errorf("unknown TaskComment nullable field %s", name)
 }
 
@@ -12994,6 +13140,9 @@ func (m *TaskCommentMutation) ResetField(name string) error {
 		return nil
 	case taskcomment.FieldComment:
 		m.ResetComment()
+		return nil
+	case taskcomment.FieldAgentName:
+		m.ResetAgentName()
 		return nil
 	case taskcomment.FieldCreatedAt:
 		m.ResetCreatedAt()

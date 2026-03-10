@@ -7,6 +7,20 @@ import { TaskAIClient, Task, Project, SwimLane, Comment, WikiPage, WikiBlock, Us
 const TASKAI_API_URL = process.env.TASKAI_API_URL || "https://taskai.cc";
 const PORT = parseInt(process.env.PORT || "3000", 10);
 
+/** Map known MCP client identifiers to friendly display names. */
+const AGENT_NAME_MAP: Record<string, string> = {
+  "claude-code": "Claude Code",
+  "codex-cli": "Codex",
+  "gemini-cli": "Gemini",
+  "cursor": "Cursor",
+  "windsurf": "Windsurf",
+};
+
+function normalizeAgentName(raw: string): string {
+  const key = raw.trim().toLowerCase();
+  return AGENT_NAME_MAP[key] ?? raw.trim().slice(0, 100);
+}
+
 // --- API key validation cache (5-minute TTL) ---
 interface CacheEntry { user: User; validUntil: number }
 const apiKeyCache = new Map<string, CacheEntry>();
@@ -495,6 +509,15 @@ app.post("/mcp", async (req, res) => {
     } catch {
       res.status(403).json({ error: "Invalid API key" });
       return;
+    }
+  }
+
+  // Extract agent name from MCP initialize message if present
+  const messages = Array.isArray(req.body) ? req.body : [req.body];
+  for (const msg of messages) {
+    if (msg?.method === "initialize" && msg?.params?.clientInfo?.name) {
+      client.agentName = normalizeAgentName(msg.params.clientInfo.name);
+      break;
     }
   }
 

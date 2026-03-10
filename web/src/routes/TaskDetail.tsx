@@ -972,9 +972,9 @@ export default function TaskDetail({ isModal, onClose }: TaskDetailProps) {
                   comments.map((comment) => (
                     <div key={comment.id} className="border-t border-dark-border-subtle pt-4 first:border-t-0 first:pt-0">
                       <div className="flex items-start gap-3">
-                        <div className="w-8 h-8 rounded-full bg-primary-500/10 flex items-center justify-center flex-shrink-0">
-                          <span className="text-xs font-medium text-primary-400">
-                            {(comment.user_name || 'U').charAt(0).toUpperCase()}
+                        <div className={`w-8 h-8 rounded-full flex items-center justify-center flex-shrink-0 ${comment.agent_name ? 'bg-violet-500/10' : 'bg-primary-500/10'}`}>
+                          <span className={`text-xs font-medium ${comment.agent_name ? 'text-violet-400' : 'text-primary-400'}`}>
+                            {comment.agent_name ? 'AI' : (comment.user_name || 'U').charAt(0).toUpperCase()}
                           </span>
                         </div>
                         <div className="flex-1 min-w-0">
@@ -983,8 +983,15 @@ export default function TaskDetail({ isModal, onClose }: TaskDetailProps) {
                               to={`/app/users/${comment.user_id}`}
                               className="text-sm font-medium text-dark-text-primary hover:text-primary-400 transition-colors"
                             >
-                              {comment.user_name || `User ${comment.user_id}`}
+                              {comment.agent_name
+                                ? `${comment.agent_name} for ${comment.user_name || `User ${comment.user_id}`}`
+                                : comment.user_name || `User ${comment.user_id}`}
                             </Link>
+                            {comment.agent_name && (
+                              <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium bg-violet-500/10 text-violet-400 border border-violet-500/20">
+                                AI
+                              </span>
+                            )}
                             <span className="text-xs text-dark-text-tertiary">
                               {new Date(comment.created_at).toLocaleString()}
                             </span>

@@ -40,6 +40,8 @@ const (
 	FieldStartDate = "start_date"
 	// FieldDueDate holds the string denoting the due_date field in the database.
 	FieldDueDate = "due_date"
+	// FieldAgentName holds the string denoting the agent_name field in the database.
+	FieldAgentName = "agent_name"
 	// FieldCreatedAt holds the string denoting the created_at field in the database.
 	FieldCreatedAt = "created_at"
 	// FieldUpdatedAt holds the string denoting the updated_at field in the database.
@@ -136,6 +138,7 @@ var Columns = []string{
 	FieldActualHours,
 	FieldStartDate,
 	FieldDueDate,
+	FieldAgentName,
 	FieldCreatedAt,
 	FieldUpdatedAt,
 }
@@ -157,6 +160,8 @@ var (
 	DefaultStatus string
 	// DefaultPriority holds the default value on creation for the "priority" field.
 	DefaultPriority string
+	// AgentNameValidator is a validator for the "agent_name" field. It is called by the builders before save.
+	AgentNameValidator func(string) error
 	// DefaultCreatedAt holds the default value on creation for the "created_at" field.
 	DefaultCreatedAt func() time.Time
 	// DefaultUpdatedAt holds the default value on creation for the "updated_at" field.
@@ -236,6 +241,11 @@ func ByStartDate(opts ...sql.OrderTermOption) OrderOption {
 // ByDueDate orders the results by the due_date field.
 func ByDueDate(opts ...sql.OrderTermOption) OrderOption {
 	return sql.OrderByField(FieldDueDate, opts...).ToFunc()
+}
+
+// ByAgentName orders the results by the agent_name field.
+func ByAgentName(opts ...sql.OrderTermOption) OrderOption {
+	return sql.OrderByField(FieldAgentName, opts...).ToFunc()
 }
 
 // ByCreatedAt orders the results by the created_at field.

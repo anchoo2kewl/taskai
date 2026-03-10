@@ -61,6 +61,7 @@ type Task struct {
 	Tags                []Tag              `json:"tags,omitempty"`
 	GithubIssueNumber   *int64             `json:"github_issue_number,omitempty"`
 	GithubReactions     []GitHubReaction   `json:"github_reactions,omitempty"`
+	AgentName           *string            `json:"agent_name,omitempty"`
 	CreatedAt           time.Time          `json:"created_at"`
 	UpdatedAt           time.Time          `json:"updated_at"`
 }
@@ -247,6 +248,7 @@ func (s *Server) HandleListTasks(w http.ResponseWriter, r *http.Request) {
 			Priority:       et.Priority,
 			EstimatedHours: et.EstimatedHours,
 			ActualHours:    et.ActualHours,
+			AgentName:      et.AgentName,
 			CreatedAt:      et.CreatedAt,
 			UpdatedAt:      et.UpdatedAt,
 			Tags:           []Tag{}, // Initialize empty tags array
@@ -522,6 +524,13 @@ func (s *Server) HandleCreateTask(w http.ResponseWriter, r *http.Request) {
 		s.logger.Warn("Failed to set created_by on task", zap.Error(err), zap.Int64("task_id", newTask.ID))
 	}
 
+	// Set agent_name via raw SQL if present (mirrors created_by pattern)
+	if agentName := GetAgentName(r); agentName != nil {
+		if _, err := s.db.ExecContext(ctx, `UPDATE tasks SET agent_name = $1 WHERE id = $2`, *agentName, newTask.ID); err != nil {
+			s.logger.Warn("Failed to set agent_name on task", zap.Error(err), zap.Int64("task_id", newTask.ID))
+		}
+	}
+
 	// Fetch the created task with all related entities
 	createdTask, err := s.db.Client.Task.Query().
 		Where(task.ID(newTask.ID)).
@@ -553,6 +562,7 @@ func (s *Server) HandleCreateTask(w http.ResponseWriter, r *http.Request) {
 		Priority:       createdTask.Priority,
 		EstimatedHours: createdTask.EstimatedHours,
 		ActualHours:    createdTask.ActualHours,
+		AgentName:      createdTask.AgentName,
 		CreatedAt:      createdTask.CreatedAt,
 		UpdatedAt:      createdTask.UpdatedAt,
 		Tags:           []Tag{},
@@ -890,6 +900,7 @@ func (s *Server) HandleUpdateTask(w http.ResponseWriter, r *http.Request) {
 		Priority:       updatedTask.Priority,
 		EstimatedHours: updatedTask.EstimatedHours,
 		ActualHours:    updatedTask.ActualHours,
+		AgentName:      updatedTask.AgentName,
 		CreatedAt:      updatedTask.CreatedAt,
 		UpdatedAt:      updatedTask.UpdatedAt,
 		Tags:           []Tag{},
@@ -1102,6 +1113,7 @@ func (s *Server) HandleGetTaskByNumber(w http.ResponseWriter, r *http.Request) {
 		Priority:       taskEntity.Priority,
 		EstimatedHours: taskEntity.EstimatedHours,
 		ActualHours:    taskEntity.ActualHours,
+		AgentName:      taskEntity.AgentName,
 		CreatedAt:      taskEntity.CreatedAt,
 		UpdatedAt:      taskEntity.UpdatedAt,
 		Tags:           []Tag{},

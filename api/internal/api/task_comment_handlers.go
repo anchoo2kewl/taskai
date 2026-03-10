@@ -24,6 +24,7 @@ type TaskComment struct {
 	TaskID          int64            `json:"task_id"`
 	UserID          int64            `json:"user_id"`
 	UserName        *string          `json:"user_name,omitempty"`
+	AgentName       *string          `json:"agent_name,omitempty"`
 	Comment         string           `json:"comment"`
 	CreatedAt       time.Time        `json:"created_at"`
 	UpdatedAt       time.Time        `json:"updated_at"`
@@ -87,6 +88,7 @@ func (s *Server) HandleListTaskComments(w http.ResponseWriter, r *http.Request) 
 			ID:        ec.ID,
 			TaskID:    ec.TaskID,
 			UserID:    ec.UserID,
+			AgentName: ec.AgentName,
 			Comment:   ec.Comment,
 			CreatedAt: ec.CreatedAt,
 			UpdatedAt: ec.UpdatedAt,
@@ -182,11 +184,16 @@ func (s *Server) HandleCreateTaskComment(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	newComment, err := s.db.Client.TaskComment.Create().
+	agentName := GetAgentName(r)
+
+	builder := s.db.Client.TaskComment.Create().
 		SetTaskID(taskID).
 		SetUserID(userID).
-		SetComment(req.Comment).
-		Save(ctx)
+		SetComment(req.Comment)
+	if agentName != nil {
+		builder = builder.SetAgentName(*agentName)
+	}
+	newComment, err := builder.Save(ctx)
 	if err != nil {
 		respondError(w, http.StatusInternalServerError, "failed to create comment", "internal_error")
 		return
@@ -206,6 +213,7 @@ func (s *Server) HandleCreateTaskComment(w http.ResponseWriter, r *http.Request)
 		ID:        commentWithUser.ID,
 		TaskID:    commentWithUser.TaskID,
 		UserID:    commentWithUser.UserID,
+		AgentName: commentWithUser.AgentName,
 		Comment:   commentWithUser.Comment,
 		CreatedAt: commentWithUser.CreatedAt,
 		UpdatedAt: commentWithUser.UpdatedAt,
@@ -216,9 +224,13 @@ func (s *Server) HandleCreateTaskComment(w http.ResponseWriter, r *http.Request)
 	}
 
 	// Best-effort push to GitHub (non-blocking)
+	// Prefix display name with agent name for AI attribution
 	displayName := ""
 	if c.UserName != nil {
 		displayName = *c.UserName
+	}
+	if c.AgentName != nil {
+		displayName = *c.AgentName + " for " + displayName
 	}
 	go s.tryPushCommentToGitHub(context.Background(), taskID, c.ID, c.Comment, displayName)
 

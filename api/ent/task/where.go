@@ -120,6 +120,11 @@ func DueDate(v time.Time) predicate.Task {
 	return predicate.Task(sql.FieldEQ(FieldDueDate, v))
 }
 
+// AgentName applies equality check predicate on the "agent_name" field. It's identical to AgentNameEQ.
+func AgentName(v string) predicate.Task {
+	return predicate.Task(sql.FieldEQ(FieldAgentName, v))
+}
+
 // CreatedAt applies equality check predicate on the "created_at" field. It's identical to CreatedAtEQ.
 func CreatedAt(v time.Time) predicate.Task {
 	return predicate.Task(sql.FieldEQ(FieldCreatedAt, v))
@@ -758,6 +763,81 @@ func DueDateIsNil() predicate.Task {
 // DueDateNotNil applies the NotNil predicate on the "due_date" field.
 func DueDateNotNil() predicate.Task {
 	return predicate.Task(sql.FieldNotNull(FieldDueDate))
+}
+
+// AgentNameEQ applies the EQ predicate on the "agent_name" field.
+func AgentNameEQ(v string) predicate.Task {
+	return predicate.Task(sql.FieldEQ(FieldAgentName, v))
+}
+
+// AgentNameNEQ applies the NEQ predicate on the "agent_name" field.
+func AgentNameNEQ(v string) predicate.Task {
+	return predicate.Task(sql.FieldNEQ(FieldAgentName, v))
+}
+
+// AgentNameIn applies the In predicate on the "agent_name" field.
+func AgentNameIn(vs ...string) predicate.Task {
+	return predicate.Task(sql.FieldIn(FieldAgentName, vs...))
+}
+
+// AgentNameNotIn applies the NotIn predicate on the "agent_name" field.
+func AgentNameNotIn(vs ...string) predicate.Task {
+	return predicate.Task(sql.FieldNotIn(FieldAgentName, vs...))
+}
+
+// AgentNameGT applies the GT predicate on the "agent_name" field.
+func AgentNameGT(v string) predicate.Task {
+	return predicate.Task(sql.FieldGT(FieldAgentName, v))
+}
+
+// AgentNameGTE applies the GTE predicate on the "agent_name" field.
+func AgentNameGTE(v string) predicate.Task {
+	return predicate.Task(sql.FieldGTE(FieldAgentName, v))
+}
+
+// AgentNameLT applies the LT predicate on the "agent_name" field.
+func AgentNameLT(v string) predicate.Task {
+	return predicate.Task(sql.FieldLT(FieldAgentName, v))
+}
+
+// AgentNameLTE applies the LTE predicate on the "agent_name" field.
+func AgentNameLTE(v string) predicate.Task {
+	return predicate.Task(sql.FieldLTE(FieldAgentName, v))
+}
+
+// AgentNameContains applies the Contains predicate on the "agent_name" field.
+func AgentNameContains(v string) predicate.Task {
+	return predicate.Task(sql.FieldContains(FieldAgentName, v))
+}
+
+// AgentNameHasPrefix applies the HasPrefix predicate on the "agent_name" field.
+func AgentNameHasPrefix(v string) predicate.Task {
+	return predicate.Task(sql.FieldHasPrefix(FieldAgentName, v))
+}
+
+// AgentNameHasSuffix applies the HasSuffix predicate on the "agent_name" field.
+func AgentNameHasSuffix(v string) predicate.Task {
+	return predicate.Task(sql.FieldHasSuffix(FieldAgentName, v))
+}
+
+// AgentNameIsNil applies the IsNil predicate on the "agent_name" field.
+func AgentNameIsNil() predicate.Task {
+	return predicate.Task(sql.FieldIsNull(FieldAgentName))
+}
+
+// AgentNameNotNil applies the NotNil predicate on the "agent_name" field.
+func AgentNameNotNil() predicate.Task {
+	return predicate.Task(sql.FieldNotNull(FieldAgentName))
+}
+
+// AgentNameEqualFold applies the EqualFold predicate on the "agent_name" field.
+func AgentNameEqualFold(v string) predicate.Task {
+	return predicate.Task(sql.FieldEqualFold(FieldAgentName, v))
+}
+
+// AgentNameContainsFold applies the ContainsFold predicate on the "agent_name" field.
+func AgentNameContainsFold(v string) predicate.Task {
+	return predicate.Task(sql.FieldContainsFold(FieldAgentName, v))
 }
 
 // CreatedAtEQ applies the EQ predicate on the "created_at" field.

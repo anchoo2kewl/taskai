@@ -70,6 +70,11 @@ func Comment(v string) predicate.TaskComment {
 	return predicate.TaskComment(sql.FieldEQ(FieldComment, v))
 }
 
+// AgentName applies equality check predicate on the "agent_name" field. It's identical to AgentNameEQ.
+func AgentName(v string) predicate.TaskComment {
+	return predicate.TaskComment(sql.FieldEQ(FieldAgentName, v))
+}
+
 // CreatedAt applies equality check predicate on the "created_at" field. It's identical to CreatedAtEQ.
 func CreatedAt(v time.Time) predicate.TaskComment {
 	return predicate.TaskComment(sql.FieldEQ(FieldCreatedAt, v))
@@ -183,6 +188,81 @@ func CommentEqualFold(v string) predicate.TaskComment {
 // CommentContainsFold applies the ContainsFold predicate on the "comment" field.
 func CommentContainsFold(v string) predicate.TaskComment {
 	return predicate.TaskComment(sql.FieldContainsFold(FieldComment, v))
+}
+
+// AgentNameEQ applies the EQ predicate on the "agent_name" field.
+func AgentNameEQ(v string) predicate.TaskComment {
+	return predicate.TaskComment(sql.FieldEQ(FieldAgentName, v))
+}
+
+// AgentNameNEQ applies the NEQ predicate on the "agent_name" field.
+func AgentNameNEQ(v string) predicate.TaskComment {
+	return predicate.TaskComment(sql.FieldNEQ(FieldAgentName, v))
+}
+
+// AgentNameIn applies the In predicate on the "agent_name" field.
+func AgentNameIn(vs ...string) predicate.TaskComment {
+	return predicate.TaskComment(sql.FieldIn(FieldAgentName, vs...))
+}
+
+// AgentNameNotIn applies the NotIn predicate on the "agent_name" field.
+func AgentNameNotIn(vs ...string) predicate.TaskComment {
+	return predicate.TaskComment(sql.FieldNotIn(FieldAgentName, vs...))
+}
+
+// AgentNameGT applies the GT predicate on the "agent_name" field.
+func AgentNameGT(v string) predicate.TaskComment {
+	return predicate.TaskComment(sql.FieldGT(FieldAgentName, v))
+}
+
+// AgentNameGTE applies the GTE predicate on the "agent_name" field.
+func AgentNameGTE(v string) predicate.TaskComment {
+	return predicate.TaskComment(sql.FieldGTE(FieldAgentName, v))
+}
+
+// AgentNameLT applies the LT predicate on the "agent_name" field.
+func AgentNameLT(v string) predicate.TaskComment {
+	return predicate.TaskComment(sql.FieldLT(FieldAgentName, v))
+}
+
+// AgentNameLTE applies the LTE predicate on the "agent_name" field.
+func AgentNameLTE(v string) predicate.TaskComment {
+	return predicate.TaskComment(sql.FieldLTE(FieldAgentName, v))
+}
+
+// AgentNameContains applies the Contains predicate on the "agent_name" field.
+func AgentNameContains(v string) predicate.TaskComment {
+	return predicate.TaskComment(sql.FieldContains(FieldAgentName, v))
+}
+
+// AgentNameHasPrefix applies the HasPrefix predicate on the "agent_name" field.
+func AgentNameHasPrefix(v string) predicate.TaskComment {
+	return predicate.TaskComment(sql.FieldHasPrefix(FieldAgentName, v))
+}
+
+// AgentNameHasSuffix applies the HasSuffix predicate on the "agent_name" field.
+func AgentNameHasSuffix(v string) predicate.TaskComment {
+	return predicate.TaskComment(sql.FieldHasSuffix(FieldAgentName, v))
+}
+
+// AgentNameIsNil applies the IsNil predicate on the "agent_name" field.
+func AgentNameIsNil() predicate.TaskComment {
+	return predicate.TaskComment(sql.FieldIsNull(FieldAgentName))
+}
+
+// AgentNameNotNil applies the NotNil predicate on the "agent_name" field.
+func AgentNameNotNil() predicate.TaskComment {
+	return predicate.TaskComment(sql.FieldNotNull(FieldAgentName))
+}
+
+// AgentNameEqualFold applies the EqualFold predicate on the "agent_name" field.
+func AgentNameEqualFold(v string) predicate.TaskComment {
+	return predicate.TaskComment(sql.FieldEqualFold(FieldAgentName, v))
+}
+
+// AgentNameContainsFold applies the ContainsFold predicate on the "agent_name" field.
+func AgentNameContainsFold(v string) predicate.TaskComment {
+	return predicate.TaskComment(sql.FieldContainsFold(FieldAgentName, v))
 }
 
 // CreatedAtEQ applies the EQ predicate on the "created_at" field.

@@ -194,6 +194,20 @@ func (_c *TaskCreate) SetNillableDueDate(v *time.Time) *TaskCreate {
 	return _c
 }
 
+// SetAgentName sets the "agent_name" field.
+func (_c *TaskCreate) SetAgentName(v string) *TaskCreate {
+	_c.mutation.SetAgentName(v)
+	return _c
+}
+
+// SetNillableAgentName sets the "agent_name" field if the given value is not nil.
+func (_c *TaskCreate) SetNillableAgentName(v *string) *TaskCreate {
+	if v != nil {
+		_c.SetAgentName(*v)
+	}
+	return _c
+}
+
 // SetCreatedAt sets the "created_at" field.
 func (_c *TaskCreate) SetCreatedAt(v time.Time) *TaskCreate {
 	_c.mutation.SetCreatedAt(v)
@@ -380,6 +394,11 @@ func (_c *TaskCreate) check() error {
 	if _, ok := _c.mutation.Priority(); !ok {
 		return &ValidationError{Name: "priority", err: errors.New(`ent: missing required field "Task.priority"`)}
 	}
+	if v, ok := _c.mutation.AgentName(); ok {
+		if err := task.AgentNameValidator(v); err != nil {
+			return &ValidationError{Name: "agent_name", err: fmt.Errorf(`ent: validator failed for field "Task.agent_name": %w`, err)}
+		}
+	}
 	if _, ok := _c.mutation.CreatedAt(); !ok {
 		return &ValidationError{Name: "created_at", err: errors.New(`ent: missing required field "Task.created_at"`)}
 	}
@@ -456,6 +475,10 @@ func (_c *TaskCreate) createSpec() (*Task, *sqlgraph.CreateSpec) {
 	if value, ok := _c.mutation.DueDate(); ok {
 		_spec.SetField(task.FieldDueDate, field.TypeTime, value)
 		_node.DueDate = &value
+	}
+	if value, ok := _c.mutation.AgentName(); ok {
+		_spec.SetField(task.FieldAgentName, field.TypeString, value)
+		_node.AgentName = &value
 	}
 	if value, ok := _c.mutation.CreatedAt(); ok {
 		_spec.SetField(task.FieldCreatedAt, field.TypeTime, value)

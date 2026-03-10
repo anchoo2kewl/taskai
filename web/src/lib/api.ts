@@ -7,7 +7,7 @@ export type AuthResponse = components['schemas']['AuthResponse']
 export type SignupRequest = components['schemas']['SignupRequest']
 export type LoginRequest = components['schemas']['LoginRequest']
 export type Project = components['schemas']['Project']
-export type Task = components['schemas']['Task'] & { task_number?: number; github_issue_number?: number | null; start_date?: string | null; github_reactions?: GitHubReaction[] }
+export type Task = components['schemas']['Task'] & { task_number?: number; github_issue_number?: number | null; start_date?: string | null; github_reactions?: GitHubReaction[]; agent_name?: string | null }
 export type ApiError = components['schemas']['Error']
 
 export interface GitHubReaction {
@@ -22,6 +22,7 @@ export interface TaskComment {
   task_id: number
   user_id: number
   user_name?: string | null
+  agent_name?: string | null
   comment: string
   created_at: string
   updated_at: string

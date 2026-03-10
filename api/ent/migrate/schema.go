@@ -428,6 +428,7 @@ var (
 		{Name: "actual_hours", Type: field.TypeFloat64, Nullable: true},
 		{Name: "start_date", Type: field.TypeTime, Nullable: true},
 		{Name: "due_date", Type: field.TypeTime, Nullable: true},
+		{Name: "agent_name", Type: field.TypeString, Nullable: true, Size: 100},
 		{Name: "created_at", Type: field.TypeTime},
 		{Name: "updated_at", Type: field.TypeTime},
 		{Name: "project_id", Type: field.TypeInt64},
@@ -443,25 +444,25 @@ var (
 		ForeignKeys: []*schema.ForeignKey{
 			{
 				Symbol:     "tasks_projects_tasks",
-				Columns:    []*schema.Column{TasksColumns[12]},
+				Columns:    []*schema.Column{TasksColumns[13]},
 				RefColumns: []*schema.Column{ProjectsColumns[0]},
 				OnDelete:   schema.NoAction,
 			},
 			{
 				Symbol:     "tasks_sprints_tasks",
-				Columns:    []*schema.Column{TasksColumns[13]},
+				Columns:    []*schema.Column{TasksColumns[14]},
 				RefColumns: []*schema.Column{SprintsColumns[0]},
 				OnDelete:   schema.SetNull,
 			},
 			{
 				Symbol:     "tasks_swim_lanes_tasks",
-				Columns:    []*schema.Column{TasksColumns[14]},
+				Columns:    []*schema.Column{TasksColumns[15]},
 				RefColumns: []*schema.Column{SwimLanesColumns[0]},
 				OnDelete:   schema.SetNull,
 			},
 			{
 				Symbol:     "tasks_users_tasks_assigned",
-				Columns:    []*schema.Column{TasksColumns[15]},
+				Columns:    []*schema.Column{TasksColumns[16]},
 				RefColumns: []*schema.Column{UsersColumns[0]},
 				OnDelete:   schema.SetNull,
 			},
@@ -470,7 +471,7 @@ var (
 			{
 				Name:    "task_project_id",
 				Unique:  false,
-				Columns: []*schema.Column{TasksColumns[12]},
+				Columns: []*schema.Column{TasksColumns[13]},
 			},
 			{
 				Name:    "task_status",
@@ -480,12 +481,12 @@ var (
 			{
 				Name:    "task_swim_lane_id",
 				Unique:  false,
-				Columns: []*schema.Column{TasksColumns[14]},
+				Columns: []*schema.Column{TasksColumns[15]},
 			},
 			{
 				Name:    "task_sprint_id",
 				Unique:  false,
-				Columns: []*schema.Column{TasksColumns[13]},
+				Columns: []*schema.Column{TasksColumns[14]},
 			},
 			{
 				Name:    "task_priority",
@@ -495,12 +496,12 @@ var (
 			{
 				Name:    "task_assignee_id",
 				Unique:  false,
-				Columns: []*schema.Column{TasksColumns[15]},
+				Columns: []*schema.Column{TasksColumns[16]},
 			},
 			{
 				Name:    "task_project_id_task_number",
 				Unique:  true,
-				Columns: []*schema.Column{TasksColumns[12], TasksColumns[1]},
+				Columns: []*schema.Column{TasksColumns[13], TasksColumns[1]},
 			},
 		},
 	}
@@ -610,6 +611,7 @@ var (
 	TaskCommentsColumns = []*schema.Column{
 		{Name: "id", Type: field.TypeInt64, Increment: true},
 		{Name: "comment", Type: field.TypeString},
+		{Name: "agent_name", Type: field.TypeString, Nullable: true, Size: 100},
 		{Name: "created_at", Type: field.TypeTime},
 		{Name: "updated_at", Type: field.TypeTime},
 		{Name: "task_id", Type: field.TypeInt64},
@@ -623,13 +625,13 @@ var (
 		ForeignKeys: []*schema.ForeignKey{
 			{
 				Symbol:     "task_comments_tasks_comments",
-				Columns:    []*schema.Column{TaskCommentsColumns[4]},
+				Columns:    []*schema.Column{TaskCommentsColumns[5]},
 				RefColumns: []*schema.Column{TasksColumns[0]},
 				OnDelete:   schema.NoAction,
 			},
 			{
 				Symbol:     "task_comments_users_task_comments",
-				Columns:    []*schema.Column{TaskCommentsColumns[5]},
+				Columns:    []*schema.Column{TaskCommentsColumns[6]},
 				RefColumns: []*schema.Column{UsersColumns[0]},
 				OnDelete:   schema.NoAction,
 			},
@@ -638,12 +640,12 @@ var (
 			{
 				Name:    "taskcomment_task_id",
 				Unique:  false,
-				Columns: []*schema.Column{TaskCommentsColumns[4]},
+				Columns: []*schema.Column{TaskCommentsColumns[5]},
 			},
 			{
 				Name:    "taskcomment_user_id",
 				Unique:  false,
-				Columns: []*schema.Column{TaskCommentsColumns[5]},
+				Columns: []*schema.Column{TaskCommentsColumns[6]},
 			},
 		},
 	}

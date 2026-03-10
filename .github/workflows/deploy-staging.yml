@@ -149,6 +149,10 @@ jobs:
             chmod +x source/deployment/scripts/ensure-zero-downtime.sh
             sudo source/deployment/scripts/ensure-zero-downtime.sh staging.taskai.cc
 
+            # Ensure MCP nginx forwards X-Agent-Name header for AI attribution
+            chmod +x source/deployment/scripts/ensure-mcp-agent-header.sh
+            sudo source/deployment/scripts/ensure-mcp-agent-header.sh mcp.staging.taskai.cc
+
             # Build new images while old containers are still running (zero-downtime)
             docker compose -f source/docker-compose.yml -p taskai-staging build --build-arg VERSION="\$VERSION" --build-arg GIT_COMMIT="\$GIT_COMMIT" --build-arg BUILD_TIME="\$BUILD_TIME"
             # Recreate containers with new images (stops old → starts new per-service)

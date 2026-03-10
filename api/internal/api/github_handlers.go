@@ -381,7 +381,7 @@ query($owner: String!, $repo: String!) {
 // by paginating through all items of the given project.
 // statusFieldID is the GraphQL ID of the status field (from fetchProjectStatusColumns); used for
 // precise matching so fields named "Stage", "Phase", etc. work correctly.
-func fetchProjectIssueStatuses(ctx context.Context, token, projectID, statusFieldID string) (map[int]ghProjectItemStatus, error) {
+func fetchProjectIssueStatuses(ctx context.Context, token, projectID, statusFieldID string, logger *zap.Logger) (map[int]ghProjectItemStatus, error) {
 	result := map[int]ghProjectItemStatus{}
 	if token == "" || projectID == "" {
 		return result, nil
@@ -456,6 +456,19 @@ query($projectId: ID!, $cursor: String) {
 			}
 			info := ghProjectItemStatus{ItemID: item.ID}
 			for _, fv := range item.FieldValues.Nodes {
+				// Temporary diagnostic: log field values for the first few items
+				if len(result) < 3 && logger != nil {
+					logger.Info("GraphQL field value",
+						zap.Int("issue_number", item.Content.Number),
+						zap.String("fv.Name", fv.Name),
+						zap.String("fv.Date", fv.Date),
+						zap.String("fv.Title", fv.Title),
+						zap.String("fv.StartDate", fv.StartDate),
+						zap.Int("fv.Duration", fv.Duration),
+						zap.String("fv.Field.ID", fv.Field.ID),
+						zap.String("fv.Field.Name", fv.Field.Name),
+					)
+				}
 				// Capture status from single-select field
 				if fv.Name != "" {
 					// Match by field ID when available (handles "Stage", "Phase", etc.)
@@ -474,12 +487,10 @@ query($projectId: ID!, $cursor: String) {
 						info.DueDate = fv.Date
 					}
 				}
-				// Capture iteration field (sprint)
+				// Capture iteration field (sprint) — Title is only set for
+				// ProjectV2ItemFieldIterationValue, so any non-empty Title is an iteration.
 				if fv.Title != "" {
-					lower := strings.ToLower(fv.Field.Name)
-					if strings.Contains(lower, "sprint") || strings.Contains(lower, "iteration") {
-						info.IterationTitle = fv.Title
-					}
+					info.IterationTitle = fv.Title
 				}
 			}
 			result[item.Content.Number] = info
@@ -1538,7 +1549,7 @@ func (s *Server) handleGitHubImport(w http.ResponseWriter, r *http.Request, doUp
 				s.db.Rebind(`UPDATE projects SET github_project_id = ?, github_status_field_id = ? WHERE id = ?`),
 				projInfo.ProjectID, projInfo.FieldID, projectID)
 
-			if m, err := fetchProjectIssueStatuses(ctx, token, projInfo.ProjectID, projInfo.FieldID); err == nil {
+			if m, err := fetchProjectIssueStatuses(ctx, token, projInfo.ProjectID, projInfo.FieldID, s.logger); err == nil {
 				issueColumnMap = m
 			}
 
@@ -1558,13 +1569,22 @@ func (s *Server) handleGitHubImport(w http.ResponseWriter, r *http.Request, doUp
 		{
 			// Collect unique iteration titles from the project board
 			iterationNames := map[string]struct{}{}
+			iterationCount := 0
 			for _, item := range issueColumnMap {
 				if item.IterationTitle != "" {
 					iterationNames[item.IterationTitle] = struct{}{}
+					iterationCount++
 				}
 			}
+			s.logger.Info("Iteration field stats from Projects V2",
+				zap.Int("project_id", projectID),
+				zap.Int("total_project_items", len(issueColumnMap)),
+				zap.Int("items_with_iteration", iterationCount),
+				zap.Int("unique_iteration_names", len(iterationNames)),
+			)
 			// Look up each iteration name as a sprint; create if missing
 			for name := range iterationNames {
+				s.logger.Info("Found iteration", zap.String("iteration_name", name), zap.Int("project_id", projectID))
 				var sid int64
 				err := s.db.QueryRowContext(ctx, `SELECT id FROM sprints WHERE project_id = $1 AND name = $2`, projectID, name).Scan(&sid)
 				if err == sql.ErrNoRows {
@@ -3055,7 +3075,7 @@ func (s *Server) runGitHubImportCore(ctx context.Context, projectID int, owner, 
 			projInfo, _ = fetchProjectStatusColumns(ctx, token, owner, repo)
 		}
 		if projInfo != nil {
-			if m, err := fetchProjectIssueStatuses(ctx, token, projInfo.ProjectID, projInfo.FieldID); err == nil {
+			if m, err := fetchProjectIssueStatuses(ctx, token, projInfo.ProjectID, projInfo.FieldID, s.logger); err == nil {
 				issueColumnMap = m
 			}
 		}

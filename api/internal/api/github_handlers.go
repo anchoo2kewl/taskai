@@ -89,10 +89,11 @@ type ghProjectInfo struct {
 
 // ghProjectItemStatus groups an item's Projects V2 status with its item ID.
 type ghProjectItemStatus struct {
-	StatusName string
-	ItemID     string // GraphQL item ID
-	StartDate  string // "YYYY-MM-DD" from Projects V2 date field, may be empty
-	DueDate    string // "YYYY-MM-DD", may be empty
+	StatusName     string
+	ItemID         string // GraphQL item ID
+	StartDate      string // "YYYY-MM-DD" from Projects V2 date field, may be empty
+	DueDate        string // "YYYY-MM-DD", may be empty
+	IterationTitle string // Sprint/iteration name from Projects V2 iteration field
 }
 
 type ghReactions struct {
@@ -120,9 +121,12 @@ type ghProjectItemContent struct {
 }
 
 type ghProjectFieldValue struct {
-	Name  string `json:"name"`  // selected option name (for single-select fields)
-	Date  string `json:"date"`  // date value (for date fields)
-	Field struct {
+	Name      string `json:"name"`      // selected option name (for single-select fields)
+	Date      string `json:"date"`      // date value (for date fields)
+	Title     string `json:"title"`     // iteration title (e.g. "Sprint 139")
+	StartDate string `json:"startDate"` // iteration start date
+	Duration  int    `json:"duration"`  // iteration duration in days
+	Field     struct {
 		ID   string `json:"id"`   // field GraphQL ID
 		Name string `json:"name"` // field name (e.g. "Status")
 	} `json:"field"`
@@ -403,6 +407,12 @@ query($projectId: ID!, $cursor: String) {
                 date
                 field { ... on ProjectV2Field { id name } }
               }
+              ... on ProjectV2ItemFieldIterationValue {
+                title
+                startDate
+                duration
+                field { ... on ProjectV2IterationField { id name } }
+              }
             }
           }
         }
@@ -462,6 +472,13 @@ query($projectId: ID!, $cursor: String) {
 						info.StartDate = fv.Date
 					} else if strings.Contains(lower, "due") || strings.Contains(lower, "end") {
 						info.DueDate = fv.Date
+					}
+				}
+				// Capture iteration field (sprint)
+				if fv.Title != "" {
+					lower := strings.ToLower(fv.Field.Name)
+					if strings.Contains(lower, "sprint") || strings.Contains(lower, "iteration") {
+						info.IterationTitle = fv.Title
 					}
 				}
 			}
@@ -1206,11 +1223,21 @@ func (s *Server) handleGitHubImport(w http.ResponseWriter, r *http.Request, doUp
 		}
 	}
 
+	// Determine sync mode for logging
+	syncMode := "incremental_all"
+	if req.ForceFullSync {
+		syncMode = "full_all"
+	} else if req.Filter != nil && req.Filter.State == "open" {
+		syncMode = "incremental_open"
+	} else if req.Filter != nil && req.Filter.State == "closed" {
+		syncMode = "incremental_closed"
+	}
+
 	// Record sync log entry
 	var syncLogID int64
 	_ = s.db.QueryRowContext(ctx, `
-		INSERT INTO github_sync_logs (project_id, triggered_by) VALUES ($1, 'manual') RETURNING id
-	`, projectID).Scan(&syncLogID)
+		INSERT INTO github_sync_logs (project_id, triggered_by, sync_mode) VALUES ($1, 'manual', $2) RETURNING id
+	`, projectID, syncMode).Scan(&syncLogID)
 
 	finishSyncLog := func(result *GitHubPullResponse, syncErr error) {
 		status := "success"
@@ -1526,6 +1553,29 @@ func (s *Server) handleGitHubImport(w http.ResponseWriter, r *http.Request, doUp
 			}
 		}
 
+		// Build iteration_title→sprint_id map from Projects V2 iteration values
+		iterationToSprintID := map[string]int64{}
+		{
+			// Collect unique iteration titles from the project board
+			iterationNames := map[string]struct{}{}
+			for _, item := range issueColumnMap {
+				if item.IterationTitle != "" {
+					iterationNames[item.IterationTitle] = struct{}{}
+				}
+			}
+			// Look up each iteration name as a sprint; create if missing
+			for name := range iterationNames {
+				var sid int64
+				err := s.db.QueryRowContext(ctx, `SELECT id FROM sprints WHERE project_id = $1 AND name = $2`, projectID, name).Scan(&sid)
+				if err == sql.ErrNoRows {
+					err = s.db.QueryRowContext(ctx, `INSERT INTO sprints (project_id, name) VALUES ($1, $2) RETURNING id`, projectID, name).Scan(&sid)
+				}
+				if err == nil {
+					iterationToSprintID[name] = sid
+				}
+			}
+		}
+
 		// Get next task_number baseline
 		var maxNumber sql.NullInt64
 		_ = s.db.QueryRowContext(ctx, `SELECT MAX(task_number) FROM tasks WHERE project_id = $1`, projectID).Scan(&maxNumber)
@@ -1567,9 +1617,14 @@ func (s *Server) handleGitHubImport(w http.ResponseWriter, r *http.Request, doUp
 				}
 			}
 
-			// Resolve sprint
+			// Resolve sprint: prefer Projects V2 iteration, fall back to milestone
 			var sprintID *int64
-			if issue.Milestone != nil {
+			if itemStatus, ok := issueColumnMap[issue.Number]; ok && itemStatus.IterationTitle != "" {
+				if sid, ok := iterationToSprintID[itemStatus.IterationTitle]; ok {
+					sprintID = &sid
+				}
+			}
+			if sprintID == nil && issue.Milestone != nil {
 				if sid, ok := milestoneToSprintID[issue.Milestone.Number]; ok {
 					sprintID = &sid
 				}
@@ -2707,6 +2762,7 @@ type GitHubSyncLog struct {
 	CompletedAt     *time.Time `json:"completed_at,omitempty"`
 	Status          string     `json:"status"`
 	TriggeredBy     string     `json:"triggered_by"`
+	SyncMode        string     `json:"sync_mode"`
 	CreatedTasks    int        `json:"created_tasks"`
 	UpdatedTasks    int        `json:"updated_tasks"`
 	CreatedComments int        `json:"created_comments"`
@@ -2735,7 +2791,7 @@ func (s *Server) HandleGetGitHubSyncLogs(w http.ResponseWriter, r *http.Request)
 	}
 
 	rows, err := s.db.QueryContext(r.Context(), `
-		SELECT id, project_id, started_at, completed_at, status, triggered_by,
+		SELECT id, project_id, started_at, completed_at, status, triggered_by, COALESCE(sync_mode, ''),
 		       created_tasks, updated_tasks, created_comments, skipped_tasks, COALESCE(pushed_comments, 0), error_message
 		FROM github_sync_logs
 		WHERE project_id = $1
@@ -2754,7 +2810,7 @@ func (s *Server) HandleGetGitHubSyncLogs(w http.ResponseWriter, r *http.Request)
 		var l GitHubSyncLog
 		var completedAt sql.NullTime
 		var errMsg sql.NullString
-		if err := rows.Scan(&l.ID, &l.ProjectID, &l.StartedAt, &completedAt, &l.Status, &l.TriggeredBy,
+		if err := rows.Scan(&l.ID, &l.ProjectID, &l.StartedAt, &completedAt, &l.Status, &l.TriggeredBy, &l.SyncMode,
 			&l.CreatedTasks, &l.UpdatedTasks, &l.CreatedComments, &l.SkippedTasks, &l.PushedComments, &errMsg); err != nil {
 			continue
 		}
@@ -2924,10 +2980,11 @@ func (s *Server) runGitHubImportCore(ctx context.Context, projectID int, owner, 
 	}
 
 	// Record sync log
+	syncMode := "auto"
 	var syncLogID int64
 	_ = s.db.QueryRowContext(ctx,
-		s.db.Rebind(`INSERT INTO github_sync_logs (project_id, triggered_by) VALUES (?, ?) RETURNING id`),
-		projectID, triggeredBy).Scan(&syncLogID)
+		s.db.Rebind(`INSERT INTO github_sync_logs (project_id, triggered_by, sync_mode) VALUES (?, ?, ?) RETURNING id`),
+		projectID, triggeredBy, syncMode).Scan(&syncLogID)
 
 	defer func() {
 		if syncLogID != 0 {
@@ -3027,6 +3084,27 @@ func (s *Server) runGitHubImportCore(ctx context.Context, projectID int, owner, 
 			}
 		}
 
+		// Build iteration_title→sprint_id map from Projects V2 iteration values
+		iterationToSprintID := map[string]int64{}
+		{
+			iterationNames := map[string]struct{}{}
+			for _, item := range issueColumnMap {
+				if item.IterationTitle != "" {
+					iterationNames[item.IterationTitle] = struct{}{}
+				}
+			}
+			for name := range iterationNames {
+				var sid int64
+				err := s.db.QueryRowContext(ctx, `SELECT id FROM sprints WHERE project_id = $1 AND name = $2`, projectID, name).Scan(&sid)
+				if err == sql.ErrNoRows {
+					err = s.db.QueryRowContext(ctx, `INSERT INTO sprints (project_id, name) VALUES ($1, $2) RETURNING id`, projectID, name).Scan(&sid)
+				}
+				if err == nil {
+					iterationToSprintID[name] = sid
+				}
+			}
+		}
+
 		var maxNumber sql.NullInt64
 		_ = s.db.QueryRowContext(ctx, `SELECT MAX(task_number) FROM tasks WHERE project_id = $1`, projectID).Scan(&maxNumber)
 		nextNumber := int64(1)
@@ -3066,9 +3144,14 @@ func (s *Server) runGitHubImportCore(ctx context.Context, projectID int, owner, 
 				}
 			}
 
-			// Resolve sprint from milestone
+			// Resolve sprint: prefer Projects V2 iteration, fall back to milestone
 			var sprintID *int64
-			if issue.Milestone != nil {
+			if itemStatus, ok := issueColumnMap[issue.Number]; ok && itemStatus.IterationTitle != "" {
+				if sid, ok := iterationToSprintID[itemStatus.IterationTitle]; ok {
+					sprintID = &sid
+				}
+			}
+			if sprintID == nil && issue.Milestone != nil {
 				if sid, ok := milestoneToSprintID[issue.Milestone.Number]; ok {
 					sprintID = &sid
 				}

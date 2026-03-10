@@ -366,6 +366,7 @@ export interface GitHubSyncLog {
   completed_at?: string
   status: 'running' | 'success' | 'failed'
   triggered_by: 'manual' | 'auto'
+  sync_mode: string
   created_tasks: number
   updated_tasks: number
   created_comments: number

@@ -2041,6 +2041,11 @@ export default function ProjectSettings({ embedded, projectIdOverride }: Project
                         <span className={`px-1.5 py-0.5 rounded text-xs font-medium shrink-0 ${log.triggered_by === 'auto' ? 'bg-blue-500/20 text-blue-300' : 'bg-gray-500/20 text-gray-300'}`}>
                           {log.triggered_by}
                         </span>
+                        {log.sync_mode && (
+                          <span className="px-1.5 py-0.5 rounded text-xs font-medium shrink-0 bg-purple-500/20 text-purple-300">
+                            {log.sync_mode.replace(/_/g, ' ')}
+                          </span>
+                        )}
                         <span className={`px-1.5 py-0.5 rounded text-xs font-medium shrink-0 ${log.status === 'success' ? 'bg-success-500/20 text-success-300' : log.status === 'failed' ? 'bg-red-500/20 text-red-300' : 'bg-yellow-500/20 text-yellow-300'}`}>
                           {log.status}
                         </span>

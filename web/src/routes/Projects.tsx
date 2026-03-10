@@ -5,10 +5,16 @@ import { useNavigate } from 'react-router-dom'
 export default function Projects() {
   const navigate = useNavigate()
 
+  // Redirect to last project only once per session (on initial app load).
+  // Subsequent visits to /app show the project list to avoid surprising redirects.
   useEffect(() => {
-    const lastProject = localStorage.getItem('taskai_last_project')
-    if (lastProject) {
-      navigate(`/app/projects/${lastProject}`, { replace: true })
+    const alreadyRedirected = sessionStorage.getItem('taskai_initial_redirect')
+    if (!alreadyRedirected) {
+      const lastProject = localStorage.getItem('taskai_last_project')
+      if (lastProject) {
+        sessionStorage.setItem('taskai_initial_redirect', '1')
+        navigate(`/app/projects/${lastProject}`, { replace: true })
+      }
     }
   }, []) // eslint-disable-line react-hooks/exhaustive-deps
 

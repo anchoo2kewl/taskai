@@ -25,12 +25,13 @@ export default function Sidebar({ onCreateProject, onLogout, isOpen, onClose, is
 
   // Remember last selected project so nav items stay active on Settings/Admin pages
   const [lastProjectId, setLastProjectId] = useState<string | null>(
-    () => localStorage.getItem('last-project-id')
+    () => localStorage.getItem('taskai_last_project')
   )
   useEffect(() => {
     if (urlProjectId) {
       setLastProjectId(urlProjectId)
-      localStorage.setItem('last-project-id', urlProjectId)
+      // Note: ProjectDetail also sets this key; keep in sync
+      localStorage.setItem('taskai_last_project', urlProjectId)
     }
   }, [urlProjectId])
 

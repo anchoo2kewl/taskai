@@ -146,7 +146,8 @@ export default function CommandPalette() {
       category: 'navigation',
       keywords: ['sprints', 'cycles', 'iterations'],
       action: () => {
-        navigate('/app/sprints')
+        const pid = localStorage.getItem('taskai_last_project')
+        navigate(pid ? `/app/projects/${pid}/sprints` : '/app')
         setIsOpen(false)
       },
     },
@@ -158,7 +159,8 @@ export default function CommandPalette() {
       category: 'navigation',
       keywords: ['tags', 'labels'],
       action: () => {
-        navigate('/app/tags')
+        const pid = localStorage.getItem('taskai_last_project')
+        navigate(pid ? `/app/projects/${pid}/tags` : '/app')
         setIsOpen(false)
       },
     },

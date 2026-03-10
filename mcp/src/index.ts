@@ -512,32 +512,32 @@ app.post("/mcp", async (req, res) => {
     }
   }
 
-  // Extract agent name from MCP initialize message if present
-  const messages = Array.isArray(req.body) ? req.body : [req.body];
-  for (const msg of messages) {
-    if (msg?.method === "initialize" && msg?.params?.clientInfo?.name) {
-      client.agentName = normalizeAgentName(msg.params.clientInfo.name);
-      // Persist in cache so subsequent stateless requests retain it
-      const entry = apiKeyCache.get(apiKey);
-      if (entry) entry.agentName = client.agentName;
-      break;
+  // Detect agent name — check HTTP header first (most reliable, sent on every request),
+  // then MCP initialize message, then cache as last resort
+  const headerAgent = req.headers["x-agent-name"] as string | undefined;
+  if (headerAgent) {
+    client.agentName = normalizeAgentName(headerAgent);
+  }
+
+  if (!client.agentName) {
+    const messages = Array.isArray(req.body) ? req.body : [req.body];
+    for (const msg of messages) {
+      if (msg?.method === "initialize" && msg?.params?.clientInfo?.name) {
+        client.agentName = normalizeAgentName(msg.params.clientInfo.name);
+        break;
+      }
     }
   }
 
-  // Apply cached agent name if not found in current request
   if (!client.agentName) {
     const entry = apiKeyCache.get(apiKey);
     if (entry?.agentName) client.agentName = entry.agentName;
   }
 
-  // Fallback: check incoming HTTP X-Agent-Name header (sent by MCP clients via custom headers config)
-  if (!client.agentName) {
-    const headerAgent = req.headers["x-agent-name"] as string | undefined;
-    if (headerAgent) {
-      client.agentName = normalizeAgentName(headerAgent);
-      const entry = apiKeyCache.get(apiKey);
-      if (entry) entry.agentName = client.agentName;
-    }
+  // Persist agent name in cache for future requests
+  if (client.agentName) {
+    const entry = apiKeyCache.get(apiKey);
+    if (entry) entry.agentName = client.agentName;
   }
 
   // Create MCP server with authenticated client and cached user

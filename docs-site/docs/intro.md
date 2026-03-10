@@ -29,3 +29,4 @@ TaskAI is an **AI-native project management platform** built for teams that work
 - [Quickstart Guide](/getting-started/quickstart) — Get up and running in minutes
 - [API Reference](/api/authentication) — Integrate with the REST API
 - [MCP Integration](/mcp/overview) — Connect AI agents to TaskAI
+- [Interactive API Explorer](https://taskai.cc/api/docs) — Try API calls with the Swagger UI

@@ -145,12 +145,16 @@ jobs:
             chmod +x source/deployment/scripts/ensure-draw-route.sh
             sudo source/deployment/scripts/ensure-draw-route.sh staging.taskai.cc
 
-            docker compose -f source/docker-compose.yml -p taskai-staging down || true
-            echo "🧹 Pruning only dangling images/cache to preserve base image layers..."
-            docker builder prune -f || true
-            docker image prune -f || true
+            # Add zero-downtime nginx directives (error pages + upstream retry)
+            chmod +x source/deployment/scripts/ensure-zero-downtime.sh
+            sudo source/deployment/scripts/ensure-zero-downtime.sh staging.taskai.cc
+
+            # Build new images while old containers are still running (zero-downtime)
             docker compose -f source/docker-compose.yml -p taskai-staging build --build-arg VERSION="\$VERSION" --build-arg GIT_COMMIT="\$GIT_COMMIT" --build-arg BUILD_TIME="\$BUILD_TIME"
+            # Recreate containers with new images (stops old → starts new per-service)
             docker compose -f source/docker-compose.yml -p taskai-staging up -d --force-recreate --remove-orphans
+            # Clean up old images after new containers are running
+            docker image prune -f || true
             sleep 15
             docker compose -f source/docker-compose.yml -p taskai-staging ps
           ENDSSH

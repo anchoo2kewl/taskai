@@ -26,6 +26,34 @@ interface CacheEntry { user: User; validUntil: number; agentName?: string }
 const apiKeyCache = new Map<string, CacheEntry>();
 const CACHE_TTL_MS = 5 * 60 * 1000;
 
+// --- Persistent agent name cache (survives container restarts) ---
+import { readFileSync, writeFileSync, mkdirSync } from "fs";
+const AGENT_CACHE_PATH = "/tmp/taskai-mcp-agents.json";
+
+function loadAgentCache(): Record<string, string> {
+  try { return JSON.parse(readFileSync(AGENT_CACHE_PATH, "utf-8")); }
+  catch { return {}; }
+}
+
+function saveAgentName(apiKeyHash: string, agentName: string): void {
+  const cache = loadAgentCache();
+  cache[apiKeyHash] = agentName;
+  try { writeFileSync(AGENT_CACHE_PATH, JSON.stringify(cache)); } catch { /* best-effort */ }
+}
+
+function getPersistedAgentName(apiKeyHash: string): string | undefined {
+  return loadAgentCache()[apiKeyHash];
+}
+
+/** Simple hash to avoid storing raw API keys on disk */
+function hashKey(key: string): string {
+  let h = 0;
+  for (let i = 0; i < key.length; i++) {
+    h = ((h << 5) - h + key.charCodeAt(i)) | 0;
+  }
+  return h.toString(36);
+}
+
 /**
  * Helper to format response with minimal tokens by default.
  * Use verbose=true to get full details with pretty formatting.
@@ -512,8 +540,11 @@ app.post("/mcp", async (req, res) => {
     }
   }
 
-  // Detect agent name — check HTTP header first (most reliable, sent on every request),
-  // then MCP initialize message, then cache as last resort
+  // Detect agent name from multiple sources (in priority order):
+  // 1. X-Agent-Name HTTP header (explicit, most reliable when sent)
+  // 2. MCP initialize message clientInfo.name
+  // 3. User-Agent header (fallback: detect known MCP clients)
+  // 4. Cached from a previous request with the same API key
   const headerAgent = req.headers["x-agent-name"] as string | undefined;
   if (headerAgent) {
     client.agentName = normalizeAgentName(headerAgent);
@@ -529,15 +560,34 @@ app.post("/mcp", async (req, res) => {
     }
   }
 
+  // Detect agent from User-Agent header (MCP clients often identify themselves)
+  if (!client.agentName) {
+    const ua = (req.headers["user-agent"] || "").toLowerCase();
+    for (const [key, name] of Object.entries(AGENT_NAME_MAP)) {
+      if (ua.includes(key)) {
+        client.agentName = name;
+        break;
+      }
+    }
+  }
+
   if (!client.agentName) {
     const entry = apiKeyCache.get(apiKey);
     if (entry?.agentName) client.agentName = entry.agentName;
   }
 
-  // Persist agent name in cache for future requests
+  // Final fallback: persistent file cache (survives container restarts)
+  const keyHash = hashKey(apiKey);
+  if (!client.agentName) {
+    const persisted = getPersistedAgentName(keyHash);
+    if (persisted) client.agentName = persisted;
+  }
+
+  // Persist agent name in both memory and file cache
   if (client.agentName) {
     const entry = apiKeyCache.get(apiKey);
     if (entry) entry.agentName = client.agentName;
+    saveAgentName(keyHash, client.agentName);
   }
 
   // Create MCP server with authenticated client and cached user

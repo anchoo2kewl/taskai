@@ -1542,20 +1542,21 @@ func (s *Server) handleGitHubImport(w http.ResponseWriter, r *http.Request) {
 					}
 				}
 			}
-			// DEBUG: log status resolution for first 5 issues
-			if i < 5 {
-				s.logger.Info("DEBUG: task status resolution",
+			// DEBUG: log Code Review status resolution and Sprint 139 issues
+			if is, ok := issueColumnMap[colKey]; ok && is.StatusName == "Code Review" {
+				s.logger.Info("DEBUG: Code Review task",
 					zap.String("colKey", colKey),
 					zap.String("title", issue.Title),
-					zap.Bool("inColumnMap", func() bool { _, ok := issueColumnMap[colKey]; return ok }()),
-					zap.String("boardStatus", func() string {
-						if is, ok := issueColumnMap[colKey]; ok {
-							return is.StatusName
-						}
-						return "<not_in_map>"
-					}()),
 					zap.Any("swimLaneID", swimLaneID),
-					zap.Int("statusAssignmentsLen", len(req.StatusAssignments)),
+					zap.String("iteration", is.IterationTitle),
+				)
+			}
+			if is, ok := issueColumnMap[colKey]; ok && is.IterationTitle == "Sprint 139" {
+				s.logger.Info("DEBUG: Sprint 139 task",
+					zap.String("colKey", colKey),
+					zap.String("title", issue.Title),
+					zap.String("boardStatus", is.StatusName),
+					zap.Any("swimLaneID", swimLaneID),
 				)
 			}
 			// 2. Status-like labels

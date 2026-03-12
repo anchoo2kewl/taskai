@@ -1,0 +1,22 @@
+# Docker Hub image overlay for TaskAI
+# Usage: docker compose -f docker-compose.yml -f docker-compose.hub.yml pull
+#        docker compose -f docker-compose.yml -f docker-compose.hub.yml up -d --no-build
+#
+# Set IMAGE_TAG to a git short SHA or "latest"
+
+services:
+  api:
+    image: anchoo2kewl/taskai-api:${IMAGE_TAG:-latest}
+    build: !reset null
+
+  web:
+    image: anchoo2kewl/taskai-web:${IMAGE_TAG:-latest}
+    build: !reset null
+
+  mcp:
+    image: anchoo2kewl/taskai-mcp:${IMAGE_TAG:-latest}
+    build: !reset null
+
+  yjs-processor:
+    image: anchoo2kewl/taskai-yjs:${IMAGE_TAG:-latest}
+    build: !reset null

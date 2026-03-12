@@ -181,18 +181,21 @@ $SSH_CMD "bash -s" <<REMOTE_EOF
     sudo $GIT_DIR/deployment/scripts/ensure-mcp-agent-header.sh $MCP_DOMAIN || true
   fi
 
+  # Pull pre-built images from Docker Hub
+  export IMAGE_TAG='$GIT_SHORT'
+
   # Build and deploy
   if [ '$ENV' = 'uat' ]; then
     # UAT: simple down/up (shared server, no zero-downtime needed)
     $COMPOSE_CMD down || true
     docker builder prune -f || true
     docker image prune -f || true
-    $COMPOSE_CMD build --build-arg VERSION="\$VERSION" --build-arg GIT_COMMIT="\$GIT_COMMIT" --build-arg BUILD_TIME="\$BUILD_TIME"
-    $COMPOSE_CMD up -d --force-recreate --remove-orphans
+    $COMPOSE_CMD -f docker-compose.yml -f docker-compose.hub.yml pull api web mcp yjs-processor
+    $COMPOSE_CMD -f docker-compose.yml -f docker-compose.hub.yml up -d --no-build --force-recreate --remove-orphans
   else
-    # Staging/Production: zero-downtime (build first, then recreate)
-    $COMPOSE_CMD build --build-arg VERSION="\$VERSION" --build-arg GIT_COMMIT="\$GIT_COMMIT" --build-arg BUILD_TIME="\$BUILD_TIME"
-    $COMPOSE_CMD up -d --force-recreate --remove-orphans
+    # Staging/Production: zero-downtime (pull first, then recreate)
+    $COMPOSE_CMD -f source/docker-compose.hub.yml pull api web mcp yjs-processor
+    $COMPOSE_CMD -f source/docker-compose.hub.yml up -d --no-build --force-recreate --remove-orphans
     docker image prune -f || true
   fi
 

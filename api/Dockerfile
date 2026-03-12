@@ -1,8 +1,9 @@
-# Build stage
-FROM golang:1.26-alpine AS builder
+# Build stage — runs on host arch, cross-compiles via GOARCH
+# Uses modernc.org/sqlite (pure Go) so CGO is not needed
+FROM --platform=$BUILDPLATFORM golang:1.26-alpine AS builder
 
 # Install build dependencies
-RUN apk add --no-cache git gcc musl-dev sqlite-dev
+RUN apk add --no-cache git
 
 WORKDIR /build
 
@@ -17,14 +18,14 @@ COPY . .
 ARG VERSION=dev
 ARG GIT_COMMIT=unknown
 ARG BUILD_TIME=unknown
+ARG TARGETARCH
 
-# Build static binary with CGO enabled for SQLite and version info
-RUN CGO_ENABLED=1 go build \
-    -ldflags="-w -s -extldflags '-static' \
+# Build static binary — no CGO needed (modernc.org/sqlite is pure Go)
+RUN CGO_ENABLED=0 GOOS=linux GOARCH=${TARGETARCH} go build \
+    -ldflags="-w -s \
       -X 'taskai/internal/version.Version=${VERSION}' \
       -X 'taskai/internal/version.GitCommit=${GIT_COMMIT}' \
       -X 'taskai/internal/version.BuildTime=${BUILD_TIME}'" \
-    -tags sqlite_omit_load_extension \
     -o taskai \
     ./cmd/api
 

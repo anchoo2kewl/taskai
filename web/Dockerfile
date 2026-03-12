@@ -1,5 +1,5 @@
-# Build stage — React SPA
-FROM node:20-alpine AS builder
+# Build stage — React SPA, runs on host arch for speed
+FROM --platform=$BUILDPLATFORM node:24-alpine AS builder
 
 # Build arguments for version info
 ARG VERSION=dev
@@ -14,9 +14,8 @@ COPY api/openapi.yaml /api/openapi.yaml
 # Copy package files
 COPY web/package*.json ./
 
-# Install dependencies with workaround for rollup native binaries
-RUN npm ci --production=false && \
-    npm install @rollup/rollup-linux-arm64-musl --save-optional
+# Install dependencies (BUILDPLATFORM finds correct native binaries automatically)
+RUN npm ci --production=false
 
 # Copy web source code
 COPY web/ .
@@ -30,8 +29,8 @@ ENV VITE_GIT_COMMIT=$GIT_COMMIT
 ENV VITE_BUILD_TIME=$BUILD_TIME
 RUN npm run build
 
-# Build stage — Docusaurus docs
-FROM node:20-alpine AS docs-builder
+# Build stage — Docusaurus docs, runs on host arch for speed
+FROM --platform=$BUILDPLATFORM node:24-alpine AS docs-builder
 
 WORKDIR /docs-build
 

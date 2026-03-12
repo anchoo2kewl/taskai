@@ -26,6 +26,8 @@ stages:
     if: type = push OR type = pull_request
   - name: sonarqube
     if: branch = main AND type = push
+  - name: build-images
+    if: branch IN (main, uat, production) AND type = push
   - name: deploy-staging
     if: branch = main AND type = push
   - name: deploy-uat
@@ -64,7 +66,7 @@ jobs:
     - stage: test
       name: "Web Tests + Build"
       language: node_js
-      node_js: "20"
+      node_js: "24"
       cache: npm
       before_script:
         - cd web
@@ -101,6 +103,14 @@ jobs:
             -Dsonar.host.url="$SONAR_HOST_URL" \
             -Dsonar.token="$SONAR_TOKEN" \
             -Dsonar.projectVersion="$(git describe --tags --always 2>/dev/null || echo dev)"
+
+    # ── Build & Push Docker Images ────────────────────────────────────────
+    - stage: build-images
+      name: "Build & Push Docker Images"
+      services:
+        - docker
+      script:
+        - bash deployment/scripts/travis-build-images.sh
 
     # ── Deploy Staging ─────────────────────────────────────────────────────
     - stage: deploy-staging

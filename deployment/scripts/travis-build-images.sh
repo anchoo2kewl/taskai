@@ -58,7 +58,10 @@ build_and_tag() {
 
   echo "$name digest: $digest"
 
-  # Tag as staging-latest via Harbor API
+  # Tag as staging-latest via Harbor API (delete existing immutable tag first)
+  curl -sf -u "$HARBOR_USERNAME:$HARBOR_PASSWORD" \
+    -X DELETE "https://harbor.biswas.me/api/v2.0/projects/biswas/repositories/${name}/artifacts/staging-latest/tags/staging-latest" 2>/dev/null || true
+
   curl -sf -u "$HARBOR_USERNAME:$HARBOR_PASSWORD" \
     -X POST "https://harbor.biswas.me/api/v2.0/projects/biswas/repositories/${name}/artifacts/${digest}/tags" \
     -H "Content-Type: application/json" \

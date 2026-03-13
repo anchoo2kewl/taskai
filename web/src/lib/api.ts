@@ -7,7 +7,7 @@ export type AuthResponse = components['schemas']['AuthResponse']
 export type SignupRequest = components['schemas']['SignupRequest']
 export type LoginRequest = components['schemas']['LoginRequest']
 export type Project = components['schemas']['Project']
-export type Task = components['schemas']['Task'] & { task_number?: number; github_issue_number?: number | null; start_date?: string | null; github_reactions?: GitHubReaction[] }
+export type Task = components['schemas']['Task'] & { task_number?: number; github_issue_number?: number | null; github_repo?: string; start_date?: string | null; github_reactions?: GitHubReaction[]; agent_name?: string | null }
 export type ApiError = components['schemas']['Error']
 
 export interface GitHubReaction {
@@ -22,6 +22,7 @@ export interface TaskComment {
   task_id: number
   user_id: number
   user_name?: string | null
+  agent_name?: string | null
   comment: string
   created_at: string
   updated_at: string
@@ -244,6 +245,7 @@ export interface SearchTaskResult {
   snippet: string
   status: string
   priority: string
+  github_issue_number?: number
 }
 
 export interface GlobalSearchWikiResult {
@@ -319,14 +321,11 @@ export interface GitHubLabel {
   color: string
 }
 
-export interface GitHubPreviewResponse {
-  milestone_count: number
-  label_count: number
-  issue_count: number
-  github_users: GitHubUserMatch[]
-  statuses: GitHubStatusMatch[]
-  milestones: GitHubMilestone[]
-  labels: GitHubLabel[]
+export interface GitHubDiscoverMappingsResponse {
+  discovered_statuses: number
+  discovered_users: number
+  total_statuses: number
+  total_users: number
 }
 
 export interface GitHubImportFilter {
@@ -364,6 +363,7 @@ export interface GitHubSyncLog {
   completed_at?: string
   status: 'running' | 'success' | 'failed'
   triggered_by: 'manual' | 'auto'
+  sync_mode: string
   created_tasks: number
   updated_tasks: number
   created_comments: number
@@ -397,6 +397,7 @@ export interface UserWithStats {
   last_login_ip?: string | null
   failed_attempts: number
   invite_count: number
+  linked_providers: string[]
 }
 
 export interface UserActivity {
@@ -626,9 +627,9 @@ export interface BackupSettings {
   folder_id: string
   provider_name: string
   retention: {
-    full_days: number
-    alternate_days: number
-    weekly_days: number
+    FullDays: number      // PascalCase — Go struct has no json tags
+    AlternateDays: number
+    WeeklyDays: number
   }
   updated_at: string
 }
@@ -645,6 +646,12 @@ export interface BackupRecord {
   error_message: string
   started_at: string
   finished_at?: string
+}
+
+export interface BackupFolder {
+  id: string
+  name: string
+  parent_id: string
 }
 
 export interface Asset {
@@ -976,16 +983,10 @@ class ApiClient {
     })
   }
 
-  async githubPreview(
-    projectId: number,
-    token?: string,
-    onProgress?: (event: GitHubProgressEvent) => void
-  ): Promise<GitHubPreviewResponse> {
-    return this.streamGitHub<GitHubPreviewResponse>(
-      `/api/projects/${projectId}/github/preview`,
-      { token: token || '' },
-      onProgress ?? (() => {})
-    )
+  async githubDiscoverMappings(projectId: number): Promise<GitHubDiscoverMappingsResponse> {
+    return this.request<GitHubDiscoverMappingsResponse>(`/api/projects/${projectId}/github/discover-mappings`, {
+      method: 'POST',
+    })
   }
 
   // Stream a GitHub SSE endpoint and report progress events.
@@ -1040,18 +1041,6 @@ class ApiClient {
       }
     }
     throw new Error('Stream ended without result')
-  }
-
-  async githubPull(
-    projectId: number,
-    data: GitHubPullRequest,
-    onProgress?: (event: GitHubProgressEvent) => void
-  ): Promise<GitHubPullResponse> {
-    return this.streamGitHub(
-      `/api/projects/${projectId}/github/pull`,
-      data,
-      onProgress ?? (() => {})
-    )
   }
 
   async githubSync(
@@ -1477,7 +1466,7 @@ class ApiClient {
     return this.request<BackupSettings>('/api/admin/backup/settings')
   }
 
-  async updateBackupSettings(settings: { enabled?: boolean; cron_expression?: string; folder_id?: string }): Promise<BackupSettings> {
+  async updateBackupSettings(settings: { enabled?: boolean; cron_expression?: string; folder_id?: string; retention?: { FullDays: number; AlternateDays: number; WeeklyDays: number } }): Promise<BackupSettings> {
     return this.request<BackupSettings>('/api/admin/backup/settings', {
       method: 'PUT',
       body: JSON.stringify(settings),
@@ -1498,6 +1487,40 @@ class ApiClient {
 
   async disconnectBackup(): Promise<void> {
     return this.request<void>('/api/admin/backup/oauth/disconnect', { method: 'DELETE' })
+  }
+
+  async listBackupFolders(parentId = ''): Promise<BackupFolder[]> {
+    const q = parentId ? `?parentId=${encodeURIComponent(parentId)}` : ''
+    const resp = await this.request<{ folders: BackupFolder[] }>(`/api/admin/backup/folders${q}`)
+    return resp.folders ?? []
+  }
+
+  async createBackupFolder(name: string, parentId = ''): Promise<BackupFolder> {
+    return this.request<BackupFolder>('/api/admin/backup/folders', {
+      method: 'POST',
+      body: JSON.stringify({ name, parent_id: parentId }),
+    })
+  }
+
+  async downloadBackupRecord(id: string, filename: string): Promise<void> {
+    const url = `${this.baseURL}/api/admin/backup/history/${id}/download`
+    const resp = await fetch(url, {
+      headers: this.token ? { Authorization: `Bearer ${this.token}` } : {},
+    })
+    if (!resp.ok) throw new Error(`Download failed: ${resp.status}`)
+    const blob = await resp.blob()
+    const a = document.createElement('a')
+    a.href = URL.createObjectURL(blob)
+    a.download = filename
+    a.click()
+    URL.revokeObjectURL(a.href)
+  }
+
+  async copyFromEnv(sourceUrl: string, sourceApiKey: string): Promise<{ message: string; version: number; rows: number }> {
+    return this.request<{ message: string; version: number; rows: number }>('/api/admin/backup/copy-from-env', {
+      method: 'POST',
+      body: JSON.stringify({ source_url: sourceUrl, source_api_key: sourceApiKey }),
+    })
   }
 
   // Task attachment endpoints

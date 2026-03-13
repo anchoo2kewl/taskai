@@ -29,14 +29,16 @@ type GlobalSearchRequest struct {
 
 // SearchTaskResult represents a task in global search results
 type SearchTaskResult struct {
-	ID          int64  `json:"id"`
-	ProjectID   int64  `json:"project_id"`
-	ProjectName string `json:"project_name"`
-	TaskNumber  int    `json:"task_number"`
-	Title       string `json:"title"`
-	Snippet     string `json:"snippet"`
-	Status      string `json:"status"`
-	Priority    string `json:"priority"`
+	ID                int64  `json:"id"`
+	ProjectID         int64  `json:"project_id"`
+	ProjectName       string `json:"project_name"`
+	TaskNumber        int    `json:"task_number"`
+	Title             string `json:"title"`
+	Snippet           string `json:"snippet"`
+	Status            string `json:"status"`
+	Priority          string `json:"priority"`
+	GithubIssueNumber *int    `json:"github_issue_number,omitempty"`
+	GithubRepo        string  `json:"github_repo,omitempty"`
 }
 
 // GlobalSearchWikiResult represents a wiki page in global search results
@@ -233,14 +235,23 @@ func (s *Server) searchTasksPostgres(ctx context.Context, req GlobalSearchReques
 	// $1 = query (for FTS), $2 = query (for ILIKE fallback), $3 = limit
 	args := []interface{}{req.Query, req.Query, req.Limit}
 
+	// Check if query looks like a GitHub issue number for exact match
+	issueNumFilter := ""
+	var issueNum int
+	if _, err := fmt.Sscanf(req.Query, "%d", &issueNum); err == nil && strings.TrimSpace(req.Query) == fmt.Sprintf("%d", issueNum) {
+		issueNumFilter = fmt.Sprintf("OR t.github_issue_number = $%d", len(args)+1)
+		args = append(args, issueNum)
+	}
+
+	projectArgStart := len(args) + 1
 	var projectFilter string
 	if req.ProjectID != nil {
-		projectFilter = "AND t.project_id = $4"
+		projectFilter = fmt.Sprintf("AND t.project_id = $%d", projectArgStart)
 		args = append(args, *req.ProjectID)
 	} else {
 		placeholders := make([]string, len(accessibleProjects))
 		for i, pid := range accessibleProjects {
-			placeholders[i] = fmt.Sprintf("$%d", 4+i)
+			placeholders[i] = fmt.Sprintf("$%d", projectArgStart+i)
 			args = append(args, pid)
 		}
 		projectFilter = fmt.Sprintf("AND t.project_id IN (%s)", strings.Join(placeholders, ","))
@@ -248,16 +259,18 @@ func (s *Server) searchTasksPostgres(ctx context.Context, req GlobalSearchReques
 
 	sqlQuery := fmt.Sprintf(`
 		SELECT t.id, t.project_id, t.task_number, t.title, t.description, t.status, t.priority,
+		       t.github_issue_number, t.github_repo,
 		       ts_rank(t.search_vector, plainto_tsquery('english', $1)) AS rank
 		FROM tasks t
 		WHERE (
 			t.search_vector @@ plainto_tsquery('english', $1)
 			OR t.title ILIKE '%%' || $2 || '%%'
+			%s
 		)
 		%s
 		ORDER BY rank DESC, t.updated_at DESC
 		LIMIT $3
-	`, projectFilter)
+	`, issueNumFilter, projectFilter)
 
 	rows, err := s.db.QueryContext(ctx, sqlQuery, args...)
 	if err != nil {
@@ -268,16 +281,18 @@ func (s *Server) searchTasksPostgres(ctx context.Context, req GlobalSearchReques
 	results := make([]SearchTaskResult, 0)
 	for rows.Next() {
 		var (
-			id          int64
-			projectID   int64
-			taskNumber  sql.NullInt32
-			title       string
-			description sql.NullString
-			status      string
-			priority    string
-			rank        float64
+			id                int64
+			projectID         int64
+			taskNumber        sql.NullInt32
+			title             string
+			description       sql.NullString
+			status            string
+			priority          string
+			githubIssueNumber sql.NullInt32
+			githubRepo        sql.NullString
+			rank              float64
 		)
-		if err := rows.Scan(&id, &projectID, &taskNumber, &title, &description, &status, &priority, &rank); err != nil {
+		if err := rows.Scan(&id, &projectID, &taskNumber, &title, &description, &status, &priority, &githubIssueNumber, &githubRepo, &rank); err != nil {
 			return nil, fmt.Errorf("scan task row: %w", err)
 		}
 
@@ -294,15 +309,28 @@ func (s *Server) searchTasksPostgres(ctx context.Context, req GlobalSearchReques
 			tn = int(taskNumber.Int32)
 		}
 
+		var ghNum *int
+		if githubIssueNumber.Valid {
+			n := int(githubIssueNumber.Int32)
+			ghNum = &n
+		}
+
+		ghRepoStr := ""
+		if githubRepo.Valid {
+			ghRepoStr = githubRepo.String
+		}
+
 		results = append(results, SearchTaskResult{
-			ID:          id,
-			ProjectID:   projectID,
-			ProjectName: projectNameMap[projectID],
-			TaskNumber:  tn,
-			Title:       title,
-			Snippet:     snippet,
-			Status:      status,
-			Priority:    priority,
+			ID:                id,
+			ProjectID:         projectID,
+			ProjectName:       projectNameMap[projectID],
+			TaskNumber:        tn,
+			Title:             title,
+			Snippet:           snippet,
+			Status:            status,
+			Priority:          priority,
+			GithubIssueNumber: ghNum,
+			GithubRepo:        ghRepoStr,
 		})
 	}
 

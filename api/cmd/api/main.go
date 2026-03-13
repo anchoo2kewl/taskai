@@ -22,13 +22,16 @@ import (
 	"github.com/go-chi/chi/v5/middleware"
 	"github.com/go-chi/cors"
 	"github.com/golang-jwt/jwt/v5"
+	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
 	"go.uber.org/zap"
 
+	"taskai/apm"
 	"taskai/internal/api"
 	"taskai/internal/auth"
 	"taskai/internal/collab"
 	"taskai/internal/config"
 	"taskai/internal/db"
+	"taskai/internal/version"
 	"taskai/internal/yjs"
 )
 
@@ -76,6 +79,41 @@ func main() {
 		zap.String("port", cfg.Port),
 	)
 
+	// Initialize APM (OpenTelemetry → Datadog via otel-collector).
+	// When APM_ENABLED != "true" this is a zero-cost noop.
+	apmCfg := apm.ConfigFromEnv(version.Version)
+	apmShutdown, err := apm.Init(context.Background(), apmCfg)
+	if err != nil {
+		logger.Fatal("failed to init APM tracer", zap.Error(err))
+	}
+	defer func() {
+		if err := apmShutdown(context.Background()); err != nil {
+			logger.Warn("APM shutdown error", zap.Error(err))
+		}
+	}()
+	if apmCfg.Enabled {
+		logger.Info("APM enabled",
+			zap.String("service", apmCfg.ServiceName),
+			zap.String("endpoint", apmCfg.Endpoint),
+			zap.String("env", apmCfg.Environment),
+		)
+		// Enrich every log entry with DD service tags for log-trace correlation.
+		// dd.trace_id and dd.span_id are injected per-request by ZapLogger middleware.
+		logger = logger.With(
+			zap.String("dd.service", apmCfg.ServiceName),
+			zap.String("dd.env", apmCfg.Environment),
+			zap.String("dd.version", apmCfg.Version),
+		)
+	}
+
+	// Start Datadog continuous profiling (CPU, heap, goroutine, mutex profiles).
+	// Activated when DD_PROFILING_ENABLED=true; zero-cost noop otherwise.
+	profilerStop, err := apm.StartProfiling(apmCfg)
+	if err != nil {
+		logger.Warn("failed to start Datadog profiler", zap.Error(err))
+	}
+	defer profilerStop()
+
 	// Initialize database with auto-migrations
 	dbCfg := db.Config{
 		Driver:         cfg.DBDriver,
@@ -119,6 +157,9 @@ func main() {
 	// Middleware stack
 	r.Use(middleware.RequestID)
 	r.Use(middleware.RealIP)
+	// APM tracing — instruments every HTTP request with an OpenTelemetry span.
+	// Zero-overhead noop when APM_ENABLED != "true".
+	r.Use(otelhttp.NewMiddleware("taskai.http"))
 	// Gzip compression — skip for WebSocket upgrades (gzip wrapper strips http.Hijacker)
 	r.Use(func(next http.Handler) http.Handler {
 		gz := middleware.Compress(5)
@@ -142,11 +183,10 @@ func main() {
 				return
 			}
 			// SSE endpoints and long-running operations — no fixed timeout
-			if strings.HasSuffix(r.URL.Path, "/github/preview") ||
-				strings.HasSuffix(r.URL.Path, "/github/pull") ||
-				strings.HasSuffix(r.URL.Path, "/github/sync") ||
+			if strings.HasSuffix(r.URL.Path, "/github/sync") ||
 				strings.HasSuffix(r.URL.Path, "/github/push-all") ||
 				strings.HasSuffix(r.URL.Path, "/admin/backup/trigger") ||
+			strings.HasSuffix(r.URL.Path, "/admin/backup/copy-from-env") ||
 				strings.HasSuffix(r.URL.Path, "/download") {
 				next.ServeHTTP(w, r)
 				return
@@ -258,8 +298,8 @@ func main() {
 			backup.WithStore(backupStore),
 			backup.WithDumper(dumper),
 			backup.WithProvider(gdriveProvider),
-			backup.WithBasePath("/admin/backup"),
-			backup.WithOAuthSuccessRedirect(cfg.AppURL+"/app/settings"),
+			backup.WithBasePath("/api/admin/backup"),
+			backup.WithOAuthSuccessRedirect(cfg.AppURL+"/app/admin?tab=backup&subtab=automated"),
 			backup.WithEncryptionKey(encKey),
 		)
 		if mgErr != nil {
@@ -300,6 +340,9 @@ func main() {
 				JWTSecret:   cfg.JWTSecret,
 				JWTExpiry:   cfg.JWTExpiry(),
 				Logger:      logger,
+				OnLoginSuccess: func(r *http.Request, userID int64) {
+					server.LogUserActivity(r.Context(), userID, "login", api.GetClientIP(r), r.UserAgent())
+				},
 			}
 			if cfg.GoogleClientID != "" {
 				oauthCfg.Google = &gologin.OAuthProviderConfig{
@@ -475,9 +518,8 @@ func main() {
 			r.Delete("/projects/{id}/members/{memberId}", server.HandleRemoveProjectMember)
 			r.Get("/projects/{id}/github", server.HandleGetProjectGitHubSettings)
 			r.Patch("/projects/{id}/github", server.HandleUpdateProjectGitHubSettings)
-			r.Post("/projects/{id}/github/preview", server.HandleGitHubPreview)
-			r.Post("/projects/{id}/github/pull", server.HandleGitHubPull)
 			r.Post("/projects/{id}/github/sync", server.HandleGitHubSync)
+			r.Post("/projects/{id}/github/discover-mappings", server.HandleGitHubDiscoverMappings)
 			r.Post("/projects/{id}/github/oauth-init", server.HandleGitHubOAuthInit)
 			r.Get("/projects/{id}/github/repos", server.HandleGitHubListRepos)
 			r.Delete("/projects/{id}/github/token", server.HandleGitHubDisconnect)
@@ -592,6 +634,7 @@ func main() {
 			// Admin backup/restore routes (legacy export/import)
 			r.Get("/admin/backup/export", server.HandleExportData)
 			r.Post("/admin/backup/import", server.HandleImportData)
+			r.Post("/admin/backup/copy-from-env", server.HandleCopyFromEnv)
 
 			// go-backup scheduled backup routes
 			if backupMgr != nil {

@@ -293,6 +293,26 @@ func (_u *TaskUpdate) ClearDueDate() *TaskUpdate {
 	return _u
 }
 
+// SetAgentName sets the "agent_name" field.
+func (_u *TaskUpdate) SetAgentName(v string) *TaskUpdate {
+	_u.mutation.SetAgentName(v)
+	return _u
+}
+
+// SetNillableAgentName sets the "agent_name" field if the given value is not nil.
+func (_u *TaskUpdate) SetNillableAgentName(v *string) *TaskUpdate {
+	if v != nil {
+		_u.SetAgentName(*v)
+	}
+	return _u
+}
+
+// ClearAgentName clears the value of the "agent_name" field.
+func (_u *TaskUpdate) ClearAgentName() *TaskUpdate {
+	_u.mutation.ClearAgentName()
+	return _u
+}
+
 // SetUpdatedAt sets the "updated_at" field.
 func (_u *TaskUpdate) SetUpdatedAt(v time.Time) *TaskUpdate {
 	_u.mutation.SetUpdatedAt(v)
@@ -535,6 +555,11 @@ func (_u *TaskUpdate) check() error {
 			return &ValidationError{Name: "title", err: fmt.Errorf(`ent: validator failed for field "Task.title": %w`, err)}
 		}
 	}
+	if v, ok := _u.mutation.AgentName(); ok {
+		if err := task.AgentNameValidator(v); err != nil {
+			return &ValidationError{Name: "agent_name", err: fmt.Errorf(`ent: validator failed for field "Task.agent_name": %w`, err)}
+		}
+	}
 	if _u.mutation.ProjectCleared() && len(_u.mutation.ProjectIDs()) > 0 {
 		return errors.New(`ent: clearing a required unique edge "Task.project"`)
 	}
@@ -606,6 +631,12 @@ func (_u *TaskUpdate) sqlSave(ctx context.Context) (_node int, err error) {
 	}
 	if _u.mutation.DueDateCleared() {
 		_spec.ClearField(task.FieldDueDate, field.TypeTime)
+	}
+	if value, ok := _u.mutation.AgentName(); ok {
+		_spec.SetField(task.FieldAgentName, field.TypeString, value)
+	}
+	if _u.mutation.AgentNameCleared() {
+		_spec.ClearField(task.FieldAgentName, field.TypeString)
 	}
 	if value, ok := _u.mutation.UpdatedAt(); ok {
 		_spec.SetField(task.FieldUpdatedAt, field.TypeTime, value)
@@ -1183,6 +1214,26 @@ func (_u *TaskUpdateOne) ClearDueDate() *TaskUpdateOne {
 	return _u
 }
 
+// SetAgentName sets the "agent_name" field.
+func (_u *TaskUpdateOne) SetAgentName(v string) *TaskUpdateOne {
+	_u.mutation.SetAgentName(v)
+	return _u
+}
+
+// SetNillableAgentName sets the "agent_name" field if the given value is not nil.
+func (_u *TaskUpdateOne) SetNillableAgentName(v *string) *TaskUpdateOne {
+	if v != nil {
+		_u.SetAgentName(*v)
+	}
+	return _u
+}
+
+// ClearAgentName clears the value of the "agent_name" field.
+func (_u *TaskUpdateOne) ClearAgentName() *TaskUpdateOne {
+	_u.mutation.ClearAgentName()
+	return _u
+}
+
 // SetUpdatedAt sets the "updated_at" field.
 func (_u *TaskUpdateOne) SetUpdatedAt(v time.Time) *TaskUpdateOne {
 	_u.mutation.SetUpdatedAt(v)
@@ -1438,6 +1489,11 @@ func (_u *TaskUpdateOne) check() error {
 			return &ValidationError{Name: "title", err: fmt.Errorf(`ent: validator failed for field "Task.title": %w`, err)}
 		}
 	}
+	if v, ok := _u.mutation.AgentName(); ok {
+		if err := task.AgentNameValidator(v); err != nil {
+			return &ValidationError{Name: "agent_name", err: fmt.Errorf(`ent: validator failed for field "Task.agent_name": %w`, err)}
+		}
+	}
 	if _u.mutation.ProjectCleared() && len(_u.mutation.ProjectIDs()) > 0 {
 		return errors.New(`ent: clearing a required unique edge "Task.project"`)
 	}
@@ -1526,6 +1582,12 @@ func (_u *TaskUpdateOne) sqlSave(ctx context.Context) (_node *Task, err error) {
 	}
 	if _u.mutation.DueDateCleared() {
 		_spec.ClearField(task.FieldDueDate, field.TypeTime)
+	}
+	if value, ok := _u.mutation.AgentName(); ok {
+		_spec.SetField(task.FieldAgentName, field.TypeString, value)
+	}
+	if _u.mutation.AgentNameCleared() {
+		_spec.ClearField(task.FieldAgentName, field.TypeString)
 	}
 	if value, ok := _u.mutation.UpdatedAt(); ok {
 		_spec.SetField(task.FieldUpdatedAt, field.TypeTime, value)

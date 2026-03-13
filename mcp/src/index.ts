@@ -7,10 +7,52 @@ import { TaskAIClient, Task, Project, SwimLane, Comment, WikiPage, WikiBlock, Us
 const TASKAI_API_URL = process.env.TASKAI_API_URL || "https://taskai.cc";
 const PORT = parseInt(process.env.PORT || "3000", 10);
 
+/** Map known MCP client identifiers to friendly display names. */
+const AGENT_NAME_MAP: Record<string, string> = {
+  "claude-code": "Claude Code",
+  "codex-cli": "Codex",
+  "gemini-cli": "Gemini",
+  "cursor": "Cursor",
+  "windsurf": "Windsurf",
+};
+
+function normalizeAgentName(raw: string): string {
+  const key = raw.trim().toLowerCase();
+  return AGENT_NAME_MAP[key] ?? raw.trim().slice(0, 100);
+}
+
 // --- API key validation cache (5-minute TTL) ---
-interface CacheEntry { user: User; validUntil: number }
+interface CacheEntry { user: User; validUntil: number; agentName?: string }
 const apiKeyCache = new Map<string, CacheEntry>();
 const CACHE_TTL_MS = 5 * 60 * 1000;
+
+// --- Persistent agent name cache (survives container restarts) ---
+import { readFileSync, writeFileSync, mkdirSync } from "fs";
+const AGENT_CACHE_PATH = "/tmp/taskai-mcp-agents.json";
+
+function loadAgentCache(): Record<string, string> {
+  try { return JSON.parse(readFileSync(AGENT_CACHE_PATH, "utf-8")); }
+  catch { return {}; }
+}
+
+function saveAgentName(apiKeyHash: string, agentName: string): void {
+  const cache = loadAgentCache();
+  cache[apiKeyHash] = agentName;
+  try { writeFileSync(AGENT_CACHE_PATH, JSON.stringify(cache)); } catch { /* best-effort */ }
+}
+
+function getPersistedAgentName(apiKeyHash: string): string | undefined {
+  return loadAgentCache()[apiKeyHash];
+}
+
+/** Simple hash to avoid storing raw API keys on disk */
+function hashKey(key: string): string {
+  let h = 0;
+  for (let i = 0; i < key.length; i++) {
+    h = ((h << 5) - h + key.charCodeAt(i)) | 0;
+  }
+  return h.toString(36);
+}
 
 /**
  * Helper to format response with minimal tokens by default.
@@ -355,14 +397,18 @@ function createServer(client: TaskAIClient, cachedUser?: User): McpServer {
   // --- get_wiki_page ---
   server.tool(
     "get_wiki_page",
-    "Get a specific wiki page by ID",
+    "Get a specific wiki page by ID including its full markdown content",
     {
       page_id: z.string().describe("Wiki page ID"),
       verbose: z.boolean().optional().describe("Pretty print JSON (default: false)"),
     },
     async ({ page_id, verbose }) => {
-      const page = await client.getWikiPage(page_id);
-      return { content: [{ type: "text", text: formatResponse(page, verbose) }] };
+      const [page, pageContent] = await Promise.all([
+        client.getWikiPage(page_id),
+        client.getWikiPageContent(page_id),
+      ]);
+      const result = { ...page, content: pageContent.content };
+      return { content: [{ type: "text", text: formatResponse(result, verbose) }] };
     }
   );
 
@@ -492,6 +538,56 @@ app.post("/mcp", async (req, res) => {
       res.status(403).json({ error: "Invalid API key" });
       return;
     }
+  }
+
+  // Detect agent name from multiple sources (in priority order):
+  // 1. X-Agent-Name HTTP header (explicit, most reliable when sent)
+  // 2. MCP initialize message clientInfo.name
+  // 3. User-Agent header (fallback: detect known MCP clients)
+  // 4. Cached from a previous request with the same API key
+  const headerAgent = req.headers["x-agent-name"] as string | undefined;
+  if (headerAgent) {
+    client.agentName = normalizeAgentName(headerAgent);
+  }
+
+  if (!client.agentName) {
+    const messages = Array.isArray(req.body) ? req.body : [req.body];
+    for (const msg of messages) {
+      if (msg?.method === "initialize" && msg?.params?.clientInfo?.name) {
+        client.agentName = normalizeAgentName(msg.params.clientInfo.name);
+        break;
+      }
+    }
+  }
+
+  // Detect agent from User-Agent header (MCP clients often identify themselves)
+  if (!client.agentName) {
+    const ua = (req.headers["user-agent"] || "").toLowerCase();
+    for (const [key, name] of Object.entries(AGENT_NAME_MAP)) {
+      if (ua.includes(key)) {
+        client.agentName = name;
+        break;
+      }
+    }
+  }
+
+  if (!client.agentName) {
+    const entry = apiKeyCache.get(apiKey);
+    if (entry?.agentName) client.agentName = entry.agentName;
+  }
+
+  // Final fallback: persistent file cache (survives container restarts)
+  const keyHash = hashKey(apiKey);
+  if (!client.agentName) {
+    const persisted = getPersistedAgentName(keyHash);
+    if (persisted) client.agentName = persisted;
+  }
+
+  // Persist agent name in both memory and file cache
+  if (client.agentName) {
+    const entry = apiKeyCache.get(apiKey);
+    if (entry) entry.agentName = client.agentName;
+    saveAgentName(keyHash, client.agentName);
   }
 
   // Create MCP server with authenticated client and cached user

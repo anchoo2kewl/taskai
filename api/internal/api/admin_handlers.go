@@ -20,18 +20,19 @@ import (
 
 // UserWithStats represents a user with admin and activity stats
 type UserWithStats struct {
-	ID             int64     `json:"id"`
-	Email          string    `json:"email"`
-	Name           string    `json:"name,omitempty"`
-	FirstName      string    `json:"first_name,omitempty"`
-	LastName       string    `json:"last_name,omitempty"`
-	IsAdmin        bool      `json:"is_admin"`
-	CreatedAt      time.Time `json:"created_at"`
-	LoginCount     int       `json:"login_count"`
-	LastLoginAt    *string   `json:"last_login_at"`
-	LastLoginIP    *string   `json:"last_login_ip"`
-	FailedAttempts int       `json:"failed_attempts"`
-	InviteCount    int       `json:"invite_count"`
+	ID              int64     `json:"id"`
+	Email           string    `json:"email"`
+	Name            string    `json:"name,omitempty"`
+	FirstName       string    `json:"first_name,omitempty"`
+	LastName        string    `json:"last_name,omitempty"`
+	IsAdmin         bool      `json:"is_admin"`
+	CreatedAt       time.Time `json:"created_at"`
+	LoginCount      int       `json:"login_count"`
+	LastLoginAt     *string   `json:"last_login_at"`
+	LastLoginIP     *string   `json:"last_login_ip"`
+	FailedAttempts  int       `json:"failed_attempts"`
+	InviteCount     int       `json:"invite_count"`
+	LinkedProviders []string  `json:"linked_providers"`
 }
 
 // UserActivity represents a user activity log entry
@@ -140,6 +141,13 @@ func (s *Server) HandleGetUsers(w http.ResponseWriter, r *http.Request) {
 		if err == nil {
 			userStats.FailedAttempts = failedCount
 		}
+
+		// Get linked auth providers
+		var authProvider string
+		_ = s.db.QueryRowContext(ctx,
+			s.db.Rebind(`SELECT auth_provider FROM users WHERE id = ? LIMIT 1`), u.ID,
+		).Scan(&authProvider)
+		userStats.LinkedProviders = s.getUserLinkedProviders(ctx, u.ID, authProvider == "password")
 
 		users = append(users, userStats)
 	}
@@ -343,6 +351,11 @@ func (s *Server) isAdmin(ctx context.Context, userID int64) bool {
 	return userEntity.IsAdmin
 }
 
+// LogUserActivity logs a user activity event using Ent.
+func (s *Server) LogUserActivity(ctx context.Context, userID int64, activityType, ipAddress, userAgent string) error {
+	return s.logUserActivity(ctx, userID, activityType, ipAddress, userAgent)
+}
+
 // logUserActivity logs a user activity event using Ent
 func (s *Server) logUserActivity(ctx context.Context, userID int64, activityType, ipAddress, userAgent string) error {
 	creator := s.db.Client.UserActivity.Create().
@@ -362,6 +375,35 @@ func (s *Server) logUserActivity(ctx context.Context, userID int64, activityType
 		s.logger.Error("Failed to log user activity", zap.Error(err))
 	}
 	return err
+}
+
+// getUserLinkedProviders returns the list of auth methods connected for a user.
+// hasPassword indicates whether the user has a real password set (auth_provider='password').
+// OAuth rows are fetched from oauth_providers.
+func (s *Server) getUserLinkedProviders(ctx context.Context, userID int64, hasPassword bool) []string {
+	providers := []string{}
+	if hasPassword {
+		providers = append(providers, "password")
+	}
+	rows, err := s.db.QueryContext(ctx,
+		s.db.Rebind(`SELECT provider FROM oauth_providers WHERE user_id = ?`), userID,
+	)
+	if err != nil {
+		return providers
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var p string
+		if rows.Scan(&p) == nil {
+			providers = append(providers, p)
+		}
+	}
+	return providers
+}
+
+// GetClientIP extracts the client IP address from the request.
+func GetClientIP(r *http.Request) string {
+	return getClientIP(r)
 }
 
 // getClientIP extracts the client IP address from the request

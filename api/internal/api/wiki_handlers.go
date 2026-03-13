@@ -31,6 +31,7 @@ type WikiPageResponse struct {
 	CreatorName *string   `json:"creator_name,omitempty"`
 	UpdatedBy   *int64    `json:"updated_by,omitempty"`
 	UpdaterName *string   `json:"updater_name,omitempty"`
+	Content     *string   `json:"content,omitempty"`
 	CreatedAt   time.Time `json:"created_at"`
 	UpdatedAt   time.Time `json:"updated_at"`
 }
@@ -266,6 +267,7 @@ func (s *Server) HandleGetWikiPage(w http.ResponseWriter, r *http.Request) {
 		Slug:      page.Slug,
 		CreatedBy: page.CreatedBy,
 		UpdatedBy: page.UpdatedBy,
+		Content:   &page.Content,
 		CreatedAt: page.CreatedAt,
 		UpdatedAt: page.UpdatedAt,
 	}

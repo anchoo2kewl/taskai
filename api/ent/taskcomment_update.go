@@ -72,6 +72,26 @@ func (_u *TaskCommentUpdate) SetNillableComment(v *string) *TaskCommentUpdate {
 	return _u
 }
 
+// SetAgentName sets the "agent_name" field.
+func (_u *TaskCommentUpdate) SetAgentName(v string) *TaskCommentUpdate {
+	_u.mutation.SetAgentName(v)
+	return _u
+}
+
+// SetNillableAgentName sets the "agent_name" field if the given value is not nil.
+func (_u *TaskCommentUpdate) SetNillableAgentName(v *string) *TaskCommentUpdate {
+	if v != nil {
+		_u.SetAgentName(*v)
+	}
+	return _u
+}
+
+// ClearAgentName clears the value of the "agent_name" field.
+func (_u *TaskCommentUpdate) ClearAgentName() *TaskCommentUpdate {
+	_u.mutation.ClearAgentName()
+	return _u
+}
+
 // SetUpdatedAt sets the "updated_at" field.
 func (_u *TaskCommentUpdate) SetUpdatedAt(v time.Time) *TaskCommentUpdate {
 	_u.mutation.SetUpdatedAt(v)
@@ -148,6 +168,11 @@ func (_u *TaskCommentUpdate) check() error {
 			return &ValidationError{Name: "comment", err: fmt.Errorf(`ent: validator failed for field "TaskComment.comment": %w`, err)}
 		}
 	}
+	if v, ok := _u.mutation.AgentName(); ok {
+		if err := taskcomment.AgentNameValidator(v); err != nil {
+			return &ValidationError{Name: "agent_name", err: fmt.Errorf(`ent: validator failed for field "TaskComment.agent_name": %w`, err)}
+		}
+	}
 	if _u.mutation.TaskCleared() && len(_u.mutation.TaskIDs()) > 0 {
 		return errors.New(`ent: clearing a required unique edge "TaskComment.task"`)
 	}
@@ -171,6 +196,12 @@ func (_u *TaskCommentUpdate) sqlSave(ctx context.Context) (_node int, err error)
 	}
 	if value, ok := _u.mutation.Comment(); ok {
 		_spec.SetField(taskcomment.FieldComment, field.TypeString, value)
+	}
+	if value, ok := _u.mutation.AgentName(); ok {
+		_spec.SetField(taskcomment.FieldAgentName, field.TypeString, value)
+	}
+	if _u.mutation.AgentNameCleared() {
+		_spec.ClearField(taskcomment.FieldAgentName, field.TypeString)
 	}
 	if value, ok := _u.mutation.UpdatedAt(); ok {
 		_spec.SetField(taskcomment.FieldUpdatedAt, field.TypeTime, value)
@@ -295,6 +326,26 @@ func (_u *TaskCommentUpdateOne) SetNillableComment(v *string) *TaskCommentUpdate
 	return _u
 }
 
+// SetAgentName sets the "agent_name" field.
+func (_u *TaskCommentUpdateOne) SetAgentName(v string) *TaskCommentUpdateOne {
+	_u.mutation.SetAgentName(v)
+	return _u
+}
+
+// SetNillableAgentName sets the "agent_name" field if the given value is not nil.
+func (_u *TaskCommentUpdateOne) SetNillableAgentName(v *string) *TaskCommentUpdateOne {
+	if v != nil {
+		_u.SetAgentName(*v)
+	}
+	return _u
+}
+
+// ClearAgentName clears the value of the "agent_name" field.
+func (_u *TaskCommentUpdateOne) ClearAgentName() *TaskCommentUpdateOne {
+	_u.mutation.ClearAgentName()
+	return _u
+}
+
 // SetUpdatedAt sets the "updated_at" field.
 func (_u *TaskCommentUpdateOne) SetUpdatedAt(v time.Time) *TaskCommentUpdateOne {
 	_u.mutation.SetUpdatedAt(v)
@@ -384,6 +435,11 @@ func (_u *TaskCommentUpdateOne) check() error {
 			return &ValidationError{Name: "comment", err: fmt.Errorf(`ent: validator failed for field "TaskComment.comment": %w`, err)}
 		}
 	}
+	if v, ok := _u.mutation.AgentName(); ok {
+		if err := taskcomment.AgentNameValidator(v); err != nil {
+			return &ValidationError{Name: "agent_name", err: fmt.Errorf(`ent: validator failed for field "TaskComment.agent_name": %w`, err)}
+		}
+	}
 	if _u.mutation.TaskCleared() && len(_u.mutation.TaskIDs()) > 0 {
 		return errors.New(`ent: clearing a required unique edge "TaskComment.task"`)
 	}
@@ -424,6 +480,12 @@ func (_u *TaskCommentUpdateOne) sqlSave(ctx context.Context) (_node *TaskComment
 	}
 	if value, ok := _u.mutation.Comment(); ok {
 		_spec.SetField(taskcomment.FieldComment, field.TypeString, value)
+	}
+	if value, ok := _u.mutation.AgentName(); ok {
+		_spec.SetField(taskcomment.FieldAgentName, field.TypeString, value)
+	}
+	if _u.mutation.AgentNameCleared() {
+		_spec.ClearField(taskcomment.FieldAgentName, field.TypeString)
 	}
 	if value, ok := _u.mutation.UpdatedAt(); ok {
 		_spec.SetField(taskcomment.FieldUpdatedAt, field.TypeTime, value)

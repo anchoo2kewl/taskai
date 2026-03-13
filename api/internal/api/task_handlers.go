@@ -60,7 +60,9 @@ type Task struct {
 	ActualHours         *float64           `json:"actual_hours,omitempty"`
 	Tags                []Tag              `json:"tags,omitempty"`
 	GithubIssueNumber   *int64             `json:"github_issue_number,omitempty"`
+	GithubRepo          string             `json:"github_repo,omitempty"`
 	GithubReactions     []GitHubReaction   `json:"github_reactions,omitempty"`
+	AgentName           *string            `json:"agent_name,omitempty"`
 	CreatedAt           time.Time          `json:"created_at"`
 	UpdatedAt           time.Time          `json:"updated_at"`
 }
@@ -247,6 +249,7 @@ func (s *Server) HandleListTasks(w http.ResponseWriter, r *http.Request) {
 			Priority:       et.Priority,
 			EstimatedHours: et.EstimatedHours,
 			ActualHours:    et.ActualHours,
+			AgentName:      et.AgentName,
 			CreatedAt:      et.CreatedAt,
 			UpdatedAt:      et.UpdatedAt,
 			Tags:           []Tag{}, // Initialize empty tags array
@@ -312,6 +315,35 @@ func (s *Server) HandleListTasks(w http.ResponseWriter, r *http.Request) {
 		}
 
 		tasks = append(tasks, t)
+	}
+
+	// Bulk-fetch github_issue_number and github_repo (not in ent schema)
+	if len(tasks) > 0 {
+		ghRows, ghErr := s.db.QueryContext(ctx, `
+			SELECT id, github_issue_number, github_repo FROM tasks
+			WHERE project_id = $1 AND github_issue_number IS NOT NULL
+		`, projectID)
+		if ghErr == nil {
+			type ghInfo struct {
+				issueNum int64
+				repo     string
+			}
+			ghMap := map[int64]ghInfo{}
+			for ghRows.Next() {
+				var tid, inum int64
+				var repo string
+				if ghRows.Scan(&tid, &inum, &repo) == nil {
+					ghMap[tid] = ghInfo{inum, repo}
+				}
+			}
+			ghRows.Close()
+			for i := range tasks {
+				if info, ok := ghMap[tasks[i].ID]; ok {
+					tasks[i].GithubIssueNumber = &info.issueNum
+					tasks[i].GithubRepo = info.repo
+				}
+			}
+		}
 	}
 
 	// Bulk-fetch GitHub reactions for all tasks in this project, including user_reacted
@@ -522,6 +554,13 @@ func (s *Server) HandleCreateTask(w http.ResponseWriter, r *http.Request) {
 		s.logger.Warn("Failed to set created_by on task", zap.Error(err), zap.Int64("task_id", newTask.ID))
 	}
 
+	// Set agent_name via raw SQL if present (mirrors created_by pattern)
+	if agentName := GetAgentName(r); agentName != nil {
+		if _, err := s.db.ExecContext(ctx, `UPDATE tasks SET agent_name = $1 WHERE id = $2`, *agentName, newTask.ID); err != nil {
+			s.logger.Warn("Failed to set agent_name on task", zap.Error(err), zap.Int64("task_id", newTask.ID))
+		}
+	}
+
 	// Fetch the created task with all related entities
 	createdTask, err := s.db.Client.Task.Query().
 		Where(task.ID(newTask.ID)).
@@ -553,6 +592,7 @@ func (s *Server) HandleCreateTask(w http.ResponseWriter, r *http.Request) {
 		Priority:       createdTask.Priority,
 		EstimatedHours: createdTask.EstimatedHours,
 		ActualHours:    createdTask.ActualHours,
+		AgentName:      createdTask.AgentName,
 		CreatedAt:      createdTask.CreatedAt,
 		UpdatedAt:      createdTask.UpdatedAt,
 		Tags:           []Tag{},
@@ -890,6 +930,7 @@ func (s *Server) HandleUpdateTask(w http.ResponseWriter, r *http.Request) {
 		Priority:       updatedTask.Priority,
 		EstimatedHours: updatedTask.EstimatedHours,
 		ActualHours:    updatedTask.ActualHours,
+		AgentName:      updatedTask.AgentName,
 		CreatedAt:      updatedTask.CreatedAt,
 		UpdatedAt:      updatedTask.UpdatedAt,
 		Tags:           []Tag{},
@@ -1102,6 +1143,7 @@ func (s *Server) HandleGetTaskByNumber(w http.ResponseWriter, r *http.Request) {
 		Priority:       taskEntity.Priority,
 		EstimatedHours: taskEntity.EstimatedHours,
 		ActualHours:    taskEntity.ActualHours,
+		AgentName:      taskEntity.AgentName,
 		CreatedAt:      taskEntity.CreatedAt,
 		UpdatedAt:      taskEntity.UpdatedAt,
 		Tags:           []Tag{},
@@ -1166,11 +1208,15 @@ func (s *Server) HandleGetTaskByNumber(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// Load github_issue_number (not in ent schema, raw SQL)
+	// Load github_issue_number and github_repo (not in ent schema, raw SQL)
 	var ghIssueNum sql.NullInt64
-	if err := s.db.QueryRowContext(ctx, `SELECT github_issue_number FROM tasks WHERE id = $1`, taskEntity.ID).Scan(&ghIssueNum); err == nil {
+	var ghRepo sql.NullString
+	if err := s.db.QueryRowContext(ctx, `SELECT github_issue_number, github_repo FROM tasks WHERE id = $1`, taskEntity.ID).Scan(&ghIssueNum, &ghRepo); err == nil {
 		if ghIssueNum.Valid {
 			t.GithubIssueNumber = &ghIssueNum.Int64
+		}
+		if ghRepo.Valid && ghRepo.String != "" {
+			t.GithubRepo = ghRepo.String
 		}
 	}
 

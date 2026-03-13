@@ -59,6 +59,14 @@ server {
     # Max upload size
     client_max_body_size 10M;
 
+    # Friendly maintenance page during deployments
+    error_page 502 503 504 /50x.html;
+    location = /50x.html {
+        internal;
+        default_type text/html;
+        return 503 '<!DOCTYPE html><html><head><title>Updating...</title><meta http-equiv="refresh" content="5"></head><body style="font-family:system-ui;display:flex;justify-content:center;align-items:center;height:100vh;margin:0;background:#f8fafc"><div style="text-align:center"><h1 style="color:#1e293b">Updating TaskAI</h1><p style="color:#64748b">Please wait a moment, this page will refresh automatically.</p></div></body></html>';
+    }
+
     # Auth endpoints (stricter rate limiting)
     location ~ ^/api/auth {
         limit_req zone={{ domain | replace('.', '_') }}_auth burst=3 nodelay;
@@ -69,6 +77,10 @@ server {
         proxy_set_header X-Real-IP $remote_addr;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
         proxy_set_header X-Forwarded-Proto $scheme;
+
+        proxy_next_upstream error timeout http_502 http_503;
+        proxy_next_upstream_timeout 5s;
+        proxy_next_upstream_tries 2;
     }
 
     # API endpoints (backend)
@@ -89,6 +101,11 @@ server {
         proxy_connect_timeout 60s;
         proxy_send_timeout 60s;
         proxy_read_timeout 60s;
+
+        # Retry on upstream failure during deployments
+        proxy_next_upstream error timeout http_502 http_503;
+        proxy_next_upstream_timeout 5s;
+        proxy_next_upstream_tries 2;
     }
 
     # Health check endpoint (no logging)
@@ -105,6 +122,10 @@ server {
         proxy_set_header X-Real-IP $remote_addr;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
         proxy_set_header X-Forwarded-Proto $scheme;
+
+        proxy_next_upstream error timeout http_502 http_503;
+        proxy_next_upstream_timeout 5s;
+        proxy_next_upstream_tries 2;
     }
 
     # Frontend (React app via web container)
@@ -118,6 +139,10 @@ server {
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
         proxy_set_header X-Forwarded-Proto $scheme;
         proxy_cache_bypass $http_upgrade;
+
+        proxy_next_upstream error timeout http_502 http_503;
+        proxy_next_upstream_timeout 5s;
+        proxy_next_upstream_tries 2;
 
         # Cache static assets
         location ~* \.(js|css|png|jpg|jpeg|gif|ico|svg|woff|woff2|ttf|eot)$ {

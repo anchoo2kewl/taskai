@@ -259,12 +259,16 @@ func init() {
 	taskDescPriority := taskFields[9].Descriptor()
 	// task.DefaultPriority holds the default value on creation for the priority field.
 	task.DefaultPriority = taskDescPriority.Default.(string)
+	// taskDescAgentName is the schema descriptor for agent_name field.
+	taskDescAgentName := taskFields[14].Descriptor()
+	// task.AgentNameValidator is a validator for the "agent_name" field. It is called by the builders before save.
+	task.AgentNameValidator = taskDescAgentName.Validators[0].(func(string) error)
 	// taskDescCreatedAt is the schema descriptor for created_at field.
-	taskDescCreatedAt := taskFields[14].Descriptor()
+	taskDescCreatedAt := taskFields[15].Descriptor()
 	// task.DefaultCreatedAt holds the default value on creation for the created_at field.
 	task.DefaultCreatedAt = taskDescCreatedAt.Default.(func() time.Time)
 	// taskDescUpdatedAt is the schema descriptor for updated_at field.
-	taskDescUpdatedAt := taskFields[15].Descriptor()
+	taskDescUpdatedAt := taskFields[16].Descriptor()
 	// task.DefaultUpdatedAt holds the default value on creation for the updated_at field.
 	task.DefaultUpdatedAt = taskDescUpdatedAt.Default.(func() time.Time)
 	// task.UpdateDefaultUpdatedAt holds the default value on update for the updated_at field.
@@ -311,12 +315,16 @@ func init() {
 	taskcommentDescComment := taskcommentFields[3].Descriptor()
 	// taskcomment.CommentValidator is a validator for the "comment" field. It is called by the builders before save.
 	taskcomment.CommentValidator = taskcommentDescComment.Validators[0].(func(string) error)
+	// taskcommentDescAgentName is the schema descriptor for agent_name field.
+	taskcommentDescAgentName := taskcommentFields[4].Descriptor()
+	// taskcomment.AgentNameValidator is a validator for the "agent_name" field. It is called by the builders before save.
+	taskcomment.AgentNameValidator = taskcommentDescAgentName.Validators[0].(func(string) error)
 	// taskcommentDescCreatedAt is the schema descriptor for created_at field.
-	taskcommentDescCreatedAt := taskcommentFields[4].Descriptor()
+	taskcommentDescCreatedAt := taskcommentFields[5].Descriptor()
 	// taskcomment.DefaultCreatedAt holds the default value on creation for the created_at field.
 	taskcomment.DefaultCreatedAt = taskcommentDescCreatedAt.Default.(func() time.Time)
 	// taskcommentDescUpdatedAt is the schema descriptor for updated_at field.
-	taskcommentDescUpdatedAt := taskcommentFields[5].Descriptor()
+	taskcommentDescUpdatedAt := taskcommentFields[6].Descriptor()
 	// taskcomment.DefaultUpdatedAt holds the default value on creation for the updated_at field.
 	taskcomment.DefaultUpdatedAt = taskcommentDescUpdatedAt.Default.(func() time.Time)
 	// taskcomment.UpdateDefaultUpdatedAt holds the default value on update for the updated_at field.

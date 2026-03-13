@@ -9,7 +9,7 @@ const WikiContent = lazy(() => import('../components/WikiContent'))
 const ProjectSettings = lazy(() => import('./ProjectSettings'))
 
 // ── Board filter bar (GitHub-style) ──────────────────────────────────────────
-type BoardFilterKey = 'sprint' | 'assignee' | 'priority' | 'label'
+type BoardFilterKey = 'sprint' | 'assignee' | 'priority' | 'label' | 'task_id'
 
 interface BoardFilterBarProps {
   sprints: Sprint[]
@@ -19,11 +19,13 @@ interface BoardFilterBarProps {
   assigneeId: number | null
   priority: string
   tagId: number | null
+  taskIds: number[]
   onChange: (patch: {
     sprintId?: number | null
     assigneeId?: number | null
     priority?: string
     tagId?: number | null
+    taskIds?: number[]
   }) => void
 }
 
@@ -34,16 +36,17 @@ const PRIORITY_OPTIONS = [
   { value: 'low',    label: 'Low',    color: '#6b7280' },
 ]
 
-function BoardFilterBar({ sprints, assignees, tags, sprintId, assigneeId, priority, tagId, onChange }: BoardFilterBarProps) {
+function BoardFilterBar({ sprints, assignees, tags, sprintId, assigneeId, priority, tagId, taskIds, onChange }: BoardFilterBarProps) {
   const [open, setOpen] = useState(false)
   const [category, setCategory] = useState<BoardFilterKey | null>(null)
   const [search, setSearch] = useState('')
+  const [taskIdInput, setTaskIdInput] = useState('')
   const ref = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
     const h = (e: MouseEvent) => {
       if (ref.current && !ref.current.contains(e.target as Node)) {
-        setOpen(false); setCategory(null); setSearch('')
+        setOpen(false); setCategory(null); setSearch(''); setTaskIdInput('')
       }
     }
     document.addEventListener('mousedown', h)
@@ -55,20 +58,23 @@ function BoardFilterBar({ sprints, assignees, tags, sprintId, assigneeId, priori
     { id: 'assignee', label: 'Assignee', icon: <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" /></svg> },
     { id: 'priority', label: 'Priority', icon: <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M3 4h13M3 8h9m-9 4h6m4 0l4-4m0 0l4 4m-4-4v12" /></svg> },
     { id: 'label',    label: 'Label',    icon: <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M7 7h.01M7 3h5c.512 0 1.024.195 1.414.586l7 7a2 2 0 010 2.828l-7 7a2 2 0 01-2.828 0l-7-7A2 2 0 013 12V7a4 4 0 014-4z" /></svg> },
+    { id: 'task_id',  label: 'Task ID',  icon: <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M7 20l4-16m2 16l4-16M6 9h14M4 15h14" /></svg> },
   ]
 
   // Active chips
   const chips: { key: BoardFilterKey; label: string }[] = []
-  if (sprintId)   chips.push({ key: 'sprint',   label: `sprint:"${sprints.find(s => s.id === sprintId)?.name ?? sprintId}"` })
-  if (assigneeId) chips.push({ key: 'assignee', label: `assignee:"${assignees.find(a => a.id === assigneeId)?.name ?? assigneeId}"` })
-  if (priority)   chips.push({ key: 'priority', label: `priority:${priority}` })
-  if (tagId)      chips.push({ key: 'label',    label: `label:"${tags.find(t => t.id === tagId)?.name ?? tagId}"` })
+  if (sprintId)         chips.push({ key: 'sprint',   label: `sprint:"${sprints.find(s => s.id === sprintId)?.name ?? sprintId}"` })
+  if (assigneeId)       chips.push({ key: 'assignee', label: `assignee:"${assignees.find(a => a.id === assigneeId)?.name ?? assigneeId}"` })
+  if (priority)         chips.push({ key: 'priority', label: `priority:${priority}` })
+  if (tagId)            chips.push({ key: 'label',    label: `label:"${tags.find(t => t.id === tagId)?.name ?? tagId}"` })
+  if (taskIds.length)   chips.push({ key: 'task_id',  label: `id:${taskIds.join(',')}` })
 
   const removeChip = (key: BoardFilterKey) => {
     if (key === 'sprint')   onChange({ sprintId: null })
     if (key === 'assignee') onChange({ assigneeId: null })
     if (key === 'priority') onChange({ priority: '' })
     if (key === 'label')    onChange({ tagId: null })
+    if (key === 'task_id')  onChange({ taskIds: [] })
   }
 
   const q = search.toLowerCase()
@@ -98,6 +104,7 @@ function BoardFilterBar({ sprints, assignees, tags, sprintId, assigneeId, priori
     if (key === 'assignee') return assigneeId ? assignees.find(a => a.id === assigneeId)?.name : undefined
     if (key === 'priority') return priority || undefined
     if (key === 'label')    return tagId ? tags.find(t => t.id === tagId)?.name : undefined
+    if (key === 'task_id')  return taskIds.length ? `${taskIds.length} selected` : undefined
   }
 
   const selectOption = (cat: BoardFilterKey, value: string) => {
@@ -108,13 +115,25 @@ function BoardFilterBar({ sprints, assignees, tags, sprintId, assigneeId, priori
     setOpen(false); setCategory(null); setSearch('')
   }
 
+  const addTaskId = () => {
+    const n = parseInt(taskIdInput.trim(), 10)
+    if (!isNaN(n) && n > 0 && !taskIds.includes(n)) {
+      onChange({ taskIds: [...taskIds, n] })
+    }
+    setTaskIdInput('')
+  }
+
+  const removeTaskId = (id: number) => {
+    onChange({ taskIds: taskIds.filter(x => x !== id) })
+  }
+
   const hasFilters = chips.length > 0
 
   return (
     <div ref={ref} className="relative">
       <button
         type="button"
-        onClick={() => { setOpen(v => !v); setCategory(null); setSearch('') }}
+        onClick={() => { setOpen(v => !v); setCategory(null); setSearch(''); setTaskIdInput('') }}
         className={`flex items-center gap-2 px-3 py-1.5 rounded-lg border text-sm transition-colors focus:outline-none ${
           hasFilters
             ? 'bg-primary-500/10 border-primary-500/40 text-primary-400'
@@ -164,10 +183,62 @@ function BoardFilterBar({ sprints, assignees, tags, sprintId, assigneeId, priori
                 <div className="border-t border-dark-border-subtle px-3 py-2">
                   <button
                     type="button"
-                    onClick={() => { onChange({ sprintId: null, assigneeId: null, priority: '', tagId: null }); setOpen(false) }}
+                    onClick={() => { onChange({ sprintId: null, assigneeId: null, priority: '', tagId: null, taskIds: [] }); setOpen(false) }}
                     className="text-xs text-danger-400 hover:text-danger-300"
                   >
                     Clear all filters
+                  </button>
+                </div>
+              )}
+            </>
+          ) : category === 'task_id' ? (
+            <>
+              <div className="flex items-center gap-2 px-3 py-2 border-b border-dark-border-subtle">
+                <button type="button" onClick={() => { setCategory(null); setTaskIdInput('') }} className="text-dark-text-tertiary hover:text-dark-text-secondary">
+                  <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" /></svg>
+                </button>
+                <span className="text-xs text-dark-text-tertiary font-semibold uppercase tracking-wide">Filter by Task ID</span>
+              </div>
+              <div className="px-3 py-2 border-b border-dark-border-subtle">
+                <div className="flex items-center gap-2">
+                  <input
+                    autoFocus
+                    type="number"
+                    min="1"
+                    placeholder="Enter task # and press Enter"
+                    value={taskIdInput}
+                    onChange={e => setTaskIdInput(e.target.value)}
+                    onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); addTaskId() } }}
+                    className="flex-1 text-sm bg-transparent text-dark-text-secondary placeholder:text-dark-text-quaternary outline-none [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+                  />
+                  <button
+                    type="button"
+                    onClick={addTaskId}
+                    disabled={!taskIdInput.trim()}
+                    className="text-xs px-2 py-1 rounded bg-primary-500/20 text-primary-400 hover:bg-primary-500/30 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+                  >
+                    Add
+                  </button>
+                </div>
+              </div>
+              <div className="px-3 py-2 min-h-[2.5rem]">
+                {taskIds.length === 0 ? (
+                  <p className="text-xs text-dark-text-quaternary">No task IDs selected</p>
+                ) : (
+                  <div className="flex flex-wrap gap-1.5">
+                    {taskIds.map(id => (
+                      <span key={id} className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-primary-500/10 text-primary-400 font-mono text-xs">
+                        #{id}
+                        <button type="button" onClick={() => removeTaskId(id)} className="text-primary-400/60 hover:text-primary-400 leading-none">×</button>
+                      </span>
+                    ))}
+                  </div>
+                )}
+              </div>
+              {taskIds.length > 0 && (
+                <div className="border-t border-dark-border-subtle px-3 py-2">
+                  <button type="button" onClick={() => onChange({ taskIds: [] })} className="text-xs text-danger-400 hover:text-danger-300">
+                    Clear task IDs
                   </button>
                 </div>
               )}
@@ -242,6 +313,7 @@ export default function ProjectDetail() {
   const [filterAssignee, setFilterAssignee] = useState<number | null>(null)
   const [filterPriority, setFilterPriority] = useState('')
   const [filterTag, setFilterTag] = useState<number | null>(null)
+  const [filterTaskIds, setFilterTaskIds] = useState<number[]>([])
 
   // Use local-first tasks hook
   const {
@@ -303,11 +375,13 @@ export default function ProjectDetail() {
         setFilterAssignee(s.assignee ?? null)
         setFilterPriority(s.priority ?? '')
         setFilterTag(s.tag ?? null)
+        setFilterTaskIds(Array.isArray(s.taskIds) ? s.taskIds : [])
       } else {
         setFilterSprint(null)
         setFilterAssignee(null)
         setFilterPriority('')
         setFilterTag(null)
+        setFilterTaskIds([])
       }
     } catch { /* ignore */ }
   }, [projectId])
@@ -320,8 +394,9 @@ export default function ProjectDetail() {
       assignee: filterAssignee,
       priority: filterPriority,
       tag: filterTag,
+      taskIds: filterTaskIds,
     }))
-  }, [projectId, filterSprint, filterAssignee, filterPriority, filterTag])
+  }, [projectId, filterSprint, filterAssignee, filterPriority, filterTag, filterTaskIds])
 
   const loadProject = async () => {
     try {
@@ -434,8 +509,9 @@ export default function ProjectDetail() {
     }
     if (filterPriority && t.priority !== filterPriority) return false
     if (filterTag      !== null && !t.tags?.some(tag => tag.id === filterTag)) return false
+    if (filterTaskIds.length > 0 && !filterTaskIds.includes(t.task_number ?? 0)) return false
     return true
-  }), [tasks, filterSprint, filterAssignee, filterPriority, filterTag])
+  }), [tasks, filterSprint, filterAssignee, filterPriority, filterTag, filterTaskIds])
 
   if (loadingProject || loadingTasks || loadingSwimLanes) {
     return (
@@ -543,11 +619,13 @@ export default function ProjectDetail() {
                 assigneeId={filterAssignee}
                 priority={filterPriority}
                 tagId={filterTag}
+                taskIds={filterTaskIds}
                 onChange={patch => {
                   if ('sprintId'   in patch) setFilterSprint(patch.sprintId ?? null)
                   if ('assigneeId' in patch) setFilterAssignee(patch.assigneeId ?? null)
                   if ('priority'   in patch) setFilterPriority(patch.priority ?? '')
                   if ('tagId'      in patch) setFilterTag(patch.tagId ?? null)
+                  if ('taskIds'    in patch) setFilterTaskIds(patch.taskIds ?? [])
                 }}
               />
               {/* Lane stats — hidden on mobile (shown in lane tab bar instead) */}

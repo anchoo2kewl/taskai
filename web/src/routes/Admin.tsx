@@ -1,11 +1,98 @@
 import { useEffect, useState } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import { useAuth } from '../state/AuthContext'
-import { api, type EmailProviderResponse, type AdminInvitation } from '../lib/api'
+import { api, type EmailProviderResponse, type AdminInvitation, type BackupStatus, type BackupSettings, type BackupRecord, type BackupFolder } from '../lib/api'
 import { version as frontendVersion } from '../lib/version'
 
 // API URL with fallback for production (empty string = relative URL)
 const API_URL = import.meta.env.VITE_API_URL || ''
+
+// ─── Schedule / cron helpers ─────────────────────────────────────────────────
+type ScheduleFreq = 'hourly' | 'daily' | 'weekly' | 'monthly' | 'custom'
+const DOW_LABELS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
+
+function scheduleToCron(freq: ScheduleFreq, hour: number, minute: number, dow: number, dom: number, custom: string): string {
+  const h = String(hour).padStart(2, '0')
+  const m = String(minute).padStart(2, '0')
+  switch (freq) {
+    case 'hourly':  return `${m} * * * *`
+    case 'daily':   return `${m} ${h} * * *`
+    case 'weekly':  return `${m} ${h} * * ${dow}`
+    case 'monthly': return `${m} ${h} ${dom} * *`
+    case 'custom':  return custom
+  }
+}
+
+function cronToSchedule(cron: string): { freq: ScheduleFreq; hour: number; minute: number; dow: number; dom: number } {
+  const parts = (cron || '0 3 * * *').trim().split(/\s+/)
+  if (parts.length !== 5) return { freq: 'custom', hour: 3, minute: 0, dow: 1, dom: 1 }
+  const [min, hr, dom, , dow] = parts
+  if (hr === '*' && dom === '*' && dow === '*') return { freq: 'hourly', hour: 0, minute: Number(min) || 0, dow: 1, dom: 1 }
+  if (dom === '*' && dow === '*') return { freq: 'daily', hour: Number(hr) || 3, minute: Number(min) || 0, dow: 1, dom: 1 }
+  if (dom === '*' && dow !== '*') return { freq: 'weekly', hour: Number(hr) || 3, minute: Number(min) || 0, dow: Number(dow) || 1, dom: 1 }
+  if (dom !== '*' && dow === '*') return { freq: 'monthly', hour: Number(hr) || 3, minute: Number(min) || 0, dow: 1, dom: Number(dom) || 1 }
+  return { freq: 'custom', hour: 3, minute: 0, dow: 1, dom: 1 }
+}
+
+function scheduleDesc(freq: ScheduleFreq, hour: number, minute: number, dow: number, dom: number): string {
+  const t = `${String(hour).padStart(2, '0')}:${String(minute).padStart(2, '0')} UTC`
+  switch (freq) {
+    case 'hourly':  return `Every hour at :${String(minute).padStart(2, '0')}`
+    case 'daily':   return `Every day at ${t}`
+    case 'weekly':  return `Every ${DOW_LABELS[dow]} at ${t}`
+    case 'monthly': return `On the ${dom}${dom === 1 ? 'st' : dom === 2 ? 'nd' : dom === 3 ? 'rd' : 'th'} of each month at ${t}`
+    case 'custom':  return 'Custom schedule'
+  }
+}
+
+const MONTH_NAMES = ['January','February','March','April','May','June','July','August','September','October','November','December']
+
+function buildCalendarGrid(year: number, month: number): (number | null)[] {
+  const firstDay = new Date(year, month, 1).getDay()
+  const daysInMonth = new Date(year, month + 1, 0).getDate()
+  const cells: (number | null)[] = []
+  for (let i = 0; i < firstDay; i++) cells.push(null)
+  for (let d = 1; d <= daysInMonth; d++) cells.push(d)
+  while (cells.length % 7 !== 0) cells.push(null)
+  return cells
+}
+
+function getCronScheduledDays(cron: string, year: number, month: number): Set<number> {
+  const s = new Set<number>()
+  const parts = cron.trim().split(/\s+/)
+  if (parts.length !== 5) return s
+  const [, hr, dom, , dow] = parts
+  const daysInMonth = new Date(year, month + 1, 0).getDate()
+  for (let d = 1; d <= daysInMonth; d++) {
+    const date = new Date(year, month, d)
+    const matchDow = dow === '*' || date.getDay() === Number(dow)
+    const matchDom = dom === '*' || date.getDate() === Number(dom)
+    if (matchDow && matchDom) {
+      if (hr === '*') { s.add(d) } else { s.add(d) }
+    }
+  }
+  return s
+}
+
+function getRetentionTier(backupDate: string, now: Date, fullDays: number, alternateDays: number, weeklyDays: number): 'full' | 'alternate' | 'weekly' | 'expired' {
+  const ageDays = Math.floor((now.getTime() - new Date(backupDate).getTime()) / (1000 * 60 * 60 * 24))
+  if (ageDays < fullDays) return 'full'
+  if (ageDays < alternateDays) return 'alternate'
+  if (ageDays < weeklyDays) return 'weekly'
+  return 'expired'
+}
+
+function relativeTime(dateStr: string): string {
+  const diff = Date.now() - new Date(dateStr).getTime()
+  const secs = Math.floor(diff / 1000)
+  if (secs < 60) return 'just now'
+  const mins = Math.floor(secs / 60)
+  if (mins < 60) return `${mins}m ago`
+  const hrs = Math.floor(mins / 60)
+  if (hrs < 24) return `${hrs}h ago`
+  const days = Math.floor(hrs / 24)
+  return `${days}d ago`
+}
 
 // Types from backend
 interface UserWithStats {
@@ -21,6 +108,7 @@ interface UserWithStats {
   last_login_ip?: string | null
   failed_attempts: number
   invite_count: number
+  linked_providers: string[]
 }
 
 interface UserActivity {
@@ -105,6 +193,59 @@ export default function Admin() {
   const [backupStatus, setBackupStatus] = useState('')
   const [backupError, setBackupError] = useState('')
 
+  // Backup subtab (also reads ?subtab= from URL so OAuth callback can land here directly)
+  type BackupSubTab = 'manual' | 'automated'
+  const subtabFromUrl = searchParams.get('subtab') as BackupSubTab | null
+  const [backupSubTab, setBackupSubTab] = useState<BackupSubTab>(
+    subtabFromUrl === 'automated' ? 'automated' : 'manual'
+  )
+
+  // Copy-from-env state
+  const [copySourceUrl, setCopySourceUrl] = useState('')
+  const [copySourceApiKey, setCopySourceApiKey] = useState('')
+  const [isCopying, setIsCopying] = useState(false)
+  const [copyStatus, setCopyStatus] = useState('')
+  const [copyError, setCopyError] = useState('')
+
+  // Automated (Google Drive) backup state
+  const [autoBackupStatus, setAutoBackupStatus] = useState<BackupStatus | null>(null)
+  const [autoBackupSettings, setAutoBackupSettings] = useState<BackupSettings | null>(null)
+  const [autoBackupHistory, setAutoBackupHistory] = useState<BackupRecord[]>([])
+  const [autoBackupEnabled, setAutoBackupEnabled] = useState(false)
+  const [isAutoBackupAvailable, setIsAutoBackupAvailable] = useState(false)
+  const [isLoadingAutoBackup, setIsLoadingAutoBackup] = useState(false)
+  const [isTriggeringAutoBackup, setIsTriggeringAutoBackup] = useState(false)
+  const [isSavingAutoBackupSettings, setIsSavingAutoBackupSettings] = useState(false)
+  const [isDisconnectingAutoBackup, setIsDisconnectingAutoBackup] = useState(false)
+  const [autoBackupError, setAutoBackupError] = useState('')
+  const [autoBackupSuccess, setAutoBackupSuccess] = useState('')
+  // Visual schedule builder
+  const [schedFreq, setSchedFreq] = useState<ScheduleFreq>('daily')
+  const [schedHour, setSchedHour] = useState(3)
+  const [schedMinute, setSchedMinute] = useState(0)
+  const [schedDayOfWeek, setSchedDayOfWeek] = useState(1)
+  const [schedDayOfMonth, setSchedDayOfMonth] = useState(1)
+  const [schedCustomCron, setSchedCustomCron] = useState('0 3 * * *')
+  // Folder browser
+  const [folderBrowserOpen, setFolderBrowserOpen] = useState(false)
+  const [folderStack, setFolderStack] = useState<{ id: string; name: string }[]>([])
+  const [folderList, setFolderList] = useState<BackupFolder[]>([])
+  const [isFolderLoading, setIsFolderLoading] = useState(false)
+  const [newFolderName, setNewFolderName] = useState('')
+  const [isCreatingFolder, setIsCreatingFolder] = useState(false)
+  const [selectedFolderId, setSelectedFolderId] = useState('')
+  const [selectedFolderName, setSelectedFolderName] = useState('')
+  const [isDownloadingRecord, setIsDownloadingRecord] = useState<string | null>(null)
+  // Retention settings
+  const [retFullDays, setRetFullDays] = useState(30)
+  const [retAlternateDays, setRetAlternateDays] = useState(60)
+  const [retWeeklyDays, setRetWeeklyDays] = useState(365)
+  // Folder search
+  const [folderSearch, setFolderSearch] = useState('')
+  // Calendar navigation
+  const [calYear, setCalYear] = useState(() => new Date().getFullYear())
+  const [calMonth, setCalMonth] = useState(() => new Date().getMonth())
+
   // System/version state
   const [versionInfo, setVersionInfo] = useState<VersionInfo | null>(null)
   const [versionLoading, setVersionLoading] = useState(false)
@@ -139,6 +280,13 @@ export default function Admin() {
       loadInvitations(invStatusFilter, invTypeFilter)
     }
   }, [activeTab, invStatusFilter, invTypeFilter])
+
+  // Load automated backup when subtab becomes active
+  useEffect(() => {
+    if (activeTab === 'backup' && backupSubTab === 'automated') {
+      loadAutomatedBackup()
+    }
+  }, [activeTab, backupSubTab])
 
   // === User Management ===
   const loadUsers = async () => {
@@ -381,6 +529,201 @@ export default function Admin() {
     } finally {
       setIsTestingEmail(false)
     }
+  }
+
+  // === Copy from environment ===
+  const handleCopyFromEnv = async () => {
+    if (!copySourceUrl || !copySourceApiKey) {
+      setCopyError('Source URL and API key are required')
+      return
+    }
+    if (!confirm('This will overwrite ALL data in this environment with data from the source. Are you sure?')) return
+    setIsCopying(true)
+    setCopyError('')
+    setCopyStatus('')
+    try {
+      const result = await api.copyFromEnv(copySourceUrl, copySourceApiKey)
+      setCopyStatus(`✅ ${result.message} — ${result.rows} rows imported (v${result.version})`)
+      setTimeout(() => globalThis.location.reload(), 2000)
+    } catch (err) {
+      setCopyError(err instanceof Error ? err.message : 'Copy failed')
+    } finally {
+      setIsCopying(false)
+    }
+  }
+
+  // === Automated (Google Drive) backup ===
+  const loadAutomatedBackup = async () => {
+    setIsLoadingAutoBackup(true)
+    try {
+      const [status, settings, history] = await Promise.all([
+        api.getBackupStatus(),
+        api.getBackupSettings(),
+        api.listBackupHistory(20),
+      ])
+      setAutoBackupStatus(status)
+      setAutoBackupSettings(settings)
+      setAutoBackupHistory(history)
+      setAutoBackupEnabled(settings.enabled)
+      // Initialise visual schedule builder from stored cron
+      const cron = settings.cron_expression || '0 3 * * *'
+      const parsed = cronToSchedule(cron)
+      setSchedFreq(parsed.freq)
+      setSchedHour(parsed.hour)
+      setSchedMinute(parsed.minute)
+      setSchedDayOfWeek(parsed.dow)
+      setSchedDayOfMonth(parsed.dom)
+      setSchedCustomCron(cron)
+      // Initialise retention
+      setRetFullDays(settings.retention?.FullDays || 30)
+      setRetAlternateDays(settings.retention?.AlternateDays || 60)
+      setRetWeeklyDays(settings.retention?.WeeklyDays || 365)
+      // Initialise folder selection
+      setSelectedFolderId(settings.folder_id || '')
+      setSelectedFolderName(settings.folder_id ? `Folder: ${settings.folder_id}` : '')
+      setIsAutoBackupAvailable(true)
+    } catch {
+      setIsAutoBackupAvailable(false)
+    } finally {
+      setIsLoadingAutoBackup(false)
+    }
+  }
+
+  const handleTriggerAutoBackup = async () => {
+    setIsTriggeringAutoBackup(true)
+    setAutoBackupError('')
+    setAutoBackupSuccess('')
+    try {
+      await api.triggerBackup()
+      setAutoBackupSuccess('Backup started — check history in a moment')
+      setTimeout(() => loadAutomatedBackup(), 3000)
+    } catch (err) {
+      setAutoBackupError(err instanceof Error ? err.message : 'Failed to trigger backup')
+    } finally {
+      setIsTriggeringAutoBackup(false)
+    }
+  }
+
+  const handleSaveAutoBackupSettings = async () => {
+    setIsSavingAutoBackupSettings(true)
+    setAutoBackupError('')
+    setAutoBackupSuccess('')
+    try {
+      const cron = scheduleToCron(schedFreq, schedHour, schedMinute, schedDayOfWeek, schedDayOfMonth, schedCustomCron)
+      const updated = await api.updateBackupSettings({
+        enabled: autoBackupEnabled,
+        cron_expression: cron,
+        folder_id: selectedFolderId,
+        retention: { FullDays: retFullDays, AlternateDays: retAlternateDays, WeeklyDays: retWeeklyDays },
+      })
+      setAutoBackupSettings(updated)
+      setAutoBackupSuccess('Settings saved')
+      setTimeout(() => setAutoBackupSuccess(''), 3000)
+    } catch (err) {
+      setAutoBackupError(err instanceof Error ? err.message : 'Failed to save settings')
+    } finally {
+      setIsSavingAutoBackupSettings(false)
+    }
+  }
+
+  const handleDisconnectAutoBackup = async () => {
+    if (!confirm('Disconnect Google Drive? Scheduled backups will be disabled.')) return
+    setIsDisconnectingAutoBackup(true)
+    setAutoBackupError('')
+    try {
+      await api.disconnectBackup()
+      setAutoBackupSuccess('Google Drive disconnected')
+      loadAutomatedBackup()
+    } catch (err) {
+      setAutoBackupError(err instanceof Error ? err.message : 'Failed to disconnect')
+    } finally {
+      setIsDisconnectingAutoBackup(false)
+    }
+  }
+
+  const handleDeleteAutoBackupRecord = async (id: string) => {
+    if (!confirm('Delete this backup record and its remote file?')) return
+    try {
+      await api.deleteBackupRecord(id)
+      setAutoBackupHistory(prev => prev.filter(r => r.id !== id))
+    } catch (err) {
+      setAutoBackupError(err instanceof Error ? err.message : 'Failed to delete record')
+    }
+  }
+
+  const handleDownloadRecord = async (record: BackupRecord) => {
+    setIsDownloadingRecord(record.id)
+    try {
+      await api.downloadBackupRecord(record.id, record.filename || `backup-${record.id}.tar.gz`)
+    } catch (err) {
+      setAutoBackupError(err instanceof Error ? err.message : 'Download failed')
+    } finally {
+      setIsDownloadingRecord(null)
+    }
+  }
+
+  const openFolderBrowser = async () => {
+    setFolderBrowserOpen(true)
+    setFolderStack([])
+    setNewFolderName('')
+    await loadFolders('')
+  }
+
+  const loadFolders = async (parentId: string) => {
+    setIsFolderLoading(true)
+    try {
+      const folders = await api.listBackupFolders(parentId)
+      setFolderList(folders || [])
+    } catch {
+      setFolderList([])
+    } finally {
+      setIsFolderLoading(false)
+    }
+  }
+
+  const handleFolderClick = (folder: BackupFolder) => {
+    setFolderStack(prev => [...prev, { id: folder.id, name: folder.name }])
+    loadFolders(folder.id)
+  }
+
+  const handleFolderBreadcrumb = (idx: number) => {
+    const newStack = folderStack.slice(0, idx + 1)
+    setFolderStack(newStack)
+    loadFolders(newStack[newStack.length - 1]?.id ?? '')
+  }
+
+  const handleFolderBreadcrumbRoot = () => {
+    setFolderStack([])
+    loadFolders('')
+  }
+
+  const handleSelectFolder = (id: string, name: string) => {
+    setSelectedFolderId(id)
+    setSelectedFolderName(name)
+    setFolderBrowserOpen(false)
+  }
+
+  const handleCreateFolder = async () => {
+    if (!newFolderName.trim()) return
+    setIsCreatingFolder(true)
+    try {
+      const parentId = folderStack[folderStack.length - 1]?.id ?? ''
+      const folder = await api.createBackupFolder(newFolderName.trim(), parentId)
+      setFolderList(prev => [...prev, folder])
+      setNewFolderName('')
+    } catch (err) {
+      setAutoBackupError(err instanceof Error ? err.message : 'Failed to create folder')
+    } finally {
+      setIsCreatingFolder(false)
+    }
+  }
+
+  const formatBytes = (bytes: number) => {
+    if (bytes === 0) return '0 B'
+    const k = 1024
+    const sizes = ['B', 'KB', 'MB', 'GB']
+    const i = Math.floor(Math.log(bytes) / Math.log(k))
+    return `${parseFloat((bytes / Math.pow(k, i)).toFixed(1))} ${sizes[i]}`
   }
 
   // === System/Version ===
@@ -634,6 +977,25 @@ export default function Admin() {
                         <div className="bg-dark-bg-secondary rounded-lg p-3 border border-dark-border-subtle">
                           <p className="text-xs text-dark-text-tertiary">Last Login</p>
                           <p className="text-sm text-dark-text-primary">{u.last_login_at ? formatShortDate(u.last_login_at) : 'Never'}</p>
+                        </div>
+                      </div>
+
+                      {/* Auth providers */}
+                      <div className="bg-dark-bg-secondary rounded-lg p-3 border border-dark-border-subtle">
+                        <p className="text-xs text-dark-text-tertiary mb-2">Auth Methods</p>
+                        <div className="flex flex-wrap gap-2">
+                          {(u.linked_providers ?? []).length === 0 ? (
+                            <span className="text-xs text-dark-text-tertiary">None recorded</span>
+                          ) : (u.linked_providers ?? []).map(p => (
+                            <span key={p} className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium ${
+                              p === 'password' ? 'bg-blue-500/20 text-blue-300 border border-blue-500/30' :
+                              p === 'google'   ? 'bg-red-500/20 text-red-300 border border-red-500/30' :
+                              p === 'github'   ? 'bg-gray-500/20 text-gray-300 border border-gray-500/30' :
+                                                 'bg-purple-500/20 text-purple-300 border border-purple-500/30'
+                            }`}>
+                              {p === 'password' ? '🔑' : p === 'google' ? '🔴' : p === 'github' ? '🐙' : '🔗'} {p}
+                            </span>
+                          ))}
                         </div>
                       </div>
 
@@ -1012,171 +1374,893 @@ export default function Admin() {
           {/* Backup & Restore Tab */}
           {activeTab === 'backup' && (
             <div className="space-y-6">
-              {/* Export Section */}
-              <div className="bg-dark-bg-secondary rounded-lg border border-dark-border-subtle p-6">
-                <div className="flex items-start justify-between mb-4">
-                  <div>
-                    <h2 className="text-lg font-semibold text-dark-text-primary mb-2">Export Data</h2>
-                    <p className="text-sm text-dark-text-secondary">
-                      Download a complete backup of all database data including migration version.
-                    </p>
-                  </div>
-                  <button
-                    onClick={async () => {
-                      setIsExporting(true)
-                      setBackupError('')
-                      setBackupStatus('')
-                      try {
-                        const response = await fetch(`${API_URL}/api/admin/backup/export`, {
-                          method: 'GET',
-                          headers: {
-                            'Authorization': `Bearer ${localStorage.getItem('auth_token')}`
-                          }
-                        })
-                        if (!response.ok) {
-                          const error = await response.json()
-                          throw new Error(error.error || 'Export failed')
-                        }
-
-                        const blob = await response.blob()
-                        const url = globalThis.URL.createObjectURL(blob)
-                        const a = document.createElement('a')
-                        a.href = url
-                        a.download = `taskai-backup-${new Date().toISOString().split('T')[0]}.json`
-                        document.body.appendChild(a)
-                        a.click()
-                        globalThis.URL.revokeObjectURL(url)
-                        a.remove()
-
-                        setBackupStatus('✅ Export completed successfully')
-                      } catch (err: unknown) {
-                        setBackupError(err instanceof Error ? err.message : 'Export failed')
-                      } finally {
-                        setIsExporting(false)
-                      }
-                    }}
-                    disabled={isExporting}
-                    className="px-4 py-2 text-sm font-medium bg-primary-500 text-white rounded-lg hover:bg-primary-600 transition-colors disabled:opacity-50 flex items-center gap-2"
-                  >
-                    {isExporting ? (
-                      <>
-                        <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white"></div>
-                        Exporting...
-                      </>
-                    ) : (
-                      <>
-                        <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
-                        </svg>
-                        Export Data
-                      </>
-                    )}
+              {/* Subtab switcher */}
+              <div className="flex border-b border-dark-border-subtle">
+                {(['manual', 'automated'] as const).map(sub => (
+                  <button key={sub} onClick={() => setBackupSubTab(sub)}
+                    className={`px-5 py-2.5 text-sm font-medium border-b-2 transition-colors ${
+                      backupSubTab === sub
+                        ? 'border-primary-500 text-primary-400'
+                        : 'border-transparent text-dark-text-secondary hover:text-dark-text-primary'
+                    }`}>
+                    {sub === 'manual' ? 'Manual' : 'Automated (Google Drive)'}
                   </button>
-                </div>
-
-                <div className="mt-4 p-4 bg-dark-bg-tertiary rounded border border-dark-border-subtle">
-                  <h3 className="text-sm font-medium text-dark-text-primary mb-2">Export includes:</h3>
-                  <ul className="text-sm text-dark-text-secondary space-y-1">
-                    <li>• All users, teams, and members</li>
-                    <li>• All projects, tasks, and comments</li>
-                    <li>• Tags, sprints, and swim lanes</li>
-                    <li>• User activity and invitations</li>
-                    <li>• API keys and provider settings</li>
-                    <li>• Migration version for compatibility check</li>
-                  </ul>
-                </div>
+                ))}
               </div>
 
-              {/* Import Section */}
-              <div className="bg-dark-bg-secondary rounded-lg border border-dark-border-subtle p-6">
-                <div className="mb-4">
-                  <h2 className="text-lg font-semibold text-dark-text-primary mb-2">Import Data</h2>
-                  <p className="text-sm text-dark-text-secondary mb-4">
-                    Restore data from a backup file. The migration version must match your current database.
-                  </p>
-                  <div className="p-4 bg-orange-500/10 border border-orange-500/30 rounded-lg">
-                    <p className="text-sm text-orange-400 font-medium">⚠️ Warning</p>
-                    <p className="text-sm text-orange-300 mt-1">
-                      Importing will replace existing data with the backup. Make sure to export current data first.
-                    </p>
-                  </div>
-                </div>
-
-                <input
-                  type="file"
-                  accept=".json"
-                  id="backup-file-input"
-                  className="hidden"
-                  onChange={async (e) => {
-                    const file = e.target.files?.[0]
-                    if (!file) return
-
-                    setIsImporting(true)
-                    setBackupError('')
-                    setBackupStatus('')
-
-                    try {
-                      const fileContent = await file.text()
-
-                      const response = await fetch(`${API_URL}/api/admin/backup/import`, {
-                        method: 'POST',
-                        headers: {
-                          'Authorization': `Bearer ${localStorage.getItem('auth_token')}`,
-                          'Content-Type': 'application/json'
-                        },
-                        body: fileContent
-                      })
-
-                      if (!response.ok) {
-                        const error = await response.json()
-                        throw new Error(error.error || 'Import failed')
-                      }
-
-                      const result = await response.json()
-                      setBackupStatus(`✅ Import completed: ${result.rows} rows imported`)
-
-                      // Reload page after successful import
-                      setTimeout(() => globalThis.location.reload(), 2000)
-                    } catch (err: unknown) {
-                      setBackupError(err instanceof Error ? err.message : 'Import failed')
-                    } finally {
-                      setIsImporting(false)
-                      e.target.value = '' // Reset input
-                    }
-                  }}
-                />
-
-                <button
-                  onClick={() => document.getElementById('backup-file-input')?.click()}
-                  disabled={isImporting}
-                  className="px-4 py-2 text-sm font-medium bg-orange-500 text-white rounded-lg hover:bg-orange-600 transition-colors disabled:opacity-50 flex items-center gap-2"
-                >
-                  {isImporting ? (
-                    <>
-                      <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white"></div>
-                      Importing...
-                    </>
-                  ) : (
-                    <>
-                      <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" />
-                      </svg>
-                      Choose Backup File
-                    </>
+              {/* Manual subtab */}
+              {backupSubTab === 'manual' && (
+                <div className="space-y-6">
+                  {/* Copy from environment — hidden on production */}
+                  {versionInfo?.environment !== 'production' && (
+                    <div className="bg-dark-bg-secondary rounded-lg border border-dark-border-subtle p-6">
+                      <h2 className="text-lg font-semibold text-dark-text-primary mb-1">Copy from Environment</h2>
+                      <p className="text-sm text-dark-text-secondary mb-4">
+                        Overwrite this environment's database with data from another environment.
+                      </p>
+                      <div className="p-4 bg-orange-500/10 border border-orange-500/30 rounded-lg mb-4">
+                        <p className="text-sm text-orange-400 font-medium">⚠️ Warning</p>
+                        <p className="text-sm text-orange-300 mt-1">
+                          This will overwrite <strong>all data</strong> in this environment with data from the source. This action cannot be undone.
+                        </p>
+                      </div>
+                      <div className="space-y-4">
+                        <div>
+                          <label className="block text-sm font-medium text-dark-text-secondary mb-1">Source Environment URL</label>
+                          <div className="flex flex-wrap gap-2 mb-2">
+                            {versionInfo?.environment === 'staging' && (
+                              <>
+                                <button type="button" onClick={() => setCopySourceUrl('https://taskai.cc')}
+                                  className={`px-3 py-1.5 text-xs rounded border transition-colors ${copySourceUrl === 'https://taskai.cc' ? 'border-primary-500 text-primary-400 bg-primary-500/10' : 'border-dark-border-subtle text-dark-text-secondary hover:text-dark-text-primary'}`}>
+                                  Production
+                                </button>
+                                <button type="button" onClick={() => setCopySourceUrl('https://uat.taskai.cc')}
+                                  className={`px-3 py-1.5 text-xs rounded border transition-colors ${copySourceUrl === 'https://uat.taskai.cc' ? 'border-primary-500 text-primary-400 bg-primary-500/10' : 'border-dark-border-subtle text-dark-text-secondary hover:text-dark-text-primary'}`}>
+                                  UAT
+                                </button>
+                              </>
+                            )}
+                            {versionInfo?.environment === 'uat' && (
+                              <>
+                                <button type="button" onClick={() => setCopySourceUrl('https://taskai.cc')}
+                                  className={`px-3 py-1.5 text-xs rounded border transition-colors ${copySourceUrl === 'https://taskai.cc' ? 'border-primary-500 text-primary-400 bg-primary-500/10' : 'border-dark-border-subtle text-dark-text-secondary hover:text-dark-text-primary'}`}>
+                                  Production
+                                </button>
+                                <button type="button" onClick={() => setCopySourceUrl('https://staging.taskai.cc')}
+                                  className={`px-3 py-1.5 text-xs rounded border transition-colors ${copySourceUrl === 'https://staging.taskai.cc' ? 'border-primary-500 text-primary-400 bg-primary-500/10' : 'border-dark-border-subtle text-dark-text-secondary hover:text-dark-text-primary'}`}>
+                                  Staging
+                                </button>
+                              </>
+                            )}
+                          </div>
+                          <input
+                            type="text"
+                            value={copySourceUrl}
+                            onChange={e => setCopySourceUrl(e.target.value)}
+                            placeholder="https://taskai.cc"
+                            className="w-full px-3 py-2 bg-dark-bg-primary border border-dark-border-subtle rounded text-sm text-dark-text-primary placeholder-dark-text-tertiary focus:outline-none focus:border-dark-accent-primary"
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-sm font-medium text-dark-text-secondary mb-1">Source API Key</label>
+                          <input
+                            type="password"
+                            value={copySourceApiKey}
+                            onChange={e => setCopySourceApiKey(e.target.value)}
+                            placeholder="tai_..."
+                            className="w-full px-3 py-2 bg-dark-bg-primary border border-dark-border-subtle rounded text-sm text-dark-text-primary placeholder-dark-text-tertiary focus:outline-none focus:border-dark-accent-primary"
+                          />
+                          <p className="mt-1 text-xs text-dark-text-tertiary">Use an admin API key from the source environment</p>
+                        </div>
+                        <button
+                          onClick={handleCopyFromEnv}
+                          disabled={isCopying || !copySourceUrl || !copySourceApiKey}
+                          className="px-4 py-2 text-sm font-medium bg-orange-600 text-white rounded-lg hover:bg-orange-500 transition-colors disabled:opacity-50 flex items-center gap-2"
+                        >
+                          {isCopying ? (
+                            <><div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white"></div>Copying...</>
+                          ) : 'Copy Database'}
+                        </button>
+                        {copyStatus && <div className="p-3 bg-emerald-500/10 border border-emerald-500/30 rounded text-sm text-emerald-400">{copyStatus}</div>}
+                        {copyError && <div className="p-3 bg-red-500/10 border border-red-500/30 rounded text-sm text-red-400">{copyError}</div>}
+                      </div>
+                    </div>
                   )}
-                </button>
-              </div>
 
-              {/* Status Messages */}
-              {backupStatus && (
-                <div className="p-4 bg-emerald-500/10 border border-emerald-500/30 rounded-lg">
-                  <p className="text-sm text-emerald-400">{backupStatus}</p>
+                  {/* Export Section */}
+                  <div className="bg-dark-bg-secondary rounded-lg border border-dark-border-subtle p-6">
+                    <div className="flex items-start justify-between mb-4">
+                      <div>
+                        <h2 className="text-lg font-semibold text-dark-text-primary mb-2">Export Data</h2>
+                        <p className="text-sm text-dark-text-secondary">
+                          Download a complete backup of all database data including migration version.
+                        </p>
+                      </div>
+                      <button
+                        onClick={async () => {
+                          setIsExporting(true)
+                          setBackupError('')
+                          setBackupStatus('')
+                          try {
+                            const response = await fetch(`${API_URL}/api/admin/backup/export`, {
+                              method: 'GET',
+                              headers: {
+                                'Authorization': `Bearer ${localStorage.getItem('auth_token')}`
+                              }
+                            })
+                            if (!response.ok) {
+                              const error = await response.json()
+                              throw new Error(error.error || 'Export failed')
+                            }
+
+                            const blob = await response.blob()
+                            const url = globalThis.URL.createObjectURL(blob)
+                            const a = document.createElement('a')
+                            a.href = url
+                            a.download = `taskai-backup-${new Date().toISOString().split('T')[0]}.json`
+                            document.body.appendChild(a)
+                            a.click()
+                            globalThis.URL.revokeObjectURL(url)
+                            a.remove()
+
+                            setBackupStatus('✅ Export completed successfully')
+                          } catch (err: unknown) {
+                            setBackupError(err instanceof Error ? err.message : 'Export failed')
+                          } finally {
+                            setIsExporting(false)
+                          }
+                        }}
+                        disabled={isExporting}
+                        className="px-4 py-2 text-sm font-medium bg-primary-500 text-white rounded-lg hover:bg-primary-600 transition-colors disabled:opacity-50 flex items-center gap-2"
+                      >
+                        {isExporting ? (
+                          <>
+                            <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white"></div>
+                            Exporting...
+                          </>
+                        ) : (
+                          <>
+                            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+                            </svg>
+                            Export Data
+                          </>
+                        )}
+                      </button>
+                    </div>
+
+                    <div className="mt-4 p-4 bg-dark-bg-tertiary rounded border border-dark-border-subtle">
+                      <h3 className="text-sm font-medium text-dark-text-primary mb-2">Export includes:</h3>
+                      <ul className="text-sm text-dark-text-secondary space-y-1">
+                        <li>• All users, teams, and members</li>
+                        <li>• All projects, tasks, and comments</li>
+                        <li>• Tags, sprints, and swim lanes</li>
+                        <li>• User activity and invitations</li>
+                        <li>• API keys and provider settings</li>
+                        <li>• Migration version for compatibility check</li>
+                      </ul>
+                    </div>
+                  </div>
+
+                  {/* Import Section */}
+                  <div className="bg-dark-bg-secondary rounded-lg border border-dark-border-subtle p-6">
+                    <div className="mb-4">
+                      <h2 className="text-lg font-semibold text-dark-text-primary mb-2">Import Data</h2>
+                      <p className="text-sm text-dark-text-secondary mb-4">
+                        Restore data from a backup file. The migration version must match your current database.
+                      </p>
+                      <div className="p-4 bg-orange-500/10 border border-orange-500/30 rounded-lg">
+                        <p className="text-sm text-orange-400 font-medium">⚠️ Warning</p>
+                        <p className="text-sm text-orange-300 mt-1">
+                          Importing will replace existing data with the backup. Make sure to export current data first.
+                        </p>
+                      </div>
+                    </div>
+
+                    <input
+                      type="file"
+                      accept=".json"
+                      id="backup-file-input"
+                      className="hidden"
+                      onChange={async (e) => {
+                        const file = e.target.files?.[0]
+                        if (!file) return
+
+                        setIsImporting(true)
+                        setBackupError('')
+                        setBackupStatus('')
+
+                        try {
+                          const fileContent = await file.text()
+
+                          const response = await fetch(`${API_URL}/api/admin/backup/import`, {
+                            method: 'POST',
+                            headers: {
+                              'Authorization': `Bearer ${localStorage.getItem('auth_token')}`,
+                              'Content-Type': 'application/json'
+                            },
+                            body: fileContent
+                          })
+
+                          if (!response.ok) {
+                            const error = await response.json()
+                            throw new Error(error.error || 'Import failed')
+                          }
+
+                          const result = await response.json()
+                          setBackupStatus(`✅ Import completed: ${result.rows} rows imported`)
+
+                          // Reload page after successful import
+                          setTimeout(() => globalThis.location.reload(), 2000)
+                        } catch (err: unknown) {
+                          setBackupError(err instanceof Error ? err.message : 'Import failed')
+                        } finally {
+                          setIsImporting(false)
+                          e.target.value = '' // Reset input
+                        }
+                      }}
+                    />
+
+                    <button
+                      onClick={() => document.getElementById('backup-file-input')?.click()}
+                      disabled={isImporting}
+                      className="px-4 py-2 text-sm font-medium bg-orange-500 text-white rounded-lg hover:bg-orange-600 transition-colors disabled:opacity-50 flex items-center gap-2"
+                    >
+                      {isImporting ? (
+                        <>
+                          <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white"></div>
+                          Importing...
+                        </>
+                      ) : (
+                        <>
+                          <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" />
+                          </svg>
+                          Choose Backup File
+                        </>
+                      )}
+                    </button>
+                  </div>
+
+                  {/* Status Messages */}
+                  {backupStatus && (
+                    <div className="p-4 bg-emerald-500/10 border border-emerald-500/30 rounded-lg">
+                      <p className="text-sm text-emerald-400">{backupStatus}</p>
+                    </div>
+                  )}
+                  {backupError && (
+                    <div className="p-4 bg-red-500/10 border border-red-500/30 rounded-lg">
+                      <p className="text-sm text-red-400">{backupError}</p>
+                    </div>
+                  )}
                 </div>
               )}
 
-              {backupError && (
-                <div className="p-4 bg-red-500/10 border border-red-500/30 rounded-lg">
-                  <p className="text-sm text-red-400">{backupError}</p>
+              {/* Automated subtab — Google Drive backup */}
+              {backupSubTab === 'automated' && (
+                <div className="space-y-4">
+                  {isLoadingAutoBackup && (
+                    <div className="animate-pulse space-y-4">
+                      <div className="h-28 bg-dark-bg-secondary rounded-xl"></div>
+                      <div className="h-40 bg-dark-bg-secondary rounded-xl"></div>
+                    </div>
+                  )}
+
+                  {!isLoadingAutoBackup && !isAutoBackupAvailable && (
+                    <div className="bg-dark-bg-secondary rounded-xl border border-dark-border-subtle p-6">
+                      <p className="text-sm text-dark-text-tertiary">
+                        Google Drive backup is not configured. Set{' '}
+                        <code className="font-mono text-xs bg-dark-bg-tertiary px-1 py-0.5 rounded">GOOGLE_CLIENT_ID</code>{' '}
+                        and ensure PostgreSQL is in use.
+                      </p>
+                    </div>
+                  )}
+
+                  {!isLoadingAutoBackup && isAutoBackupAvailable && (
+                    <>
+                      {/* Global alerts */}
+                      {autoBackupSuccess && (
+                        <div className="p-3 bg-emerald-500/10 border border-emerald-500/30 rounded-lg text-sm text-emerald-400">{autoBackupSuccess}</div>
+                      )}
+                      {autoBackupError && (
+                        <div className="p-3 bg-red-500/10 border border-red-500/30 rounded-lg text-sm text-red-400 flex items-center justify-between">
+                          <span>{autoBackupError}</span>
+                          <button onClick={() => setAutoBackupError('')} className="ml-3 text-red-400/60 hover:text-red-400">✕</button>
+                        </div>
+                      )}
+
+                      {/* Card 1 — Connection */}
+                      <div className="bg-dark-bg-secondary rounded-xl border border-dark-border-subtle p-5">
+                        <div className="flex items-center gap-3 mb-4">
+                          <div className="w-9 h-9 rounded-lg bg-teal-500/15 flex items-center justify-center flex-shrink-0">
+                            <svg className="w-4.5 h-4.5 text-teal-400" viewBox="0 0 24 24" fill="currentColor" style={{ width: '18px', height: '18px' }}>
+                              <path d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" />
+                              <path d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" />
+                              <path d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z" />
+                              <path d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z" />
+                            </svg>
+                          </div>
+                          <div className="flex-1 min-w-0">
+                            <h3 className="text-sm font-semibold text-dark-text-primary">Google Drive</h3>
+                            {autoBackupStatus?.provider_connected ? (
+                              <p className="text-xs text-emerald-400 flex items-center gap-1">
+                                <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 inline-block"></span>
+                                Connected{autoBackupStatus.connected_email ? ` · ${autoBackupStatus.connected_email}` : ''}
+                              </p>
+                            ) : (
+                              <p className="text-xs text-dark-text-tertiary">Not connected</p>
+                            )}
+                          </div>
+                          {autoBackupStatus?.provider_connected ? (
+                            <div className="flex items-center gap-2">
+                              <button
+                                onClick={handleTriggerAutoBackup}
+                                disabled={isTriggeringAutoBackup || !!autoBackupStatus?.running}
+                                className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-teal-600 hover:bg-teal-500 disabled:opacity-50 text-white rounded-lg text-xs font-medium transition-colors"
+                              >
+                                {isTriggeringAutoBackup || autoBackupStatus?.running ? (
+                                  <><div className="w-3 h-3 rounded-full border border-white border-t-transparent animate-spin"></div>Running…</>
+                                ) : (
+                                  <><svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z" /><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>Run Now</>
+                                )}
+                              </button>
+                              <button
+                                onClick={handleDisconnectAutoBackup}
+                                disabled={isDisconnectingAutoBackup}
+                                className="px-3 py-1.5 text-xs font-medium text-dark-text-secondary hover:text-red-400 hover:bg-red-500/10 rounded-lg transition-colors"
+                              >
+                                Disconnect
+                              </button>
+                            </div>
+                          ) : (
+                            <a
+                              href="/api/admin/backup/oauth/start"
+                              className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-teal-600 hover:bg-teal-500 text-white rounded-lg text-xs font-medium transition-colors"
+                            >
+                              <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1" /></svg>
+                              Connect
+                            </a>
+                          )}
+                        </div>
+                        {autoBackupStatus?.next_run && (
+                          <p className="text-xs text-dark-text-tertiary border-t border-dark-border-subtle pt-3">
+                            Next scheduled run: {new Date(autoBackupStatus.next_run).toLocaleString()}
+                          </p>
+                        )}
+                        {autoBackupStatus?.last_backup && (
+                          <p className="text-xs text-dark-text-tertiary mt-1">
+                            Last backup: {relativeTime(autoBackupStatus.last_backup.started_at)} ·{' '}
+                            <span className={autoBackupStatus.last_backup.status === 'success' ? 'text-emerald-400' : 'text-red-400'}>
+                              {autoBackupStatus.last_backup.status}
+                            </span>
+                            {autoBackupStatus.last_backup.size_bytes > 0 && ` · ${formatBytes(autoBackupStatus.last_backup.size_bytes)}`}
+                          </p>
+                        )}
+                      </div>
+
+                      {/* Cards 2 & 3 — Schedule + Storage (only when connected) */}
+                      {autoBackupStatus?.provider_connected && (
+                        <>
+                          {/* Card 2 — Schedule */}
+                          <div className="bg-dark-bg-secondary rounded-xl border border-dark-border-subtle p-5">
+                            <div className="flex items-center gap-3 mb-4">
+                              <div className="w-9 h-9 rounded-lg bg-violet-500/15 flex items-center justify-center flex-shrink-0">
+                                <svg className="w-4 h-4 text-violet-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
+                              </div>
+                              <div className="flex-1">
+                                <h3 className="text-sm font-semibold text-dark-text-primary">Schedule</h3>
+                                <p className="text-xs text-dark-text-tertiary">{scheduleDesc(schedFreq, schedHour, schedMinute, schedDayOfWeek, schedDayOfMonth)}</p>
+                              </div>
+                              <div className="flex items-center gap-2">
+                                <span className="text-xs text-dark-text-secondary">Enabled</span>
+                                <label className="relative inline-flex items-center cursor-pointer">
+                                  <input type="checkbox" checked={autoBackupEnabled} onChange={e => setAutoBackupEnabled(e.target.checked)} className="sr-only peer" />
+                                  <div className="w-8 h-4 bg-dark-bg-tertiary rounded-full peer peer-checked:after:translate-x-full after:content-[''] after:absolute after:top-0.5 after:left-[2px] after:bg-white after:rounded-full after:h-3 after:w-3 after:transition-all peer-checked:bg-teal-600"></div>
+                                </label>
+                              </div>
+                            </div>
+
+                            {/* Frequency pills */}
+                            <div className="flex flex-wrap gap-2 mb-4">
+                              {(['hourly', 'daily', 'weekly', 'monthly', 'custom'] as ScheduleFreq[]).map(f => (
+                                <button
+                                  key={f}
+                                  onClick={() => setSchedFreq(f)}
+                                  className={`px-3 py-1 rounded-full text-xs font-medium transition-colors capitalize ${
+                                    schedFreq === f
+                                      ? 'bg-violet-500/20 text-violet-300 border border-violet-500/40'
+                                      : 'bg-dark-bg-tertiary text-dark-text-secondary hover:text-dark-text-primary border border-dark-border-subtle'
+                                  }`}
+                                >
+                                  {f}
+                                </button>
+                              ))}
+                            </div>
+
+                            {/* Time / day pickers */}
+                            {schedFreq !== 'custom' && (
+                              <div className="flex flex-wrap gap-3 mb-4">
+                                {schedFreq !== 'hourly' && (
+                                  <div>
+                                    <label className="block text-xs text-dark-text-tertiary mb-1">Hour (UTC)</label>
+                                    <select
+                                      value={schedHour}
+                                      onChange={e => setSchedHour(Number(e.target.value))}
+                                      className="px-2 py-1.5 bg-dark-bg-primary border border-dark-border-subtle rounded text-sm text-dark-text-primary focus:outline-none focus:border-dark-accent-primary"
+                                    >
+                                      {Array.from({ length: 24 }, (_, i) => (
+                                        <option key={i} value={i}>{String(i).padStart(2, '0')}:00</option>
+                                      ))}
+                                    </select>
+                                  </div>
+                                )}
+                                <div>
+                                  <label className="block text-xs text-dark-text-tertiary mb-1">Minute</label>
+                                  <select
+                                    value={schedMinute}
+                                    onChange={e => setSchedMinute(Number(e.target.value))}
+                                    className="px-2 py-1.5 bg-dark-bg-primary border border-dark-border-subtle rounded text-sm text-dark-text-primary focus:outline-none focus:border-dark-accent-primary"
+                                  >
+                                    {[0, 5, 10, 15, 20, 25, 30, 35, 40, 45, 50, 55].map(m => (
+                                      <option key={m} value={m}>:{String(m).padStart(2, '0')}</option>
+                                    ))}
+                                  </select>
+                                </div>
+                                {schedFreq === 'weekly' && (
+                                  <div>
+                                    <label className="block text-xs text-dark-text-tertiary mb-1">Day of week</label>
+                                    <select
+                                      value={schedDayOfWeek}
+                                      onChange={e => setSchedDayOfWeek(Number(e.target.value))}
+                                      className="px-2 py-1.5 bg-dark-bg-primary border border-dark-border-subtle rounded text-sm text-dark-text-primary focus:outline-none focus:border-dark-accent-primary"
+                                    >
+                                      {DOW_LABELS.map((d, i) => <option key={i} value={i}>{d}</option>)}
+                                    </select>
+                                  </div>
+                                )}
+                                {schedFreq === 'monthly' && (
+                                  <div>
+                                    <label className="block text-xs text-dark-text-tertiary mb-1">Day of month</label>
+                                    <select
+                                      value={schedDayOfMonth}
+                                      onChange={e => setSchedDayOfMonth(Number(e.target.value))}
+                                      className="px-2 py-1.5 bg-dark-bg-primary border border-dark-border-subtle rounded text-sm text-dark-text-primary focus:outline-none focus:border-dark-accent-primary"
+                                    >
+                                      {Array.from({ length: 28 }, (_, i) => i + 1).map(d => <option key={d} value={d}>{d}</option>)}
+                                    </select>
+                                  </div>
+                                )}
+                              </div>
+                            )}
+
+                            {schedFreq === 'custom' && (
+                              <div className="mb-4">
+                                <label className="block text-xs text-dark-text-tertiary mb-1">Cron expression</label>
+                                <input
+                                  type="text"
+                                  value={schedCustomCron}
+                                  onChange={e => setSchedCustomCron(e.target.value)}
+                                  placeholder="0 3 * * *"
+                                  className="w-full max-w-xs px-3 py-1.5 bg-dark-bg-primary border border-dark-border-subtle rounded text-sm text-dark-text-primary font-mono focus:outline-none focus:border-dark-accent-primary"
+                                />
+                              </div>
+                            )}
+
+                            {/* Cron preview */}
+                            <p className="text-xs text-dark-text-tertiary font-mono mb-5">
+                              {scheduleToCron(schedFreq, schedHour, schedMinute, schedDayOfWeek, schedDayOfMonth, schedCustomCron)}
+                            </p>
+
+                            {/* Retention */}
+                            <div className="border-t border-dark-border-subtle pt-4">
+                              <p className="text-xs font-medium text-dark-text-secondary mb-3">Retention Policy</p>
+                              <div className="grid grid-cols-3 gap-4 mb-3">
+                                {([
+                                  { label: 'Daily (full)', key: 'full', value: retFullDays, setter: setRetFullDays, color: 'text-teal-400', max: retAlternateDays - 1 },
+                                  { label: 'Alternate days', key: 'alt', value: retAlternateDays, setter: setRetAlternateDays, color: 'text-amber-400', max: retWeeklyDays - 1 },
+                                  { label: 'Weekly', key: 'weekly', value: retWeeklyDays, setter: setRetWeeklyDays, color: 'text-blue-400', max: 3650 },
+                                ] as const).map(({ label, key, value, setter, color, max }) => (
+                                  <div key={key}>
+                                    <label className={`block text-xs font-medium ${color} mb-1`}>{label}</label>
+                                    <div className="flex items-center gap-1.5">
+                                      <input
+                                        type="number"
+                                        min={1}
+                                        max={max}
+                                        value={value}
+                                        onChange={e => setter(Math.max(1, Math.min(max, Number(e.target.value))))}
+                                        className="w-16 px-2 py-1 bg-dark-bg-primary border border-dark-border-subtle rounded text-sm text-dark-text-primary text-center focus:outline-none focus:border-dark-accent-primary"
+                                      />
+                                      <span className="text-xs text-dark-text-tertiary">days</span>
+                                    </div>
+                                  </div>
+                                ))}
+                              </div>
+                              {/* Retention timeline bar */}
+                              <div className="relative h-3 rounded-full overflow-hidden flex">
+                                <div
+                                  className="bg-teal-500/60 h-full"
+                                  style={{ width: `${(retFullDays / retWeeklyDays) * 100}%` }}
+                                  title={`Daily: 0–${retFullDays}d`}
+                                />
+                                <div
+                                  className="bg-amber-500/60 h-full"
+                                  style={{ width: `${((retAlternateDays - retFullDays) / retWeeklyDays) * 100}%` }}
+                                  title={`Alternate: ${retFullDays}–${retAlternateDays}d`}
+                                />
+                                <div
+                                  className="bg-blue-500/60 h-full flex-1"
+                                  title={`Weekly: ${retAlternateDays}–${retWeeklyDays}d`}
+                                />
+                              </div>
+                              <div className="flex justify-between text-xs text-dark-text-tertiary mt-1">
+                                <span>0</span>
+                                <span className="text-teal-400">{retFullDays}d</span>
+                                <span className="text-amber-400">{retAlternateDays}d</span>
+                                <span className="text-blue-400">{retWeeklyDays}d</span>
+                              </div>
+                              <p className="text-xs text-dark-text-tertiary mt-2">
+                                Keep every backup for {retFullDays} days, then every other day until day {retAlternateDays}, then weekly until day {retWeeklyDays}.
+                              </p>
+                            </div>
+                          </div>
+
+                          {/* Card 3 — Storage / Folder */}
+                          <div className="bg-dark-bg-secondary rounded-xl border border-dark-border-subtle p-5">
+                            <div className="flex items-center gap-3 mb-4">
+                              <div className="w-9 h-9 rounded-lg bg-amber-500/15 flex items-center justify-center flex-shrink-0">
+                                <svg className="w-4 h-4 text-amber-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z" /></svg>
+                              </div>
+                              <div className="flex-1">
+                                <h3 className="text-sm font-semibold text-dark-text-primary">Storage Folder</h3>
+                                <p className="text-xs text-dark-text-tertiary">
+                                  {selectedFolderName || (selectedFolderId ? `ID: ${selectedFolderId}` : 'Google Drive root')}
+                                </p>
+                              </div>
+                              <button
+                                onClick={openFolderBrowser}
+                                className="px-3 py-1.5 text-xs font-medium bg-dark-bg-tertiary hover:bg-dark-bg-primary border border-dark-border-subtle text-dark-text-secondary hover:text-dark-text-primary rounded-lg transition-colors"
+                              >
+                                Browse…
+                              </button>
+                              {selectedFolderId && (
+                                <button
+                                  onClick={() => { setSelectedFolderId(''); setSelectedFolderName('') }}
+                                  className="px-3 py-1.5 text-xs font-medium text-dark-text-tertiary hover:text-dark-text-secondary rounded-lg transition-colors"
+                                >
+                                  Use root
+                                </button>
+                              )}
+                            </div>
+
+                            {/* Folder browser inline */}
+                            {folderBrowserOpen && (
+                              <div className="border border-dark-border-subtle rounded-lg overflow-hidden mb-4">
+                                {/* Breadcrumb */}
+                                <div className="flex items-center gap-1 px-3 py-2 bg-dark-bg-tertiary border-b border-dark-border-subtle text-xs text-dark-text-secondary overflow-x-auto">
+                                  <button onClick={handleFolderBreadcrumbRoot} className="hover:text-dark-text-primary transition-colors shrink-0">Root</button>
+                                  {folderStack.map((f, i) => (
+                                    <span key={f.id} className="flex items-center gap-1 shrink-0">
+                                      <span className="text-dark-text-tertiary">/</span>
+                                      <button onClick={() => handleFolderBreadcrumb(i)} className="hover:text-dark-text-primary transition-colors">{f.name}</button>
+                                    </span>
+                                  ))}
+                                </div>
+
+                                {/* Search */}
+                                <div className="px-3 py-2 border-b border-dark-border-subtle">
+                                  <input
+                                    type="text"
+                                    value={folderSearch}
+                                    onChange={e => setFolderSearch(e.target.value)}
+                                    placeholder="Search folders…"
+                                    className="w-full px-2 py-1 text-xs bg-dark-bg-primary border border-dark-border-subtle rounded text-dark-text-primary placeholder-dark-text-tertiary focus:outline-none focus:border-dark-accent-primary"
+                                  />
+                                </div>
+
+                                {/* Folder list */}
+                                <div className="max-h-48 overflow-y-auto">
+                                  {isFolderLoading ? (
+                                    <div className="p-4 text-center text-xs text-dark-text-tertiary">Loading…</div>
+                                  ) : folderList.filter(f => f.name.toLowerCase().includes(folderSearch.toLowerCase())).length === 0 ? (
+                                    <div className="p-4 text-center text-xs text-dark-text-tertiary">{folderSearch ? 'No matches' : 'No folders here'}</div>
+                                  ) : (
+                                    folderList.filter(f => f.name.toLowerCase().includes(folderSearch.toLowerCase())).map(folder => (
+                                      <div key={folder.id} className="flex items-center px-3 py-2 hover:bg-dark-bg-tertiary/50 border-b border-dark-border-subtle last:border-0 group">
+                                        <svg className="w-3.5 h-3.5 text-amber-400 mr-2 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z" /></svg>
+                                        <span className="flex-1 text-xs text-dark-text-primary truncate">{folder.name}</span>
+                                        <button
+                                          onClick={() => handleSelectFolder(folder.id, folder.name)}
+                                          className="opacity-0 group-hover:opacity-100 px-2 py-0.5 text-xs bg-teal-600 text-white rounded transition-all mr-1"
+                                        >
+                                          Use
+                                        </button>
+                                        <button
+                                          onClick={() => handleFolderClick(folder)}
+                                          className="opacity-0 group-hover:opacity-100 px-2 py-0.5 text-xs bg-dark-bg-primary border border-dark-border-subtle text-dark-text-secondary rounded transition-all"
+                                        >
+                                          Open
+                                        </button>
+                                      </div>
+                                    ))
+                                  )}
+                                </div>
+
+                                {/* New folder + actions */}
+                                <div className="flex items-center gap-2 px-3 py-2 border-t border-dark-border-subtle bg-dark-bg-tertiary/50">
+                                  <input
+                                    type="text"
+                                    value={newFolderName}
+                                    onChange={e => setNewFolderName(e.target.value)}
+                                    onKeyDown={e => e.key === 'Enter' && handleCreateFolder()}
+                                    placeholder="New folder name…"
+                                    className="flex-1 px-2 py-1 text-xs bg-dark-bg-primary border border-dark-border-subtle rounded text-dark-text-primary placeholder-dark-text-tertiary focus:outline-none focus:border-dark-accent-primary"
+                                  />
+                                  <button
+                                    onClick={handleCreateFolder}
+                                    disabled={isCreatingFolder || !newFolderName.trim()}
+                                    className="px-2 py-1 text-xs bg-teal-600 hover:bg-teal-500 disabled:opacity-40 text-white rounded transition-colors"
+                                  >
+                                    Create
+                                  </button>
+                                  <button
+                                    onClick={() => {
+                                      const currentId = folderStack[folderStack.length - 1]?.id ?? ''
+                                      const currentName = folderStack[folderStack.length - 1]?.name ?? 'Root'
+                                      handleSelectFolder(currentId, currentName === 'Root' ? '' : currentName)
+                                    }}
+                                    className="px-2 py-1 text-xs bg-dark-bg-primary border border-dark-border-subtle text-dark-text-secondary hover:text-dark-text-primary rounded transition-colors"
+                                  >
+                                    Use current
+                                  </button>
+                                </div>
+                              </div>
+                            )}
+                          </div>
+
+                          {/* Save settings button */}
+                          <div className="flex items-center gap-3">
+                            <button
+                              onClick={handleSaveAutoBackupSettings}
+                              disabled={isSavingAutoBackupSettings}
+                              className="px-4 py-2 bg-teal-600 hover:bg-teal-500 disabled:opacity-50 text-white rounded-lg text-sm font-medium transition-colors"
+                            >
+                              {isSavingAutoBackupSettings ? 'Saving…' : 'Save Settings'}
+                            </button>
+                            {autoBackupSettings && (
+                              <p className="text-xs text-dark-text-tertiary">
+                                Last saved {relativeTime(autoBackupSettings.updated_at)}
+                              </p>
+                            )}
+                          </div>
+                        </>
+                      )}
+
+                      {/* Card 4 — History */}
+                      <div className="bg-dark-bg-secondary rounded-xl border border-dark-border-subtle overflow-hidden">
+                        <div className="flex items-center gap-3 px-5 py-4 border-b border-dark-border-subtle">
+                          <div className="w-9 h-9 rounded-lg bg-blue-500/15 flex items-center justify-center flex-shrink-0">
+                            <svg className="w-4 h-4 text-blue-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>
+                          </div>
+                          <h3 className="text-sm font-semibold text-dark-text-primary flex-1">Backup History</h3>
+                          <button
+                            onClick={loadAutomatedBackup}
+                            className="text-xs text-dark-text-tertiary hover:text-dark-text-secondary transition-colors"
+                          >
+                            Refresh
+                          </button>
+                        </div>
+
+                        {autoBackupHistory.length === 0 ? (
+                          <div className="px-5 py-8 text-center">
+                            <p className="text-sm text-dark-text-tertiary">No backups yet.</p>
+                            {autoBackupStatus?.provider_connected && (
+                              <p className="text-xs text-dark-text-tertiary mt-1">Run your first backup using the button above.</p>
+                            )}
+                          </div>
+                        ) : (
+                          <div className="divide-y divide-dark-border-subtle">
+                            {autoBackupHistory.map(record => (
+                              <div key={record.id} className="flex items-center gap-3 px-5 py-3 hover:bg-dark-bg-tertiary/30 transition-colors">
+                                {/* Status dot */}
+                                <span className={`w-2 h-2 rounded-full flex-shrink-0 ${
+                                  record.status === 'success' ? 'bg-emerald-400' :
+                                  record.status === 'failed' ? 'bg-red-400' : 'bg-amber-400 animate-pulse'
+                                }`}></span>
+                                {/* Filename + meta */}
+                                <div className="flex-1 min-w-0">
+                                  <p className="text-xs font-medium text-dark-text-primary truncate">{record.filename || `backup-${record.id.slice(0, 8)}`}</p>
+                                  <p className="text-xs text-dark-text-tertiary">
+                                    {relativeTime(record.started_at)} ·{' '}
+                                    {record.size_bytes > 0 ? formatBytes(record.size_bytes) : '—'} ·{' '}
+                                    {record.triggered_by}
+                                    {record.status === 'failed' && record.error_message && (
+                                      <span className="text-red-400 ml-1">· {record.error_message}</span>
+                                    )}
+                                  </p>
+                                </div>
+                                {/* Actions */}
+                                <div className="flex items-center gap-1 flex-shrink-0">
+                                  {record.status === 'success' && (
+                                    <button
+                                      onClick={() => handleDownloadRecord(record)}
+                                      disabled={isDownloadingRecord === record.id}
+                                      title="Download backup"
+                                      className="p-1.5 rounded text-dark-text-tertiary hover:text-teal-400 hover:bg-teal-500/10 transition-colors disabled:opacity-50"
+                                    >
+                                      {isDownloadingRecord === record.id ? (
+                                        <div className="w-3.5 h-3.5 rounded-full border border-current border-t-transparent animate-spin"></div>
+                                      ) : (
+                                        <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" /></svg>
+                                      )}
+                                    </button>
+                                  )}
+                                  <button
+                                    onClick={() => handleDeleteAutoBackupRecord(record.id)}
+                                    title="Delete record"
+                                    className="p-1.5 rounded text-dark-text-tertiary hover:text-red-400 hover:bg-red-500/10 transition-colors"
+                                  >
+                                    <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
+                                  </button>
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+
+                      {/* Card 5 — Backup Calendar */}
+                      <div className="bg-dark-bg-secondary rounded-xl border border-dark-border-subtle overflow-hidden">
+                        <div className="flex items-center gap-3 px-5 py-4 border-b border-dark-border-subtle">
+                          <div className="w-9 h-9 rounded-lg bg-purple-500/15 flex items-center justify-center flex-shrink-0">
+                            <svg className="w-4 h-4 text-purple-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" /></svg>
+                          </div>
+                          <h3 className="text-sm font-semibold text-dark-text-primary flex-1">Backup Calendar</h3>
+                          <div className="flex items-center gap-1">
+                            <button
+                              onClick={() => {
+                                const d = new Date(calYear, calMonth - 1, 1)
+                                setCalYear(d.getFullYear())
+                                setCalMonth(d.getMonth())
+                              }}
+                              className="p-1.5 rounded text-dark-text-tertiary hover:text-dark-text-primary hover:bg-dark-bg-tertiary transition-colors"
+                            >
+                              <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" /></svg>
+                            </button>
+                            <span className="text-xs font-medium text-dark-text-primary min-w-[110px] text-center">
+                              {MONTH_NAMES[calMonth]} {calYear}
+                            </span>
+                            <button
+                              onClick={() => {
+                                const d = new Date(calYear, calMonth + 1, 1)
+                                setCalYear(d.getFullYear())
+                                setCalMonth(d.getMonth())
+                              }}
+                              className="p-1.5 rounded text-dark-text-tertiary hover:text-dark-text-primary hover:bg-dark-bg-tertiary transition-colors"
+                            >
+                              <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" /></svg>
+                            </button>
+                            <button
+                              onClick={() => { setCalYear(new Date().getFullYear()); setCalMonth(new Date().getMonth()) }}
+                              className="ml-1 px-2 py-1 text-xs text-dark-text-tertiary hover:text-dark-text-primary hover:bg-dark-bg-tertiary border border-dark-border-subtle rounded transition-colors"
+                            >
+                              Today
+                            </button>
+                          </div>
+                        </div>
+
+                        <div className="p-4">
+                          {/* Day-of-week headers */}
+                          <div className="grid grid-cols-7 mb-1">
+                            {['Sun','Mon','Tue','Wed','Thu','Fri','Sat'].map(d => (
+                              <div key={d} className="text-center text-xs font-medium text-dark-text-tertiary py-1">{d}</div>
+                            ))}
+                          </div>
+
+                          {/* Calendar grid */}
+                          {(() => {
+                            const now = new Date()
+                            const grid = buildCalendarGrid(calYear, calMonth)
+                            const cronExpr = schedFreq === 'custom' ? schedCustomCron : scheduleToCron(schedFreq, schedHour, schedMinute, schedDayOfWeek, schedDayOfMonth, schedCustomCron)
+                            const scheduledDays = autoBackupSettings?.enabled ? getCronScheduledDays(cronExpr, calYear, calMonth) : new Set<number>()
+                            const today = now.getFullYear() === calYear && now.getMonth() === calMonth ? now.getDate() : -1
+
+                            // Build a map: day → record for that day (prefer success over failed)
+                            const dayRecordMap = new Map<number, typeof autoBackupHistory[0]>()
+                            for (const rec of autoBackupHistory) {
+                              const d = new Date(rec.started_at)
+                              if (d.getFullYear() === calYear && d.getMonth() === calMonth) {
+                                const day = d.getDate()
+                                const existing = dayRecordMap.get(day)
+                                if (!existing || (rec.status === 'success' && existing.status !== 'success')) {
+                                  dayRecordMap.set(day, rec)
+                                }
+                              }
+                            }
+
+                            return (
+                              <div className="grid grid-cols-7 gap-0.5">
+                                {grid.map((day, idx) => {
+                                  if (day === null) {
+                                    return <div key={`empty-${idx}`} className="aspect-square" />
+                                  }
+                                  const rec = dayRecordMap.get(day)
+                                  const isFuture = new Date(calYear, calMonth, day) > now
+                                  const isToday = day === today
+                                  const isScheduled = scheduledDays.has(day)
+
+                                  let bgClass = ''
+                                  let dotColor = ''
+                                  let title = ''
+
+                                  if (rec) {
+                                    if (rec.status === 'success') {
+                                      const tier = getRetentionTier(rec.started_at, now, retFullDays, retAlternateDays, retWeeklyDays)
+                                      if (tier === 'full') { bgClass = 'bg-teal-500/20 hover:bg-teal-500/30'; dotColor = 'bg-teal-400'; title = 'Daily backup (full retention)' }
+                                      else if (tier === 'alternate') { bgClass = 'bg-amber-500/20 hover:bg-amber-500/30'; dotColor = 'bg-amber-400'; title = 'Alternate-day retention' }
+                                      else if (tier === 'weekly') { bgClass = 'bg-blue-500/20 hover:bg-blue-500/30'; dotColor = 'bg-blue-400'; title = 'Weekly retention' }
+                                      else { bgClass = 'bg-red-500/10 hover:bg-red-500/15'; dotColor = 'bg-red-400'; title = 'Expired (will be pruned)' }
+                                    } else if (rec.status === 'failed') {
+                                      bgClass = 'bg-red-500/15 hover:bg-red-500/25'
+                                      dotColor = 'bg-red-400'
+                                      title = `Failed: ${rec.error_message || 'unknown error'}`
+                                    }
+                                  }
+
+                                  return (
+                                    <div
+                                      key={day}
+                                      title={title || (isFuture && isScheduled ? 'Scheduled' : '')}
+                                      className={`aspect-square rounded flex flex-col items-center justify-center relative cursor-default transition-colors ${bgClass || (isScheduled && isFuture ? 'bg-dark-bg-tertiary/40' : '')}`}
+                                    >
+                                      <span className={`text-xs font-medium ${
+                                        isToday ? 'text-primary-400 font-bold' :
+                                        rec ? 'text-dark-text-primary' :
+                                        isFuture ? 'text-dark-text-tertiary' :
+                                        'text-dark-text-secondary'
+                                      }`}>
+                                        {day}
+                                      </span>
+                                      {/* Dot for past backup */}
+                                      {rec && <span className={`w-1 h-1 rounded-full ${dotColor} mt-0.5`} />}
+                                      {/* Ring for future scheduled */}
+                                      {!rec && isScheduled && isFuture && (
+                                        <span className="w-1 h-1 rounded-full border border-dark-text-tertiary mt-0.5 opacity-50" />
+                                      )}
+                                      {/* Today indicator */}
+                                      {isToday && (
+                                        <span className="absolute bottom-0.5 left-1/2 -translate-x-1/2 w-1 h-1 rounded-full bg-primary-400" />
+                                      )}
+                                    </div>
+                                  )
+                                })}
+                              </div>
+                            )
+                          })()}
+
+                          {/* Legend */}
+                          <div className="flex flex-wrap items-center gap-3 mt-4 pt-3 border-t border-dark-border-subtle">
+                            <span className="text-xs text-dark-text-tertiary font-medium">Legend:</span>
+                            {[
+                              { color: 'bg-teal-400', label: `Daily (0–${retFullDays}d)` },
+                              { color: 'bg-amber-400', label: `Alternate (${retFullDays}–${retAlternateDays}d)` },
+                              { color: 'bg-blue-400', label: `Weekly (${retAlternateDays}–${retWeeklyDays}d)` },
+                              { color: 'bg-red-400', label: 'Expired' },
+                            ].map(({ color, label }) => (
+                              <div key={label} className="flex items-center gap-1.5">
+                                <span className={`w-2 h-2 rounded-full ${color}`} />
+                                <span className="text-xs text-dark-text-secondary">{label}</span>
+                              </div>
+                            ))}
+                            <div className="flex items-center gap-1.5">
+                              <span className="w-2 h-2 rounded-full border border-dark-text-tertiary opacity-50" />
+                              <span className="text-xs text-dark-text-secondary">Scheduled</span>
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    </>
+                  )}
                 </div>
               )}
             </div>

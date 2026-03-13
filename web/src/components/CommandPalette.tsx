@@ -146,7 +146,8 @@ export default function CommandPalette() {
       category: 'navigation',
       keywords: ['sprints', 'cycles', 'iterations'],
       action: () => {
-        navigate('/app/sprints')
+        const pid = localStorage.getItem('taskai_last_project')
+        navigate(pid ? `/app/projects/${pid}/sprints` : '/app')
         setIsOpen(false)
       },
     },
@@ -158,7 +159,8 @@ export default function CommandPalette() {
       category: 'navigation',
       keywords: ['tags', 'labels'],
       action: () => {
-        navigate('/app/tags')
+        const pid = localStorage.getItem('taskai_last_project')
+        navigate(pid ? `/app/projects/${pid}/tags` : '/app')
         setIsOpen(false)
       },
     },
@@ -199,10 +201,11 @@ export default function CommandPalette() {
       if (task.status === 'done') statusIcon = '✅'
       else if (task.status === 'in_progress') statusIcon = '🔄'
       const prioritySuffix = task.priority === 'medium' ? '' : ' · ' + task.priority
+      const ghSuffix = task.github_issue_number ? ` · GH#${task.github_issue_number}` : ''
       commands.push({
         id: `task-${task.id}`,
         name: `#${task.task_number} ${task.title}`,
-        description: task.project_name + ' · ' + task.status.replace('_', ' ') + prioritySuffix,
+        description: task.project_name + ' · ' + task.status.replace('_', ' ') + prioritySuffix + ghSuffix,
         icon: statusIcon,
         category: 'tasks',
         action: () => {

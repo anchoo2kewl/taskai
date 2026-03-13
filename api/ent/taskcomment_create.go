@@ -40,6 +40,20 @@ func (_c *TaskCommentCreate) SetComment(v string) *TaskCommentCreate {
 	return _c
 }
 
+// SetAgentName sets the "agent_name" field.
+func (_c *TaskCommentCreate) SetAgentName(v string) *TaskCommentCreate {
+	_c.mutation.SetAgentName(v)
+	return _c
+}
+
+// SetNillableAgentName sets the "agent_name" field if the given value is not nil.
+func (_c *TaskCommentCreate) SetNillableAgentName(v *string) *TaskCommentCreate {
+	if v != nil {
+		_c.SetAgentName(*v)
+	}
+	return _c
+}
+
 // SetCreatedAt sets the "created_at" field.
 func (_c *TaskCommentCreate) SetCreatedAt(v time.Time) *TaskCommentCreate {
 	_c.mutation.SetCreatedAt(v)
@@ -145,6 +159,11 @@ func (_c *TaskCommentCreate) check() error {
 			return &ValidationError{Name: "comment", err: fmt.Errorf(`ent: validator failed for field "TaskComment.comment": %w`, err)}
 		}
 	}
+	if v, ok := _c.mutation.AgentName(); ok {
+		if err := taskcomment.AgentNameValidator(v); err != nil {
+			return &ValidationError{Name: "agent_name", err: fmt.Errorf(`ent: validator failed for field "TaskComment.agent_name": %w`, err)}
+		}
+	}
 	if _, ok := _c.mutation.CreatedAt(); !ok {
 		return &ValidationError{Name: "created_at", err: errors.New(`ent: missing required field "TaskComment.created_at"`)}
 	}
@@ -192,6 +211,10 @@ func (_c *TaskCommentCreate) createSpec() (*TaskComment, *sqlgraph.CreateSpec) {
 	if value, ok := _c.mutation.Comment(); ok {
 		_spec.SetField(taskcomment.FieldComment, field.TypeString, value)
 		_node.Comment = value
+	}
+	if value, ok := _c.mutation.AgentName(); ok {
+		_spec.SetField(taskcomment.FieldAgentName, field.TypeString, value)
+		_node.AgentName = &value
 	}
 	if value, ok := _c.mutation.CreatedAt(); ok {
 		_spec.SetField(taskcomment.FieldCreatedAt, field.TypeTime, value)

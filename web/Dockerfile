@@ -1,5 +1,5 @@
-# Build stage
-FROM node:20-alpine AS builder
+# Build stage — React SPA, runs on host arch for speed
+FROM --platform=$BUILDPLATFORM node:24-alpine AS builder
 
 # Build arguments for version info
 ARG VERSION=dev
@@ -14,9 +14,8 @@ COPY api/openapi.yaml /api/openapi.yaml
 # Copy package files
 COPY web/package*.json ./
 
-# Install dependencies with workaround for rollup native binaries
-RUN npm ci --production=false && \
-    npm install @rollup/rollup-linux-arm64-musl --save-optional
+# Install dependencies (BUILDPLATFORM finds correct native binaries automatically)
+RUN npm ci --production=false
 
 # Copy web source code
 COPY web/ .
@@ -28,6 +27,23 @@ RUN rm -f .env
 ENV VITE_VERSION=$VERSION
 ENV VITE_GIT_COMMIT=$GIT_COMMIT
 ENV VITE_BUILD_TIME=$BUILD_TIME
+RUN npm run build
+
+# Build stage — Docusaurus docs, runs on host arch for speed
+FROM --platform=$BUILDPLATFORM node:24-alpine AS docs-builder
+
+WORKDIR /docs-build
+
+# Copy package files first for caching
+COPY docs-site/package*.json ./
+
+# Install dependencies
+RUN npm ci --production=false
+
+# Copy docs source
+COPY docs-site/ .
+
+# Build static site
 RUN npm run build
 
 # Production stage
@@ -128,6 +144,17 @@ http {
             proxy_set_header X-Forwarded-Proto \$scheme;
         }
 
+        # Redirect /docs to /docs/
+        location = /docs {
+            return 301 /docs/;
+        }
+
+        # Docusaurus documentation site
+        location ^~ /docs/ {
+            alias /usr/share/nginx/html/docs/;
+            try_files \$uri \$uri/ /docs/index.html;
+        }
+
         # SPA routing - serve index.html for all routes
         location / {
             try_files \$uri \$uri/ /index.html;
@@ -145,6 +172,9 @@ EOF
 
 # Copy built assets from builder
 COPY --from=builder --chown=nginx:nginx /build/dist /usr/share/nginx/html
+
+# Copy Docusaurus docs
+COPY --from=docs-builder --chown=nginx:nginx /docs-build/build /usr/share/nginx/html/docs
 
 # Expose port
 EXPOSE 80

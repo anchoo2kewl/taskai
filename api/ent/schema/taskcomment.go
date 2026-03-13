@@ -21,6 +21,7 @@ func (TaskComment) Fields() []ent.Field {
 		field.Int64("task_id"),
 		field.Int64("user_id"),
 		field.String("comment").NotEmpty(),
+		field.String("agent_name").Optional().Nillable().MaxLen(100),
 		field.Time("created_at").Default(time.Now).Immutable(),
 		field.Time("updated_at").Default(time.Now).UpdateDefault(time.Now),
 	}

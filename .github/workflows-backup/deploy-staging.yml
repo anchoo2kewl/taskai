@@ -74,6 +74,9 @@ jobs:
           OAUTH_STATE_SECRET: ${{ secrets.STAGING_OAUTH_STATE_SECRET }}
           GOOGLE_CLIENT_ID: ${{ secrets.STAGING_GOOGLE_CLIENT_ID }}
           GOOGLE_CLIENT_SECRET: ${{ secrets.STAGING_GOOGLE_CLIENT_SECRET }}
+          BACKUP_ENCRYPTION_KEY: ${{ secrets.STAGING_BACKUP_ENCRYPTION_KEY }}
+          DD_API_KEY: ${{ secrets.DD_API_KEY }}
+          DD_SITE: ${{ secrets.DD_SITE }}
           APP_URL: https://staging.taskai.cc
           DB_DRIVER: postgres
           DB_DSN: ${{ secrets.STAGING_DB_DSN }}
@@ -119,6 +122,20 @@ jobs:
               export GOOGLE_CLIENT_ID="\$GOOGLE_ID"
               export GOOGLE_CLIENT_SECRET='$GOOGLE_CLIENT_SECRET'
             fi
+            BACKUP_ENC_KEY='$BACKUP_ENCRYPTION_KEY'
+            if [ -n "\$BACKUP_ENC_KEY" ]; then
+              export BACKUP_ENCRYPTION_KEY="\$BACKUP_ENC_KEY"
+            fi
+            export ENV=staging
+            export OAUTH_SUCCESS_URL='https://staging.taskai.cc/oauth/callback'
+            export OAUTH_ERROR_URL='https://staging.taskai.cc/login'
+            DD_KEY='$DD_API_KEY'
+            if [ -n "\$DD_KEY" ]; then
+              export DD_API_KEY="\$DD_KEY"
+              export DD_SITE='${DD_SITE:-datadoghq.com}'
+              export APM_ENABLED=true
+              export DD_PROFILING_ENABLED=true
+            fi
 
             # Login to Docker Hub to avoid rate limiting
             echo '$DOCKERHUB_TOKEN' | docker login -u '$DOCKERHUB_USERNAME' --password-stdin
@@ -128,14 +145,22 @@ jobs:
             chmod +x source/deployment/scripts/ensure-draw-route.sh
             sudo source/deployment/scripts/ensure-draw-route.sh staging.taskai.cc
 
-            docker compose down || true
-            echo "🧹 Pruning only dangling images/cache to preserve base image layers..."
-            docker builder prune -f || true
+            # Add zero-downtime nginx directives (error pages + upstream retry)
+            chmod +x source/deployment/scripts/ensure-zero-downtime.sh
+            sudo source/deployment/scripts/ensure-zero-downtime.sh staging.taskai.cc
+
+            # Ensure MCP nginx forwards X-Agent-Name header for AI attribution
+            chmod +x source/deployment/scripts/ensure-mcp-agent-header.sh
+            sudo source/deployment/scripts/ensure-mcp-agent-header.sh mcp.staging.taskai.cc
+
+            # Build new images while old containers are still running (zero-downtime)
+            docker compose -f source/docker-compose.yml -p taskai-staging build --build-arg VERSION="\$VERSION" --build-arg GIT_COMMIT="\$GIT_COMMIT" --build-arg BUILD_TIME="\$BUILD_TIME"
+            # Recreate containers with new images (stops old → starts new per-service)
+            docker compose -f source/docker-compose.yml -p taskai-staging up -d --force-recreate --remove-orphans
+            # Clean up old images after new containers are running
             docker image prune -f || true
-            docker compose build --build-arg VERSION="\$VERSION" --build-arg GIT_COMMIT="\$GIT_COMMIT" --build-arg BUILD_TIME="\$BUILD_TIME"
-            docker compose up -d --force-recreate --remove-orphans
             sleep 15
-            docker compose ps
+            docker compose -f source/docker-compose.yml -p taskai-staging ps
           ENDSSH
 
       - name: Verify deployment

@@ -41,14 +41,15 @@ type AuthResponse struct {
 
 // User represents a user
 type User struct {
-	ID          int64     `json:"id"`
-	Email       string    `json:"email"`
-	Name        string    `json:"name,omitempty"`
-	FirstName   string    `json:"first_name,omitempty"`
-	LastName    string    `json:"last_name,omitempty"`
-	IsAdmin     bool      `json:"is_admin"`
-	HasPassword bool      `json:"has_password"`
-	CreatedAt   time.Time `json:"created_at"`
+	ID              int64     `json:"id"`
+	Email           string    `json:"email"`
+	Name            string    `json:"name,omitempty"`
+	FirstName       string    `json:"first_name,omitempty"`
+	LastName        string    `json:"last_name,omitempty"`
+	IsAdmin         bool      `json:"is_admin"`
+	HasPassword     bool      `json:"has_password"`
+	LinkedProviders []string  `json:"linked_providers"`
+	CreatedAt       time.Time `json:"created_at"`
 }
 
 // HandleSignup creates a new user account
@@ -313,6 +314,7 @@ func (s *Server) HandleMe(w http.ResponseWriter, r *http.Request) {
 		authProvider = "password" // safe default
 	}
 	apiUser.HasPassword = authProvider == "password"
+	apiUser.LinkedProviders = s.getUserLinkedProviders(ctx, userID, apiUser.HasPassword)
 
 	respondJSON(w, http.StatusOK, apiUser)
 }

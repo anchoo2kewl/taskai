@@ -83,6 +83,9 @@ jobs:
           OAUTH_STATE_SECRET: ${{ secrets.PRODUCTION_OAUTH_STATE_SECRET }}
           GOOGLE_CLIENT_ID: ${{ secrets.PRODUCTION_GOOGLE_CLIENT_ID }}
           GOOGLE_CLIENT_SECRET: ${{ secrets.PRODUCTION_GOOGLE_CLIENT_SECRET }}
+          BACKUP_ENCRYPTION_KEY: ${{ secrets.PRODUCTION_BACKUP_ENCRYPTION_KEY }}
+          DD_API_KEY: ${{ secrets.DD_API_KEY }}
+          DD_SITE: ${{ secrets.DD_SITE }}
           APP_URL: https://taskai.cc
         run: |
           mkdir -p ~/.ssh
@@ -119,6 +122,15 @@ jobs:
             export OAUTH_STATE_SECRET="$OAUTH_STATE_SECRET"
             export GOOGLE_CLIENT_ID="$GOOGLE_CLIENT_ID"
             export GOOGLE_CLIENT_SECRET="$GOOGLE_CLIENT_SECRET"
+            if [ -n "$BACKUP_ENCRYPTION_KEY" ]; then
+              export BACKUP_ENCRYPTION_KEY="$BACKUP_ENCRYPTION_KEY"
+            fi
+            if [ -n "$DD_API_KEY" ]; then
+              export DD_API_KEY="$DD_API_KEY"
+              export DD_SITE="${DD_SITE:-datadoghq.com}"
+              export APM_ENABLED=true
+              export DD_PROFILING_ENABLED=true
+            fi
 
             # Login to Docker Hub
             echo "$DOCKERHUB_TOKEN" | docker login -u "$DOCKERHUB_USERNAME" --password-stdin
@@ -126,13 +138,22 @@ jobs:
             chmod +x source/deployment/scripts/ensure-draw-route.sh
             sudo source/deployment/scripts/ensure-draw-route.sh taskai.cc
 
-            docker compose down || true
-            docker builder prune -f || true
+            # Add zero-downtime nginx directives (error pages + upstream retry)
+            chmod +x source/deployment/scripts/ensure-zero-downtime.sh
+            sudo source/deployment/scripts/ensure-zero-downtime.sh taskai.cc
+
+            # Ensure MCP nginx forwards X-Agent-Name header for AI attribution
+            chmod +x source/deployment/scripts/ensure-mcp-agent-header.sh
+            sudo source/deployment/scripts/ensure-mcp-agent-header.sh mcp.taskai.cc
+
+            # Build new images while old containers are still running (zero-downtime)
+            docker compose -f source/docker-compose.yml -p taskai build --build-arg VERSION="$VERSION" --build-arg GIT_COMMIT="$GIT_COMMIT" --build-arg BUILD_TIME="$BUILD_TIME"
+            # Recreate containers with new images (stops old → starts new per-service)
+            docker compose -f source/docker-compose.yml -p taskai up -d --force-recreate --remove-orphans
+            # Clean up old images after new containers are running
             docker image prune -f || true
-            docker compose build --build-arg VERSION="\$VERSION" --build-arg GIT_COMMIT="\$GIT_COMMIT" --build-arg BUILD_TIME="\$BUILD_TIME"
-            docker compose up -d --force-recreate --remove-orphans
             sleep 15
-            docker compose ps
+            docker compose -f source/docker-compose.yml -p taskai ps
           ENDSSH
 
       - name: Capture container logs on failure
@@ -142,8 +163,8 @@ jobs:
         run: |
           ssh -i ~/.ssh/deploy_key ubuntu@31.97.102.48 bash -s << 'ENDSSH'
             cd /home/ubuntu/taskai
-            docker compose ps -a
-            docker compose logs --tail=100 api
+            docker compose -f source/docker-compose.yml -p taskai ps -a
+            docker compose -f source/docker-compose.yml -p taskai logs --tail=100 api
           ENDSSH
 
       - name: Verify deployment

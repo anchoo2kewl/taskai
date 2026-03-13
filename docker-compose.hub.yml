@@ -1,0 +1,22 @@
+# Harbor image overlay for TaskAI
+# Usage: docker compose -f docker-compose.yml -f docker-compose.hub.yml pull
+#        docker compose -f docker-compose.yml -f docker-compose.hub.yml up -d --no-build
+#
+# Set TASKAI_API_DIGEST, TASKAI_WEB_DIGEST, TASKAI_MCP_DIGEST, TASKAI_YJS_DIGEST
+
+services:
+  api:
+    image: harbor.biswas.me/biswas/taskai-api@${TASKAI_API_DIGEST}
+    build: !reset null
+
+  web:
+    image: harbor.biswas.me/biswas/taskai-web@${TASKAI_WEB_DIGEST}
+    build: !reset null
+
+  mcp:
+    image: harbor.biswas.me/biswas/taskai-mcp@${TASKAI_MCP_DIGEST}
+    build: !reset null
+
+  yjs-processor:
+    image: harbor.biswas.me/biswas/taskai-yjs@${TASKAI_YJS_DIGEST}
+    build: !reset null

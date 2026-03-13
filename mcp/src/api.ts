@@ -59,6 +59,7 @@ export interface WikiPage {
   project_id: string;
   title: string;
   slug: string;
+  content?: string;
   created_by: string;
   created_at: string;
   updated_at: string;
@@ -100,6 +101,7 @@ export interface WikiBlock {
 export class TaskAIClient {
   private baseURL: string;
   private apiKey: string;
+  public agentName?: string;
 
   constructor(baseURL: string, apiKey: string) {
     // Strip trailing slash
@@ -109,12 +111,18 @@ export class TaskAIClient {
 
   private async request<T>(path: string, options: RequestInit = {}): Promise<T> {
     const url = `${this.baseURL}${path}`;
+    const headers: Record<string, string> = {
+      "Content-Type": "application/json",
+      Authorization: `ApiKey ${this.apiKey}`,
+    };
+    if (this.agentName) {
+      headers["X-Agent-Name"] = this.agentName;
+    }
     const res = await fetch(url, {
       ...options,
       headers: {
-        "Content-Type": "application/json",
-        Authorization: `ApiKey ${this.apiKey}`,
-        ...options.headers,
+        ...headers,
+        ...options.headers as Record<string, string>,
       },
     });
 

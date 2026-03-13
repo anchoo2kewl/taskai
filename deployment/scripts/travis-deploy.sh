@@ -148,30 +148,38 @@ chmod 600 ~/.ssh/deploy_key
 ssh-keyscan "$SERVER_IP" >> ~/.ssh/known_hosts 2>/dev/null
 
 SSH_CMD="ssh -o StrictHostKeyChecking=no -i ~/.ssh/deploy_key $SERVER_USER@$SERVER_IP"
+SCP_CMD="scp -o StrictHostKeyChecking=no -i ~/.ssh/deploy_key"
 
-# Determine compose command based on environment
+# Determine compose command and directory layout based on environment
 if [ "$ENV" = "uat" ]; then
   COMPOSE_CMD="docker compose"
-  GIT_DIR="$DEPLOY_DIR"
   COMPOSE_DIR="$DEPLOY_DIR"
 else
   COMPOSE_CMD="docker compose -f source/docker-compose.yml -p $COMPOSE_PROJECT"
-  GIT_DIR="$DEPLOY_DIR"
   COMPOSE_DIR="$(dirname "$DEPLOY_DIR")"
 fi
 
+# --- SCP compose files and deployment scripts to the server ---
+echo "=== Copying compose files to $SERVER_USER@$SERVER_IP:$DEPLOY_DIR ==="
+
+# Create DEPLOY_DIR and deployment/scripts dir on server
+$SSH_CMD "mkdir -p $DEPLOY_DIR/deployment/scripts"
+
+# Copy compose files and otel config into DEPLOY_DIR
+$SCP_CMD docker-compose.yml docker-compose.hub.yml otel-config.yaml \
+  "$SERVER_USER@$SERVER_IP:$DEPLOY_DIR/"
+
+# Copy deployment scripts
+$SCP_CMD deployment/scripts/ensure-draw-route.sh \
+  deployment/scripts/ensure-zero-downtime.sh \
+  deployment/scripts/ensure-mcp-agent-header.sh \
+  "$SERVER_USER@$SERVER_IP:$DEPLOY_DIR/deployment/scripts/"
+
 $SSH_CMD "bash -s" <<REMOTE_EOF
   set -e
-  ssh-keyscan github.com >> ~/.ssh/known_hosts 2>/dev/null || true
-
-  cd $GIT_DIR
-
-  # Ensure SSH remote (may have been cloned via HTTPS)
-  git remote set-url origin git@github.com:anchoo2kewl/taskai.git
-  git fetch origin
-  git reset --hard $GIT_COMMIT
 
   cd $COMPOSE_DIR
+  rm -rf .git api web mcp docs-site 2>/dev/null || true
 
   export VERSION='$VERSION'
   export GIT_COMMIT='$GIT_SHORT'
@@ -212,15 +220,15 @@ $SSH_CMD "bash -s" <<REMOTE_EOF
   echo '${HARBOR_PASSWORD}' | docker login harbor.biswas.me -u '${HARBOR_USERNAME}' --password-stdin || true
 
   # Nginx scripts
-  chmod +x $GIT_DIR/deployment/scripts/ensure-draw-route.sh 2>/dev/null || true
-  sudo $GIT_DIR/deployment/scripts/ensure-draw-route.sh $DOMAIN || true
+  chmod +x $DEPLOY_DIR/deployment/scripts/ensure-draw-route.sh 2>/dev/null || true
+  sudo $DEPLOY_DIR/deployment/scripts/ensure-draw-route.sh $DOMAIN || true
 
-  chmod +x $GIT_DIR/deployment/scripts/ensure-zero-downtime.sh 2>/dev/null || true
-  sudo $GIT_DIR/deployment/scripts/ensure-zero-downtime.sh $DOMAIN || true
+  chmod +x $DEPLOY_DIR/deployment/scripts/ensure-zero-downtime.sh 2>/dev/null || true
+  sudo $DEPLOY_DIR/deployment/scripts/ensure-zero-downtime.sh $DOMAIN || true
 
   if [ -n '$MCP_DOMAIN' ]; then
-    chmod +x $GIT_DIR/deployment/scripts/ensure-mcp-agent-header.sh 2>/dev/null || true
-    sudo $GIT_DIR/deployment/scripts/ensure-mcp-agent-header.sh $MCP_DOMAIN || true
+    chmod +x $DEPLOY_DIR/deployment/scripts/ensure-mcp-agent-header.sh 2>/dev/null || true
+    sudo $DEPLOY_DIR/deployment/scripts/ensure-mcp-agent-header.sh $MCP_DOMAIN || true
   fi
 
   # Image digests for docker-compose overlay
